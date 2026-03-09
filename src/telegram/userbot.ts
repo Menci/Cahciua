@@ -9,6 +9,7 @@ import { createEventBus } from './event-bus';
 import { patchGramjsLogger } from './gramjs-logger';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
 import { fromGramjsDeletedMessage, fromGramjsEditedMessage, fromGramjsMessage, resolveGramjsSender } from './message';
+import { canGenerateThumbnail, generateThumbnail } from './thumbnail';
 
 export interface UserbotOptions {
   apiId: number;
@@ -49,6 +50,22 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
   const deleteBus = createEventBus<TelegramMessageDelete>('userbot:delete', log);
   let eventHandlerRegistered = false;
 
+  const hydrateGramjsThumbnails = async (
+    telegramMsg: { attachments?: import('../db/schema').Attachment[] },
+    originalMsg: Api.Message,
+  ) => {
+    const att = telegramMsg.attachments?.find(a => canGenerateThumbnail(a));
+    if (!att) return;
+    try {
+      const result = await client.downloadMedia(originalMsg, {});
+      if (Buffer.isBuffer(result)) {
+        att.thumbnail = await generateThumbnail(result);
+      }
+    } catch (err) {
+      log.withError(err).warn('Failed to generate thumbnail');
+    }
+  };
+
   const registerEventHandler = () => {
     if (eventHandlerRegistered) return;
     eventHandlerRegistered = true;
@@ -58,7 +75,8 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
         if (!event.message || event.message instanceof Api.MessageEmpty) return;
         const msg = event.message;
         const sender = resolveGramjsSender(msg);
-        messageBus.emit(fromGramjsMessage(msg, sender));
+        const telegramMsg = fromGramjsMessage(msg, sender);
+        void hydrateGramjsThumbnails(telegramMsg, msg).then(() => messageBus.emit(telegramMsg));
       },
       new NewMessage({}),
     );
@@ -68,7 +86,8 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
         if (!event.message || event.message instanceof Api.MessageEmpty) return;
         const msg = event.message;
         const sender = resolveGramjsSender(msg);
-        editBus.emit(fromGramjsEditedMessage(msg, sender));
+        const telegramEdit = fromGramjsEditedMessage(msg, sender);
+        void hydrateGramjsThumbnails(telegramEdit, msg).then(() => editBus.emit(telegramEdit));
       },
       new EditedMessage({}),
     );
