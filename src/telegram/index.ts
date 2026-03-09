@@ -40,6 +40,7 @@ export const createTelegramManager = (
   }, logger);
 
   const dedup = createMessageDedup();
+  const botChats = new Set<string>();
   const messageBus = createEventBus<TelegramMessage>('telegram:message', logger);
   const editBus = createEventBus<TelegramMessageEdit>('telegram:edit', logger);
   const deleteBus = createEventBus<TelegramMessageDelete>('telegram:delete', logger);
@@ -49,10 +50,25 @@ export const createTelegramManager = (
     messageBus.emit(msg);
   };
 
-  userbot.onMessage(dispatchMessage);
-  bot.onMessage(dispatchMessage);
-  userbot.onMessageEdit(edit => editBus.emit(edit));
-  userbot.onMessageDelete(del => deleteBus.emit(del));
+  bot.onMessage(msg => {
+    botChats.add(msg.chatId);
+    dispatchMessage(msg);
+  });
+
+  userbot.onMessage(msg => {
+    if (!botChats.has(msg.chatId)) return;
+    dispatchMessage(msg);
+  });
+
+  userbot.onMessageEdit(edit => {
+    if (!botChats.has(edit.chatId)) return;
+    editBus.emit(edit);
+  });
+
+  userbot.onMessageDelete(del => {
+    if (del.chatId && !botChats.has(del.chatId)) return;
+    deleteBus.emit(del);
+  });
 
   const start = async () => {
     await Promise.all([

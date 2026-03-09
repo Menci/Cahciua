@@ -1,5 +1,7 @@
 import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
+import type { CanonicalAttachment, CanonicalEntity, CanonicalForwardInfo, CanonicalUser } from '../adaptation/types';
+
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
   firstName: text('first_name').notNull(),
@@ -95,3 +97,28 @@ export interface Attachment {
   // Spoiler
   hasSpoiler?: boolean;
 }
+
+export const events = sqliteTable('events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+
+  chatId: text('chat_id'),
+  type: text('type').notNull().$type<'message' | 'edit' | 'delete'>(),
+  timestamp: integer('timestamp').notNull(),
+
+  // message/edit only
+  messageId: integer('message_id'),
+  senderId: text('sender_id'),
+  text: text('text'),
+
+  // delete only
+  messageIds: text('message_ids', { mode: 'json' }).$type<number[]>(),
+
+  // JSON fields
+  sender: text('sender', { mode: 'json' }).$type<CanonicalUser>(),
+  entities: text('entities', { mode: 'json' }).$type<CanonicalEntity[]>(),
+  attachments: text('attachments', { mode: 'json' }).$type<CanonicalAttachment[]>(),
+
+  // message only
+  replyToMessageId: integer('reply_to_message_id'),
+  forwardInfo: text('forward_info', { mode: 'json' }).$type<CanonicalForwardInfo>(),
+});

@@ -1,8 +1,9 @@
 import dotenv from 'dotenv';
 
+import { adaptDelete, adaptEdit, adaptMessage } from './adaptation';
 import { loadEnv } from './config/env';
 import { setupLogger, useLogger } from './config/logger';
-import { createDatabase, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
+import { createDatabase, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
 import { createTelegramManager } from './telegram';
 import { loadSession } from './telegram/session';
 
@@ -32,6 +33,15 @@ const main = async () => {
       sender: msg.sender?.username ?? msg.sender?.firstName ?? msg.sender?.id ?? 'unknown',
       text: msg.text.length > 100 ? `${msg.text.slice(0, 100)}...` : msg.text,
     }).log('Message received');
+
+    const event = adaptMessage(msg);
+
+    try {
+      persistEvent(db, event);
+    } catch (err) {
+      logger.withError(err).error('Failed to persist event');
+    }
+
     try {
       persistMessage(db, msg);
     } catch (err) {
@@ -46,6 +56,15 @@ const main = async () => {
       sender: edit.sender?.username ?? edit.sender?.firstName ?? edit.sender?.id ?? 'unknown',
       text: edit.text.length > 100 ? `${edit.text.slice(0, 100)}...` : edit.text,
     }).log('Message edited');
+
+    const event = adaptEdit(edit);
+
+    try {
+      persistEvent(db, event);
+    } catch (err) {
+      logger.withError(err).error('Failed to persist event');
+    }
+
     try {
       persistMessageEdit(db, edit);
     } catch (err) {
@@ -58,6 +77,15 @@ const main = async () => {
       chatId: del.chatId ?? 'unknown',
       messageIds: del.messageIds,
     }).log('Message deleted');
+
+    const event = adaptDelete(del);
+
+    try {
+      persistEvent(db, event);
+    } catch (err) {
+      logger.withError(err).error('Failed to persist event');
+    }
+
     try {
       persistMessageDelete(db, del);
     } catch (err) {
