@@ -15,6 +15,9 @@ export interface TelegramManagerOptions {
   apiId: number;
   apiHash: string;
   session: string;
+  // Resolve chatId for delete events that lack it (MTProto private chat/basic group deletes).
+  // The message IDs in this space are globally unique, so a lookup by messageId suffices.
+  resolveChatId?: (messageIds: number[]) => string | undefined;
 }
 
 export interface TelegramManager {
@@ -132,8 +135,9 @@ export const createTelegramManager = (
   });
 
   userbot.onMessageDelete(del => {
-    if (!del.chatId || !botChats.has(del.chatId)) return;
-    deleteBus.emit(del);
+    const chatId = del.chatId ?? options.resolveChatId?.(del.messageIds);
+    if (!chatId || !botChats.has(chatId)) return;
+    deleteBus.emit({ ...del, chatId });
   });
 
   const start = async () => {

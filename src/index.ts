@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import { adaptDelete, adaptEdit, adaptMessage } from './adaptation';
 import { loadEnv } from './config/env';
 import { setupLogger, useLogger } from './config/logger';
-import { createDatabase, loadRecentEvents, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
+import { createDatabase, loadRecentEvents, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
 import { createTelegramManager } from './telegram';
 import { loadSession } from './telegram/session';
 
@@ -39,6 +39,7 @@ const main = async () => {
     apiId: env.TELEGRAM_API_ID,
     apiHash: env.TELEGRAM_API_HASH,
     session: loadSession(env.TELEGRAM_SESSION),
+    resolveChatId: messageIds => lookupChatId(db, messageIds),
   }, logger);
 
   telegram.onMessage(msg => {

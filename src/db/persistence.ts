@@ -204,3 +204,15 @@ export const loadRecentEvents = (db: DB, limit: number): CanonicalEvent[] => {
     .all();
   return rows.reverse().map(reconstructEvent);
 };
+
+// Resolve chatId for message IDs that lack chat context (MTProto private chat deletes).
+// Message IDs in the private/basic group space are globally unique, so a simple lookup suffices.
+export const lookupChatId = (db: DB, messageIds: number[]): string | undefined => {
+  if (messageIds.length === 0) return undefined;
+  const row = db.select({ chatId: messages.chatId })
+    .from(messages)
+    .where(inArray(messages.messageId, messageIds))
+    .limit(1)
+    .get();
+  return row?.chatId;
+};
