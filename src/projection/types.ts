@@ -1,4 +1,4 @@
-import type { CanonicalAttachment, CanonicalUser } from '../adaptation/types';
+import type { CanonicalAttachment, CanonicalEntity, CanonicalForwardInfo, CanonicalUser } from '../adaptation/types';
 
 export interface ICMessage {
   type: 'message';
@@ -7,10 +7,14 @@ export interface ICMessage {
   messageId: string;
   sender: CanonicalUser;
   timestamp: number;
-  text?: string;
+  text: string;
+  entities?: CanonicalEntity[];
   // String for same reason as messageId
   replyToMessageId?: string;
+  forwardInfo?: CanonicalForwardInfo;
   attachments: CanonicalAttachment[];
+  editedAt?: number;
+  deleted?: boolean;
 }
 
 // TODO: Concrete fields TBD when implementing MetaReducer.
@@ -33,12 +37,10 @@ export interface IntermediateContext {
   chatId: string;
   nodes: ICNode[];
   users: Map<string, ICUserState>;
-  epoch: number;
 }
 
 export const createEmptyIC = (chatId: string): IntermediateContext => ({
   chatId,
   nodes: [],
   users: new Map(),
-  epoch: 0,
 });
