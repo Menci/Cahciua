@@ -67,6 +67,12 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     client.addEventHandler(
       (event: EditedMessageEvent) => {
         if (!event.message || event.message instanceof Api.MessageEmpty) return;
+        // MTProto fires updateEditMessage for metadata-only changes (link preview
+        // loading, first reaction in large supergroups, inline keyboard updates,
+        // edit_hide corrections). These "phantom edits" have no editDate.
+        // Skip them here — if we later need reactions, subscribe to
+        // updateMessageReactions separately instead of relying on edit events.
+        if (!event.message.editDate) return;
         const msg = event.message;
         const sender = resolveGramjsSender(msg);
         editBus.emit(fromGramjsEditedMessage(msg, sender));
