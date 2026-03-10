@@ -25,8 +25,8 @@ const main = async () => {
       logger.withFields({ chatId: event.chatId, messageIds: event.messageIds }).log('[replay] delete');
     } else {
       const sender = event.sender?.displayName ?? event.sender?.id ?? 'unknown';
-      const text = event.text.length > 80 ? `${event.text.slice(0, 80)}...` : event.text;
-      logger.withFields({ chatId: event.chatId, messageId: event.messageId, sender, text }).log(`[replay] ${event.type}`);
+      const text = event.text.length > 100 ? `${event.text.slice(0, 100)}...` : event.text;
+      logger.withFields({ chatId: event.chatId, messageId: event.messageId, sender, text, length: event.text.length }).log(`[replay] ${event.type}`);
     }
   }
 
@@ -46,6 +46,7 @@ const main = async () => {
       messageId: msg.messageId,
       sender: msg.sender?.username ?? msg.sender?.firstName ?? msg.sender?.id ?? 'unknown',
       text: msg.text.length > 100 ? `${msg.text.slice(0, 100)}...` : msg.text,
+      length: msg.text.length,
     }).log('Message received');
 
     const event = adaptMessage(msg);
@@ -69,6 +70,7 @@ const main = async () => {
       messageId: edit.messageId,
       sender: edit.sender?.username ?? edit.sender?.firstName ?? edit.sender?.id ?? 'unknown',
       text: edit.text.length > 100 ? `${edit.text.slice(0, 100)}...` : edit.text,
+      length: edit.text.length,
     }).log('Message edited');
 
     const event = adaptEdit(edit);
