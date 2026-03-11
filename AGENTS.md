@@ -154,7 +154,7 @@ Turns are stored in a `turns` DB table (raw provider format, not provider-agnost
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | autoincrement |
-| chat_id | TEXT NOT NULL | which Session (chat) this Turn belongs to |
+| chat_id | TEXT NOT NULL | Session ID (= Telegram chat ID) |
 | requested_at | INTEGER NOT NULL | millisecond timestamp, merge ordering key |
 | provider | TEXT NOT NULL | e.g. 'openai-chat', 'anthropic-messages' |
 | data | TEXT (JSON) NOT NULL | raw provider response entries (assistant message + tool results) |

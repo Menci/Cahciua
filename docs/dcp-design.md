@@ -190,7 +190,7 @@ Turns are stored in a `turns` DB table, one row per Turn:
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | autoincrement |
-| chat_id | TEXT NOT NULL | which Session (chat) this Turn belongs to |
+| session_id | TEXT NOT NULL | Session ID (= Telegram chat ID) |
 | requested_at | INTEGER NOT NULL | millisecond timestamp, merge ordering key |
 | provider | TEXT NOT NULL | e.g. 'openai-chat', 'anthropic-messages' |
 | data | TEXT (JSON) NOT NULL | raw provider response entries |
@@ -199,7 +199,7 @@ Turns are stored in a `turns` DB table, one row per Turn:
 | output_tokens | INTEGER NOT NULL | for statistics / cost tracking |
 | response_envelope | TEXT (JSON) | raw response with content/output stripped (already in `data`). Includes model, finish_reason, usage, system_fingerprint, etc. |
 
-Index: `(chat_id, requested_at)` for loading a session's Turns in order.
+Index: `(session_id, requested_at)` for loading a session's Turns in order.
 
 Compaction state (cursor + summary) is session-level, not per-Turn. Stored separately — either in a dedicated session-state table or as metadata on the oldest remaining Turn after GC. Exact mechanism TBD when implementing compaction.
 

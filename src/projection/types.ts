@@ -38,13 +38,13 @@ export interface ICUserState {
 }
 
 export interface IntermediateContext {
-  chatId: string;
+  sessionId: string;
   nodes: ICNode[];
   users: Map<string, ICUserState>;
 }
 
-export const createEmptyIC = (chatId: string): IntermediateContext => ({
-  chatId,
+export const createEmptyIC = (sessionId: string): IntermediateContext => ({
+  sessionId,
   nodes: [],
   users: new Map(),
 });
