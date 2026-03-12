@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 
 import type { DB } from './client';
 import { events, messages, users } from './schema';
@@ -8,7 +8,6 @@ import type {
   CanonicalEditEvent,
   CanonicalIMEvent,
   CanonicalMessageEvent,
-  ContentNode,
 } from '../adaptation/types';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
 
@@ -147,10 +146,6 @@ export const persistEvent = (db: DB, event: CanonicalIMEvent) => {
 
 type EventRow = typeof events.$inferSelect;
 
-// Recover content from plain text when content column is null (events persisted before content parsing)
-const recoverContent = (row: EventRow): ContentNode[] =>
-  row.content ?? (row.text ? [{ type: 'text', text: row.text }] : []);
-
 const reconstructMessageEvent = (row: EventRow): CanonicalMessageEvent => {
   const event: CanonicalMessageEvent = {
     type: 'message',
@@ -158,7 +153,7 @@ const reconstructMessageEvent = (row: EventRow): CanonicalMessageEvent => {
     messageId: row.messageId!,
     receivedAtMs: row.receivedAtMs,
     timestampSec: row.timestampSec,
-    content: recoverContent(row),
+    content: row.content ?? [],
     attachments: row.attachments ?? [],
   };
   if (row.sender) event.sender = row.sender;
@@ -174,7 +169,7 @@ const reconstructEditEvent = (row: EventRow): CanonicalEditEvent => {
     messageId: row.messageId!,
     receivedAtMs: row.receivedAtMs,
     timestampSec: row.timestampSec,
-    content: recoverContent(row),
+    content: row.content ?? [],
     attachments: row.attachments ?? [],
   };
   if (row.sender) event.sender = row.sender;
@@ -204,14 +199,6 @@ export const loadEvents = (db: DB, chatId: string): CanonicalIMEvent[] => {
     .orderBy(events.receivedAtMs, events.id)
     .all();
   return rows.map(reconstructEvent);
-};
-
-export const loadRecentEvents = (db: DB, limit: number): CanonicalIMEvent[] => {
-  const rows = db.select().from(events)
-    .orderBy(desc(events.receivedAtMs), desc(events.id))
-    .limit(limit)
-    .all();
-  return rows.reverse().map(reconstructEvent);
 };
 
 // Resolve chatId for message IDs that lack chat context (MTProto private chat deletes).
