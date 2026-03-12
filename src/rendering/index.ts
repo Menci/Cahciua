@@ -73,9 +73,9 @@ const renderAttachment = (att: CanonicalAttachment): string => {
 const renderMessage = (msg: ICMessage): RenderedContentPiece[] => {
   const attrs: string[] = [
     `id="${escapeXml(msg.messageId)}"`,
-    `sender="${escapeXml(formatSender(msg.sender))}"`,
-    `t="${formatTimestamp(msg.timestampSec, msg.utcOffsetMin)}"`,
   ];
+  if (msg.sender) attrs.push(`sender="${escapeXml(formatSender(msg.sender))}"`);
+  attrs.push(`t="${formatTimestamp(msg.timestampSec, msg.utcOffsetMin)}"`);
 
   if (msg.editedAtSec != null)
     attrs.push(`edited="${formatTimestamp(msg.editedAtSec, msg.editUtcOffsetMin ?? msg.utcOffsetMin)}"`);

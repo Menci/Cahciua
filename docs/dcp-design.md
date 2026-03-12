@@ -70,7 +70,7 @@ When compaction happens:
 2. Driver generates summary covering everything before T (both RC content and TRs)
 3. Driver discards its TRs with `requestedAtMs < T`
 4. Driver passes cursor T to Rendering → Rendering skips IC nodes before T → Projection may GC nodes before T
-5. Summary is included in RC output as a "previously on..." prefix
+5. Driver prepends summary as a "previously on..." prefix when assembling the final LLM API request
 
 ### Cross-Session Interaction (open question, not yet designed)
 The system runs multiple Sessions (one per chat). Cross-session awareness (e.g., knowledge from chat A influencing chat B) is desirable for thought continuity but the mechanism is TBD:
@@ -109,9 +109,10 @@ Cold start: load compact cursor T from Driver storage → load TRs with `request
 
 ### Rendering Parameters
 In the theoretical model, `render(IC) → RC` with no extra parameters. In practice, Rendering needs:
-- **Compact cursor + summary**: from Driver, to truncate IC and prepend summary
-- **System prompt**: configuration
+- **Compact cursor**: from Driver, to skip IC nodes before the cursor (viewport filtering)
 - **Late-binding context**: computed at request time (recalled memory, cross-session awareness)
+
+Compaction summary is NOT a Rendering concern — the Driver prepends the summary at merge time when assembling the final LLM API request. Rendering is unaware of compaction semantics; it only receives a cursor timestamp for filtering.
 
 These are all provided by the Driver or computed at call time — there is no persistent "SessionState" entity in the theoretical model. Notably, Rendering does NOT need to know about TR positions — it serializes IC nodes sequentially (each carrying `receivedAtMs`), and the Driver groups RC segments into user messages based on TR `requestedAtMs` timestamps during merge.
 

@@ -139,9 +139,10 @@ describe('reduce', () => {
       expect(reply.replyToPreview!.endsWith('…')).toBe(true);
     });
 
-    it('skips messages without sender', () => {
+    it('keeps messages without sender (e.g. channel posts)', () => {
       const ic = reduce(createEmptyIC('chat1'), msg({ sender: undefined }));
-      expect(ic.nodes).toHaveLength(0);
+      expect(ic.nodes).toHaveLength(1);
+      expect((ic.nodes[0] as ICMessage).sender).toBeUndefined();
       expect(ic.users.size).toBe(0);
     });
   });

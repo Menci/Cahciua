@@ -1,9 +1,8 @@
 export interface RenderParams {
   compactCursorMs?: number;
-  compactionSummary?: string;
   // TODO: Late-binding context (recalled memory, cross-session awareness, action directives)
   // will be injected at the end of the last user message. Exact fields TBD when implementing
-  // the rendering layer. See docs/dcp-design.md §Rendering Parameters and §Cross-Session Interaction.
+  // the Driver layer. See docs/dcp-design.md §Rendering Parameters and §Cross-Session Interaction.
 }
 
 // Provider-agnostic content piece — maps to LLM API content parts.

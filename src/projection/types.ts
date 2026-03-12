@@ -3,7 +3,7 @@ import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentN
 export interface ICMessage {
   type: 'message';
   messageId: string;
-  sender: CanonicalUser;
+  sender?: CanonicalUser;
   receivedAtMs: number;
   timestampSec: number;
   utcOffsetMin: number;

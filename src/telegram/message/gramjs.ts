@@ -89,7 +89,7 @@ const convertGramjsMedia = (media?: Api.TypeMessageMedia): Attachment[] | undefi
     if (!media.photo || !(media.photo instanceof Api.Photo)) return undefined;
     const largest = media.photo.sizes
       .filter((s): s is Api.PhotoSize => s instanceof Api.PhotoSize)
-      .sort((a, b) => b.w * b.h - a.w * a.h)[0];
+      .toSorted((a, b) => b.w * b.h - a.w * a.h)[0];
     const attachment: Attachment = {
       type: 'photo',
       width: largest?.w,

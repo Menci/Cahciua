@@ -53,7 +53,7 @@ const convertGrammyAttachments = (msg: GrammyMessage): Attachment[] | undefined 
   const spoiler = msg.has_media_spoiler;
 
   if (msg.photo) {
-    const largest = msg.photo.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    const largest = msg.photo.toSorted((a, b) => b.width * b.height - a.width * a.height)[0];
     if (!largest) return undefined;
     return [{
       type: 'photo',

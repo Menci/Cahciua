@@ -57,7 +57,7 @@ export const events = sqliteTable('events', {
   type: text('type').notNull().$type<'message' | 'edit' | 'delete'>(),
   receivedAtMs: integer('received_at').notNull(),
   timestampSec: integer('timestamp').notNull(),
-  utcOffsetMin: integer('utc_offset_min').notNull(),
+  utcOffsetMin: integer('utc_offset_min').notNull().default(480),
 
   // message/edit only (canonical string IDs)
   messageId: text('message_id'),

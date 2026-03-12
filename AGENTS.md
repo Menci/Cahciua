@@ -22,9 +22,9 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 |-------|--------|-------|
 | Telegram integration | Done | Bot + userbot, dedup, thumbnail, fileId merge, credential redaction |
 | Adaptation | Done | Types, conversion, dual timestamps, rich text parsing, string IDs, phantom edit filtering |
-| DB / Persistence | Done | events table (canonical), messages table (raw platform), 8 migrations |
+| DB / Persistence | Done | events table (canonical), messages table (raw platform), 10 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
-| Rendering | Types only | `rendering/types.ts` has RC shape (RenderedContext); no implementation |
+| Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces |
 | Driver | Not started | Merges RC + TRs, owns compaction and tool call loops |
 
 ## Tech Stack
@@ -52,14 +52,17 @@ src/
 │   └── logger.ts           # @guiiai/logg setup (pretty in dev, JSON in prod)
 ├── adaptation/             # Layer 1: Platform Event → Canonical Event
 │   ├── types.ts            # CanonicalIMEvent, CanonicalUser, ContentNode, etc.
-│   └── index.ts            # adaptMessage, adaptEdit, adaptDelete, parseContent, contentToPlainText + re-exports
+│   ├── index.ts            # adaptMessage, adaptEdit, adaptDelete, parseContent, contentToPlainText + re-exports
+│   └── index.test.ts       # Adaptation unit tests
 ├── projection/             # Layer 2: IC' = Reducers(IC, Event)
 │   ├── types.ts            # IntermediateContext, ICMessage, ICSystemEvent, ICUserState
 │   ├── reduce.ts           # reduce(IC, CanonicalIMEvent) → IC' with Immer
 │   ├── reduce.test.ts      # Reducer unit tests
 │   └── index.ts            # Barrel exports
 ├── rendering/              # Layer 3: IC + RenderParams → RenderedContext (RC)
-│   └── types.ts            # RenderParams, RenderedContentPiece, RenderedContextSegment, RenderedContext
+│   ├── types.ts            # RenderParams, RenderedContentPiece, RenderedContextSegment, RenderedContext
+│   ├── index.ts            # render(), rcToXml(), XML serialization of ContentNode/attachments
+│   └── index.test.ts       # Rendering unit tests
 ├── db/
 │   ├── client.ts           # Database init (better-sqlite3 + Drizzle), WAL mode
 │   ├── schema.ts           # Drizzle schema: users, messages, events tables

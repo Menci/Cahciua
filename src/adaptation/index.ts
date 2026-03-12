@@ -27,16 +27,15 @@ const adaptUser = (user: TelegramUser): CanonicalUser => ({
   isBot: user.isBot,
 });
 
-const adaptAttachment = (a: Attachment): CanonicalAttachment => {
-  const result: CanonicalAttachment = { type: a.type };
-  if (a.mimeType) result.mimeType = a.mimeType;
-  if (a.fileName) result.fileName = a.fileName;
-  if (a.width != null) result.width = a.width;
-  if (a.height != null) result.height = a.height;
-  if (a.duration != null) result.duration = a.duration;
-  if (a.thumbnailWebp) result.thumbnailWebp = a.thumbnailWebp;
-  return result;
-};
+const adaptAttachment = ({ type, mimeType, fileName, width, height, duration, thumbnailWebp }: Attachment): CanonicalAttachment => ({
+  type,
+  ...mimeType && { mimeType },
+  ...fileName && { fileName },
+  ...width != null && { width },
+  ...height != null && { height },
+  ...duration != null && { duration },
+  ...thumbnailWebp && { thumbnailWebp },
+});
 
 const adaptAttachments = (attachments?: Attachment[]): CanonicalAttachment[] => {
   if (!attachments || attachments.length === 0) return [];
@@ -45,12 +44,13 @@ const adaptAttachments = (attachments?: Attachment[]): CanonicalAttachment[] => 
 
 const adaptForwardInfo = (info?: ForwardInfo): CanonicalForwardInfo | undefined => {
   if (!info) return undefined;
+  if (!info.fromUserId && !info.fromChatId && !info.senderName && info.date == null) return undefined;
   const result: CanonicalForwardInfo = {};
   if (info.fromUserId) result.fromUserId = info.fromUserId;
   if (info.fromChatId) result.fromChatId = info.fromChatId;
   if (info.senderName) result.senderName = info.senderName;
   if (info.date != null) result.date = info.date;
-  return Object.keys(result).length > 0 ? result : undefined;
+  return result;
 };
 
 // --- Rich text parser: Telegram's text + offset-based entities → ContentNode tree ---

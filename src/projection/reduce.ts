@@ -18,7 +18,7 @@ const userChanged = (a: CanonicalUser, b: CanonicalUser): boolean =>
 const findMessageIndex = (nodes: readonly { type: string; messageId?: string }[], messageId: string): number => {
   for (let i = nodes.length - 1; i >= 0; i--) {
     const node = nodes[i]!;
-    if (node.type === 'message' && (node as ICMessage).messageId === messageId) return i;
+    if (node.type === 'message' && node.messageId === messageId) return i;
   }
   return -1;
 };
@@ -29,23 +29,23 @@ const truncate = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max)}…`;
 
 const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent) => {
-  if (!event.sender) return;
-
-  const existing = draft.users.get(event.sender.id);
-
   // MetaReducer: detect user rename before appending the message
-  if (existing && userChanged(existing.user, event.sender)) {
-    const systemEvent: ICSystemEvent = {
-      type: 'system_event',
-      kind: 'user_renamed',
-      receivedAtMs: event.receivedAtMs,
-      timestampSec: event.timestampSec,
-      utcOffsetMin: event.utcOffsetMin,
-      userId: event.sender.id,
-      oldUser: existing.user,
-      newUser: event.sender,
-    };
-    draft.nodes.push(systemEvent);
+  if (event.sender) {
+    const existing = draft.users.get(event.sender.id);
+
+    if (existing && userChanged(existing.user, event.sender)) {
+      const systemEvent: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'user_renamed',
+        receivedAtMs: event.receivedAtMs,
+        timestampSec: event.timestampSec,
+        utcOffsetMin: event.utcOffsetMin,
+        userId: event.sender.id,
+        oldUser: existing.user,
+        newUser: event.sender,
+      };
+      draft.nodes.push(systemEvent);
+    }
   }
 
   const message: ICMessage = {
@@ -73,18 +73,21 @@ const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent)
   draft.nodes.push(message);
 
   // Update user state
-  if (existing) {
-    existing.user = event.sender;
-    existing.lastSeenAtMs = event.receivedAtMs;
-    existing.messageCount++;
-  } else {
-    const state: ICUserState = {
-      user: event.sender,
-      firstSeenAtMs: event.receivedAtMs,
-      lastSeenAtMs: event.receivedAtMs,
-      messageCount: 1,
-    };
-    draft.users.set(event.sender.id, state);
+  if (event.sender) {
+    const existing = draft.users.get(event.sender.id);
+    if (existing) {
+      existing.user = event.sender;
+      existing.lastSeenAtMs = event.receivedAtMs;
+      existing.messageCount++;
+    } else {
+      const state: ICUserState = {
+        user: event.sender,
+        firstSeenAtMs: event.receivedAtMs,
+        lastSeenAtMs: event.receivedAtMs,
+        messageCount: 1,
+      };
+      draft.users.set(event.sender.id, state);
+    }
   }
 };
 
