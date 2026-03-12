@@ -157,7 +157,7 @@ const buildContentTree = (
   return nodes;
 };
 
-const parseContent = (text: string, entities?: MessageEntity[]): ContentNode[] => {
+export const parseContent = (text: string, entities?: MessageEntity[]): ContentNode[] => {
   if (!entities || entities.length === 0) {
     return text ? [{ type: 'text', text }] : [];
   }
