@@ -131,6 +131,16 @@ describe('reduce', () => {
       expect(ic.nodes).toHaveLength(2);
       expect(ic.nodes.every(n => n.type === 'message')).toBe(true);
     });
+
+    it('treats undefined and null username as equivalent', () => {
+      const noUsername: CanonicalUser = { id: '1', displayName: 'Alice', isBot: false };
+      const nullUsername: CanonicalUser = { id: '1', displayName: 'Alice', username: undefined, isBot: false };
+      let ic = reduce(createEmptyIC('chat1'), msg({ sender: noUsername }));
+      ic = reduce(ic, msg({ messageId: '2', receivedAtMs: 2000, timestampSec: 2, sender: nullUsername }));
+
+      expect(ic.nodes).toHaveLength(2);
+      expect(ic.nodes.every(n => n.type === 'message')).toBe(true);
+    });
   });
 
   describe('edit events', () => {

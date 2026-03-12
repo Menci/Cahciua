@@ -12,7 +12,7 @@ import type {
 enableMapSet();
 
 const userChanged = (a: CanonicalUser, b: CanonicalUser): boolean =>
-  a.displayName !== b.displayName || a.username !== b.username;
+  a.displayName !== b.displayName || (a.username ?? null) !== (b.username ?? null);
 
 const findMessageIndex = (nodes: readonly { type: string; messageId?: string }[], messageId: string): number => {
   for (let i = nodes.length - 1; i >= 0; i--) {

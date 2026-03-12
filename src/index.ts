@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+
 import { createPatch } from 'diff';
 import dotenv from 'dotenv';
 
@@ -16,12 +18,19 @@ setupLogger();
 const logger = useLogger('cahciua');
 const projLogger = useLogger('projection');
 
+const IC_DUMP_DIR = '/tmp/cahciua';
+mkdirSync(IC_DUMP_DIR, { recursive: true });
+
 const icToJson = (ic: IntermediateContext): string =>
   JSON.stringify({
     sessionId: ic.sessionId,
     nodes: ic.nodes,
     users: Object.fromEntries(ic.users),
   }, null, 2);
+
+const dumpIC = (ic: IntermediateContext) => {
+  writeFileSync(`${IC_DUMP_DIR}/${ic.sessionId}.json`, icToJson(ic));
+};
 
 const logProjection = (oldIC: IntermediateContext, newIC: IntermediateContext) => {
   const oldStr = icToJson(oldIC);
@@ -40,6 +49,7 @@ const reduceAndLog = (
   const newIC = reduce(oldIC, event);
   sessions.set(chatId, newIC);
   logProjection(oldIC, newIC);
+  dumpIC(newIC);
 };
 
 const main = async () => {
@@ -58,6 +68,7 @@ const main = async () => {
     sessions.set(chatId, ic);
     logger.withFields({ chatId, events: events.length, nodes: ic.nodes.length, users: ic.users.size }).log('Replayed session');
     projLogger.log(`IC snapshot:\n${icToJson(ic)}`);
+    dumpIC(ic);
   }
   logger.withFields({ sessions: sessions.size }).log('Cold start complete');
 
