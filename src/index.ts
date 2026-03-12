@@ -124,12 +124,7 @@ const main = async () => {
     }).log('Message received');
 
     const event = adaptMessage(msg);
-
-    try {
-      persistEvent(db, event);
-    } catch (err) {
-      logger.withError(err).error('Failed to persist event');
-    }
+    persistEvent(db, event);
 
     try {
       persistMessage(db, msg);
@@ -150,12 +145,7 @@ const main = async () => {
     }).log('Message edited');
 
     const event = adaptEdit(edit);
-
-    try {
-      persistEvent(db, event);
-    } catch (err) {
-      logger.withError(err).error('Failed to persist event');
-    }
+    persistEvent(db, event);
 
     try {
       persistMessageEdit(db, edit);
@@ -173,12 +163,7 @@ const main = async () => {
     }).log('Message deleted');
 
     const event = adaptDelete(del);
-
-    try {
-      persistEvent(db, event);
-    } catch (err) {
-      logger.withError(err).error('Failed to persist event');
-    }
+    persistEvent(db, event);
 
     try {
       persistMessageDelete(db, del);

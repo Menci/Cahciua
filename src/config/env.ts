@@ -5,7 +5,7 @@ const EnvSchema = v.object({
   TELEGRAM_BOT_TOKEN: v.string(),
 
   // Telegram User API (MTProto)
-  TELEGRAM_API_ID: v.pipe(v.string(), v.transform(Number)),
+  TELEGRAM_API_ID: v.pipe(v.string(), v.transform(Number), v.integer()),
   TELEGRAM_API_HASH: v.string(),
   TELEGRAM_SESSION: v.optional(v.string(), ''),
 

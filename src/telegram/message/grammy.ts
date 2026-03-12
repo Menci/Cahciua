@@ -163,16 +163,26 @@ const convertGrammyAttachments = (msg: GrammyMessage): Attachment[] | undefined 
 // --- public API ---
 
 export const fromGrammyMessage = (message: GrammyMessage): TelegramMessage => {
-  const sender: TelegramUser | undefined = message.from
+  // Prefer sender_chat (anonymous admin, channel post, user sending as channel)
+  // over message.from (which is a placeholder bot in those cases)
+  const sender: TelegramUser | undefined = message.sender_chat
     ? {
-        id: String(message.from.id),
-        firstName: message.from.first_name,
-        lastName: message.from.last_name,
-        username: message.from.username,
-        isBot: message.from.is_bot,
-        isPremium: message.from.is_premium ?? false,
+        id: String(message.sender_chat.id),
+        firstName: message.sender_chat.title ?? message.sender_chat.first_name ?? '',
+        username: message.sender_chat.username,
+        isBot: false,
+        isPremium: false,
       }
-    : undefined;
+    : message.from
+      ? {
+          id: String(message.from.id),
+          firstName: message.from.first_name,
+          lastName: message.from.last_name,
+          username: message.from.username,
+          isBot: message.from.is_bot,
+          isPremium: message.from.is_premium ?? false,
+        }
+      : undefined;
 
   const textEntities = message.entities ?? message.caption_entities;
   const textContent = message.text ?? message.caption ?? '';

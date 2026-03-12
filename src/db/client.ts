@@ -34,9 +34,11 @@ export const runMigrations = (db: DB, logger: Logger) => {
   // and cannot be toggled inside a transaction, so we set it before Drizzle's BEGIN
   db.run(sql`PRAGMA foreign_keys = OFF`);
 
-  log.log('Running migrations...');
-  migrate(db, { migrationsFolder: './drizzle' });
-  log.log('Migrations complete');
-
-  db.run(sql`PRAGMA foreign_keys = ON`);
+  try {
+    log.log('Running migrations...');
+    migrate(db, { migrationsFolder: './drizzle' });
+    log.log('Migrations complete');
+  } finally {
+    db.run(sql`PRAGMA foreign_keys = ON`);
+  }
 };

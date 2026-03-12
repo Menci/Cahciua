@@ -85,6 +85,11 @@ src/
         └── index.ts         # Barrel exports
 ```
 
+Top-level docs:
+- `docs/dcp-design.md` — architecture rationale and Driver/TR design
+- `dcp-updates.md` — implementation deltas from the original RFC
+- `gpt-review.md` — repository-wide code/doc review notes and consistency audit
+
 ### Type Ownership
 
 Platform types (`Attachment`, `ForwardInfo`, `MessageEntity`) are defined in `telegram/message/types.ts` — they belong to the telegram layer. `db/schema.ts` imports them for JSON column annotations. Never define platform types in the DB layer.
