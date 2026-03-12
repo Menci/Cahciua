@@ -3,7 +3,7 @@
 ## Terminology
 
 | Term | Definition |
-|------|-----------||
+|------|-----------|
 | **Session** | One instance of the full pipeline: Adaptation → Projection → Rendering → Driver. Each chat has its own Session. |
 | **IC** (IntermediateContext) | Structured representation of chat events, produced by Projection. |
 | **RC** (RenderedContext) | Serialized, segmented output of Rendering. Provider-agnostic XML. |

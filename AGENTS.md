@@ -22,7 +22,7 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 |-------|--------|-------|
 | Telegram integration | Done | Bot + userbot, dedup, thumbnail, fileId merge, credential redaction |
 | Adaptation | Done | Types, conversion, dual timestamps, rich text parsing, string IDs, phantom edit filtering |
-| DB / Persistence | Done | events table (canonical), messages table (raw platform), 6 migrations |
+| DB / Persistence | Done | events table (canonical), messages table (raw platform), 8 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
 | Rendering | Types only | `rendering/types.ts` has RC shape (RenderedContext); no implementation |
 | Driver | Not started | Merges RC + TRs, owns compaction and tool call loops |
@@ -34,7 +34,7 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 - **Telegram User API**: gramjs (`telegram` on npm) — MTProto client for history fetching, reply-to context resolution, seeing other bots' messages.
 - **LLM**: xsAI (planned) — ultra-lightweight OpenAI-compatible SDK.
 - **Database**: SQLite via better-sqlite3, Drizzle ORM.
-- **State management**: Immer (planned) — immutable IC updates in Projection reducers.
+- **State management**: Immer — immutable IC updates in Projection reducers.
 - **Validation**: Valibot — schema validation for env, config, canonical events.
 - **Logging**: @guiiai/logg — structured logger with pretty/JSON output.
 - **Testing**: Vitest.
@@ -56,6 +56,7 @@ src/
 ├── projection/             # Layer 2: IC' = Reducers(IC, Event)
 │   ├── types.ts            # IntermediateContext, ICMessage, ICSystemEvent, ICUserState
 │   ├── reduce.ts           # reduce(IC, CanonicalIMEvent) → IC' with Immer
+│   ├── reduce.test.ts      # Reducer unit tests
 │   └── index.ts            # Barrel exports
 ├── rendering/              # Layer 3: IC + RenderParams → RenderedContext (RC)
 │   └── types.ts            # RenderParams, RenderedContentPiece, RenderedContextSegment, RenderedContext
@@ -237,6 +238,10 @@ User content in the rendered context is fenced with XML structure. Identity info
 
 - Use `pnpm add <dep>` / `pnpm add -D <dep>` to add dependencies. Do not edit `package.json` by hand.
 - Always run `pnpm typecheck` and `pnpm lint:fix` after finishing a task.
+
+## Data Migration Principle
+
+When existing data doesn't match the current schema or design, fix it with a **DB migration** (SQL UPDATE in a new migration file). Never add backward-compatibility code or runtime fallbacks to handle old data formats — code should only handle the latest design. This keeps the codebase clean and avoids accumulating compatibility shims.
 
 ## Commit Conventions
 
