@@ -171,6 +171,8 @@ export const contentToPlainText = (nodes: ContentNode[]): string =>
 
 // --- Adapt functions ---
 
+const captureUtcOffset = (): number => -new Date().getTimezoneOffset();
+
 export const adaptMessage = (msg: TelegramMessage): CanonicalMessageEvent => {
   const event: CanonicalMessageEvent = {
     type: 'message',
@@ -178,6 +180,7 @@ export const adaptMessage = (msg: TelegramMessage): CanonicalMessageEvent => {
     messageId: String(msg.messageId),
     receivedAtMs: Date.now(),
     timestampSec: msg.date,
+    utcOffsetMin: captureUtcOffset(),
     content: parseContent(msg.text, msg.entities),
     attachments: adaptAttachments(msg.attachments),
   };
@@ -195,6 +198,7 @@ export const adaptEdit = (edit: TelegramMessageEdit): CanonicalEditEvent => {
     messageId: String(edit.messageId),
     receivedAtMs: Date.now(),
     timestampSec: edit.editDate,
+    utcOffsetMin: captureUtcOffset(),
     content: parseContent(edit.text, edit.entities),
     attachments: adaptAttachments(edit.attachments),
   };
@@ -211,5 +215,6 @@ export const adaptDelete = (del: TelegramMessageDelete): CanonicalDeleteEvent =>
     messageIds: del.messageIds.map(String),
     receivedAtMs: now,
     timestampSec: Math.floor(now / 1000),
+    utcOffsetMin: captureUtcOffset(),
   };
 };

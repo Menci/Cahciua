@@ -121,6 +121,7 @@ export const persistEvent = (db: DB, event: CanonicalIMEvent) => {
     type: event.type,
     receivedAtMs: event.receivedAtMs,
     timestampSec: event.timestampSec,
+    utcOffsetMin: event.utcOffsetMin,
   };
 
   if (event.type === 'delete') {
@@ -153,6 +154,7 @@ const reconstructMessageEvent = (row: EventRow): CanonicalMessageEvent => {
     messageId: row.messageId!,
     receivedAtMs: row.receivedAtMs,
     timestampSec: row.timestampSec,
+    utcOffsetMin: row.utcOffsetMin,
     content: row.content ?? [],
     attachments: row.attachments ?? [],
   };
@@ -169,6 +171,7 @@ const reconstructEditEvent = (row: EventRow): CanonicalEditEvent => {
     messageId: row.messageId!,
     receivedAtMs: row.receivedAtMs,
     timestampSec: row.timestampSec,
+    utcOffsetMin: row.utcOffsetMin,
     content: row.content ?? [],
     attachments: row.attachments ?? [],
   };
@@ -182,6 +185,7 @@ const reconstructDeleteEvent = (row: EventRow): CanonicalDeleteEvent => ({
   messageIds: row.messageIds ?? [],
   receivedAtMs: row.receivedAtMs,
   timestampSec: row.timestampSec,
+  utcOffsetMin: row.utcOffsetMin,
 });
 
 const reconstructEvent = (row: EventRow): CanonicalIMEvent => {

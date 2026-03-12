@@ -22,6 +22,7 @@ const msg = (overrides: Partial<CanonicalMessageEvent> = {}): CanonicalMessageEv
   sender: alice,
   receivedAtMs: 1000,
   timestampSec: 1,
+  utcOffsetMin: 480,
   content,
   attachments: [],
   ...overrides,
@@ -34,6 +35,7 @@ const edit = (overrides: Partial<CanonicalEditEvent> = {}): CanonicalEditEvent =
   sender: alice,
   receivedAtMs: 2000,
   timestampSec: 2,
+  utcOffsetMin: 480,
   content: [{ type: 'text', text: 'edited' }],
   attachments: [],
   ...overrides,
@@ -45,6 +47,7 @@ const del = (overrides: Partial<CanonicalDeleteEvent> = {}): CanonicalDeleteEven
   messageIds: ['1'],
   receivedAtMs: 3000,
   timestampSec: 3,
+  utcOffsetMin: 480,
   ...overrides,
 });
 

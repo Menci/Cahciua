@@ -261,6 +261,7 @@ describe('adaptMessage', () => {
     expect(event.timestampSec).toBe(1700000000);
     expect(event.receivedAtMs).toBeTypeOf('number');
     expect(event.receivedAtMs).toBeGreaterThan(0);
+    expect(event.utcOffsetMin).toBeTypeOf('number');
   });
 
   it('adapts sender with firstName + lastName → displayName', () => {
@@ -363,6 +364,7 @@ describe('adaptEdit', () => {
     expect(event.chatId).toBe('-100123');
     expect(event.messageId).toBe('42');
     expect(event.timestampSec).toBe(1700000060);
+    expect(event.utcOffsetMin).toBeTypeOf('number');
   });
 
   it('adapts sender', () => {
@@ -385,6 +387,7 @@ describe('adaptDelete', () => {
   it('derives timestampSec from receivedAtMs', () => {
     const event = adaptDelete({ messageIds: [1], chatId: '-100123' });
     expect(event.timestampSec).toBe(Math.floor(event.receivedAtMs / 1000));
+    expect(event.utcOffsetMin).toBeTypeOf('number');
   });
 
   it('throws when chatId is missing', () => {

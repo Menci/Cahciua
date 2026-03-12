@@ -46,6 +46,7 @@ export interface CanonicalMessageEvent {
   sender?: CanonicalUser;
   receivedAtMs: number;
   timestampSec: number;
+  utcOffsetMin: number;
   content: ContentNode[];
   replyToMessageId?: string;
   forwardInfo?: CanonicalForwardInfo;
@@ -59,6 +60,7 @@ export interface CanonicalEditEvent {
   sender?: CanonicalUser;
   receivedAtMs: number;
   timestampSec: number;
+  utcOffsetMin: number;
   content: ContentNode[];
   attachments: CanonicalAttachment[];
 }
@@ -69,6 +71,7 @@ export interface CanonicalDeleteEvent {
   messageIds: string[];
   receivedAtMs: number;
   timestampSec: number;
+  utcOffsetMin: number;
 }
 
 export type CanonicalIMEvent =

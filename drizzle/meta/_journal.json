@@ -57,6 +57,13 @@
       "when": 1773496800001,
       "tag": "0007_backfill_events_content",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1773496800002,
+      "tag": "0008_events_utc_offset",
+      "breakpoints": true
     }
   ]
 }
