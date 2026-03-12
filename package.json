@@ -24,6 +24,7 @@
   "dependencies": {
     "@guiiai/logg": "^1.2.11",
     "better-sqlite3": "^11.7.0",
+    "diff": "^8.0.3",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.0",
     "grammy": "^1.35.0",

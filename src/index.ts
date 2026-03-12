@@ -1,3 +1,4 @@
+import { createPatch } from 'diff';
 import dotenv from 'dotenv';
 
 import { adaptDelete, adaptEdit, adaptMessage } from './adaptation';
@@ -13,6 +14,33 @@ dotenv.config();
 setupLogger();
 
 const logger = useLogger('cahciua');
+const projLogger = useLogger('projection');
+
+const icToJson = (ic: IntermediateContext): string =>
+  JSON.stringify({
+    sessionId: ic.sessionId,
+    nodes: ic.nodes,
+    users: Object.fromEntries(ic.users),
+  }, null, 2);
+
+const logProjection = (oldIC: IntermediateContext, newIC: IntermediateContext) => {
+  const oldStr = icToJson(oldIC);
+  const newStr = icToJson(newIC);
+  if (oldStr === newStr) return;
+  const patch = createPatch(`IC(${newIC.sessionId})`, oldStr, newStr, 'before', 'after', { context: 3 });
+  projLogger.log(`IC diff:\n${patch}`);
+};
+
+const reduceAndLog = (
+  sessions: Map<string, IntermediateContext>,
+  chatId: string,
+  event: Parameters<typeof reduce>[1],
+) => {
+  const oldIC = sessions.get(chatId) ?? createEmptyIC(chatId);
+  const newIC = reduce(oldIC, event);
+  sessions.set(chatId, newIC);
+  logProjection(oldIC, newIC);
+};
 
 const main = async () => {
   const env = loadEnv();
@@ -29,6 +57,7 @@ const main = async () => {
       ic = reduce(ic, event);
     sessions.set(chatId, ic);
     logger.withFields({ chatId, events: events.length, nodes: ic.nodes.length, users: ic.users.size }).log('Replayed session');
+    projLogger.log(`IC snapshot:\n${icToJson(ic)}`);
   }
   logger.withFields({ sessions: sessions.size }).log('Cold start complete');
 
@@ -65,8 +94,7 @@ const main = async () => {
       logger.withError(err).error('Failed to persist message');
     }
 
-    const ic = sessions.get(event.chatId) ?? createEmptyIC(event.chatId);
-    sessions.set(event.chatId, reduce(ic, event));
+    reduceAndLog(sessions, event.chatId, event);
   });
 
   telegram.onMessageEdit(edit => {
@@ -92,8 +120,7 @@ const main = async () => {
       logger.withError(err).error('Failed to persist message edit');
     }
 
-    const ic = sessions.get(event.chatId) ?? createEmptyIC(event.chatId);
-    sessions.set(event.chatId, reduce(ic, event));
+    reduceAndLog(sessions, event.chatId, event);
   });
 
   telegram.onMessageDelete(del => {
@@ -116,8 +143,7 @@ const main = async () => {
       logger.withError(err).error('Failed to persist message delete');
     }
 
-    const ic = sessions.get(event.chatId) ?? createEmptyIC(event.chatId);
-    sessions.set(event.chatId, reduce(ic, event));
+    reduceAndLog(sessions, event.chatId, event);
   });
 
   const shutdown = async () => {
