@@ -5,6 +5,7 @@ export interface TurnResponse {
   sessionMeta?: unknown;
   inputTokens: number;
   outputTokens: number;
+  reasoningCompat?: string;
 }
 
 export interface DriverConfig {
@@ -13,4 +14,5 @@ export interface DriverConfig {
   model: string;
   maxContextTokens: number;
   chatIds: string[];
+  reasoningSignatureCompat?: string;
 }

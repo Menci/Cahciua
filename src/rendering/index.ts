@@ -70,11 +70,13 @@ const renderAttachment = (att: CanonicalAttachment): string => {
 
 // --- ICNode → content pieces ---
 
-const renderMessage = (msg: ICMessage): RenderedContentPiece[] => {
+const renderMessage = (msg: ICMessage, params: RenderParams): { content: RenderedContentPiece[]; isMyself: boolean } => {
+  const isMyself = !!(params.botUserId && msg.sender?.id === params.botUserId);
   const attrs: string[] = [
     `id="${escapeXml(msg.messageId)}"`,
   ];
   if (msg.sender) attrs.push(`sender="${escapeXml(formatSender(msg.sender))}"`);
+  if (isMyself) attrs.push('myself="true"');
   attrs.push(`t="${formatTimestamp(msg.timestampSec, msg.utcOffsetMin)}"`);
 
   if (msg.editedAtSec != null)
@@ -90,7 +92,7 @@ const renderMessage = (msg: ICMessage): RenderedContentPiece[] => {
 
   if (msg.deleted) {
     attrs.push('deleted="true"');
-    return [{ type: 'text', text: `<message ${attrs.join(' ')}/>` }];
+    return { content: [{ type: 'text', text: `<message ${attrs.join(' ')}/>` }], isMyself };
   }
 
   const parts: string[] = [];
@@ -118,7 +120,7 @@ const renderMessage = (msg: ICMessage): RenderedContentPiece[] => {
       pieces.push({ type: 'image', url: `data:image/webp;base64,${att.thumbnailWebp}` });
   }
 
-  return pieces;
+  return { content: pieces, isMyself };
 };
 
 const renderSystemEvent = (event: ICSystemEvent): string => {
@@ -136,11 +138,13 @@ export const render = (ic: IntermediateContext, params: RenderParams = {}): Rend
   for (const node of ic.nodes) {
     if (params.compactCursorMs != null && node.receivedAtMs < params.compactCursorMs) continue;
 
-    const content = node.type === 'message'
-      ? renderMessage(node)
-      : [{ type: 'text' as const, text: renderSystemEvent(node) }];
-
-    segments.push({ receivedAtMs: node.receivedAtMs, content });
+    if (node.type === 'message') {
+      const { content, isMyself } = renderMessage(node, params);
+      segments.push({ receivedAtMs: node.receivedAtMs, content, ...(isMyself && { isMyself }) });
+    } else {
+      const content = [{ type: 'text' as const, text: renderSystemEvent(node) }];
+      segments.push({ receivedAtMs: node.receivedAtMs, content });
+    }
   }
 
   return segments;

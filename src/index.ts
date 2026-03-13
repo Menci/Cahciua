@@ -4,6 +4,7 @@ import { createPatch } from 'diff';
 import dotenv from 'dotenv';
 
 import { adaptDelete, adaptEdit, adaptMessage } from './adaptation';
+import type { CanonicalMessageEvent } from './adaptation';
 import { loadEnv } from './config/env';
 import { setupLogger, useLogger } from './config/logger';
 import { createDatabase, loadEvents, loadKnownChatIds, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
@@ -11,7 +12,7 @@ import { createDriver } from './driver';
 import { createEmptyIC, reduce } from './projection';
 import type { IntermediateContext } from './projection';
 import { rcToXml, render } from './rendering';
-import type { RenderedContext } from './rendering';
+import type { RenderedContext, RenderParams } from './rendering';
 import { createTelegramManager } from './telegram';
 import { loadSession } from './telegram/session';
 
@@ -65,6 +66,7 @@ const reduceAndLog = (
   renderedSessions: Map<string, RenderedContext>,
   chatId: string,
   event: Parameters<typeof reduce>[1],
+  renderParams: RenderParams,
 ) => {
   const oldIC = sessions.get(chatId) ?? createEmptyIC(chatId);
   const newIC = reduce(oldIC, event);
@@ -73,7 +75,7 @@ const reduceAndLog = (
   dumpIC(newIC);
 
   const oldRC = renderedSessions.get(chatId);
-  const newRC = render(newIC);
+  const newRC = render(newIC, renderParams);
   renderedSessions.set(chatId, newRC);
   logRendering(chatId, oldRC, newRC);
   dumpRC(chatId, newRC);
@@ -84,6 +86,10 @@ const main = async () => {
 
   const db = createDatabase(env.DB_PATH, logger);
   runMigrations(db, logger);
+
+  // Bot user ID from token — available immediately, used for myself detection
+  const botUserId = env.TELEGRAM_BOT_TOKEN.split(':')[0]!;
+  const renderParams: RenderParams = { botUserId };
 
   // Cold-start: replay events per chat to rebuild IC + RC
   const sessions = new Map<string, IntermediateContext>();
@@ -96,7 +102,7 @@ const main = async () => {
     sessions.set(chatId, ic);
     dumpIC(ic);
 
-    const rc = render(ic);
+    const rc = render(ic, renderParams);
     renderedSessions.set(chatId, rc);
     logRendering(chatId, undefined, rc);
     dumpRC(chatId, rc);
@@ -120,13 +126,49 @@ const main = async () => {
     model: env.LLM_MODEL,
     maxContextTokens: env.LLM_MAX_CONTEXT_TOKENS,
     chatIds: env.DRIVER_CHAT_IDS,
+    reasoningSignatureCompat: env.LLM_REASONING_SIGNATURE_COMPAT,
   }, {
     db,
-    sendMessage: (chatId, text, replyToMessageId) => telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined),
+    sendMessage: async (chatId, text, replyToMessageId) => {
+      const sent = await telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined);
+
+      // Bypass: inject bot's own sent message as a synthetic event so it
+      // enters the pipeline immediately, without relying on userbot reception.
+      const botInfo = telegram.bot.botInfo();
+      const now = Date.now();
+      const event: CanonicalMessageEvent = {
+        type: 'message',
+        chatId,
+        messageId: String(sent.messageId),
+        sender: {
+          id: botUserId,
+          displayName: botInfo?.firstName ?? 'Bot',
+          username: botInfo?.username,
+          isBot: true,
+        },
+        receivedAtMs: now,
+        timestampSec: sent.date,
+        utcOffsetMin: 0,
+        content: [{ type: 'text', text }],
+        attachments: [],
+      };
+      if (replyToMessageId != null) event.replyToMessageId = String(replyToMessageId);
+
+      persistEvent(db, event);
+      reduceAndLog(sessions, renderedSessions, chatId, event, renderParams);
+      // Don't call driver.handleEvent — we're inside the Driver's LLM call;
+      // the self-loop check will prevent re-triggering on bot-only messages.
+
+      return sent;
+    },
     logger,
   });
 
   logger.withFields({ chatIds: env.DRIVER_CHAT_IDS }).log('Driver initialized');
+
+  // Feed replayed sessions into Driver so it can respond to un-answered messages
+  for (const [chatId, rc] of renderedSessions)
+    driver.handleEvent(chatId, rc);
 
   telegram.onMessage(msg => {
     logger.withFields({
@@ -147,7 +189,7 @@ const main = async () => {
       logger.withError(err).error('Failed to persist message');
     }
 
-    reduceAndLog(sessions, renderedSessions, event.chatId, event);
+    reduceAndLog(sessions, renderedSessions, event.chatId, event, renderParams);
     driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
   });
 
@@ -169,7 +211,7 @@ const main = async () => {
       logger.withError(err).error('Failed to persist message edit');
     }
 
-    reduceAndLog(sessions, renderedSessions, event.chatId, event);
+    reduceAndLog(sessions, renderedSessions, event.chatId, event, renderParams);
     driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
   });
 
@@ -188,7 +230,7 @@ const main = async () => {
       logger.withError(err).error('Failed to persist message delete');
     }
 
-    reduceAndLog(sessions, renderedSessions, event.chatId, event);
+    reduceAndLog(sessions, renderedSessions, event.chatId, event, renderParams);
     driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
   });
 

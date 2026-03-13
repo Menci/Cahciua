@@ -90,19 +90,24 @@ describe('mergeContext', () => {
     expect(result[1]).toEqual(assistantMsg('reply'));
   });
 
-  it('handles tool call loop with interleaved messages', () => {
-    // Simulates: user msgs → assistant tool_call → tool_result + new msgs → assistant final
+  it('handles tool call loop within a single TR', () => {
+    // One generateText call produces one TR with all steps:
+    // tool_call + tool_result + final assistant — all share the same requestedAtMs.
+    // RC segment that arrived during tool exec sorts after the TR (higher timestamp).
     const rc: RenderedContext = [
       textSeg(1000, 'original'),
       textSeg(2500, 'arrived during tool exec'),
     ];
     const trs = [
-      tr(1500, [toolCallMsg('tc1', 'send_message', '{"text":"hi"}')]),
-      tr(3000, [toolResultMsg('tc1', '{"ok":true}'), assistantMsg('done')]),
+      tr(1500, [
+        toolCallMsg('tc1', 'send_message', '{"text":"hi"}'),
+        toolResultMsg('tc1', '{"ok":true}'),
+        assistantMsg('done'),
+      ]),
     ];
 
     const result = mergeContext(rc, trs);
-    // user(original) → assistant(tool_call) → tool_result → user(arrived during) → assistant(done)
+    // user(original) → tool_call → tool_result → assistant(done) → user(arrived during)
     expect(result).toHaveLength(5);
     expect(result[0]).toEqual({
       role: 'user',
@@ -110,11 +115,11 @@ describe('mergeContext', () => {
     });
     expect(result[1]).toEqual(toolCallMsg('tc1', 'send_message', '{"text":"hi"}'));
     expect(result[2]).toEqual(toolResultMsg('tc1', '{"ok":true}'));
-    expect(result[3]).toEqual({
+    expect(result[3]).toEqual(assistantMsg('done'));
+    expect(result[4]).toEqual({
       role: 'user',
       content: [{ type: 'text', text: 'arrived during tool exec' }],
     });
-    expect(result[4]).toEqual(assistantMsg('done'));
   });
 
   it('handles image content pieces', () => {
@@ -133,7 +138,7 @@ describe('mergeContext', () => {
       role: 'user',
       content: [
         { type: 'text', text: 'photo:' },
-        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc', detail: 'low' } },
       ],
     });
   });

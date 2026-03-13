@@ -82,7 +82,7 @@ describe('system prompt (velin)', () => {
     const rendered = await renderPrompt({ timeNow: '2025-01-01T00:00:00Z' });
 
     expect(rendered).toContain('send_message');
-    expect(rendered).toContain('internal reasoning only');
+    expect(rendered).toContain('internal thinking');
     expect(rendered).toContain('Choosing when to respond');
     expect(rendered).toContain('Stay silent when');
     expect(rendered).not.toContain('Your text output IS your reply');

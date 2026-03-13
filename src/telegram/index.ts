@@ -1,6 +1,6 @@
 import type { Logger } from '@guiiai/logg';
 
-import type { BotClient, SendOptions } from './bot';
+import type { BotClient, SendOptions, SentMessage } from './bot';
 import { createBotClient } from './bot';
 import { createEventBus } from './event-bus';
 import { createMessageDedup } from './message';
@@ -26,9 +26,10 @@ export interface TelegramManager {
   onMessage: (handler: (msg: TelegramMessage) => void) => void;
   onMessageEdit: (handler: (edit: TelegramMessageEdit) => void) => void;
   onMessageDelete: (handler: (del: TelegramMessageDelete) => void) => void;
-  sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<void>;
+  sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage>;
   fetchMessages(chatId: string, options: FetchOptions): Promise<TelegramMessage[]>;
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
+  botUserId: string;
   bot: BotClient;
   userbot: UserbotClient;
 }
@@ -165,6 +166,7 @@ export const createTelegramManager = (
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
     fetchMessages: (chatId, opts) => userbot.fetchMessages(chatId, opts),
     fetchSpecificMessages: (chatId, ids) => userbot.fetchSpecificMessages(chatId, ids),
+    botUserId: bot.botUserId(),
     bot,
     userbot,
   };

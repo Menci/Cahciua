@@ -14,6 +14,7 @@ const EnvSchema = v.object({
   LLM_API_KEY: v.string(),
   LLM_MODEL: v.string(),
   LLM_MAX_CONTEXT_TOKENS: v.pipe(v.string(), v.transform(Number), v.integer()),
+  LLM_REASONING_SIGNATURE_COMPAT: v.optional(v.string()),
 
   // Driver
   DRIVER_CHAT_IDS: v.pipe(

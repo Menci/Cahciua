@@ -29,6 +29,9 @@ const truncate = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max)}…`;
 
 const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent) => {
+  // Dedup: skip if a message with the same ID already exists (bypass + userbot race)
+  if (findMessageIndex(draft.nodes, event.messageId) !== -1) return;
+
   // MetaReducer: detect user rename before appending the message
   if (event.sender) {
     const existing = draft.users.get(event.sender.id);

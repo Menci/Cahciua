@@ -11,13 +11,26 @@ export interface BotClientOptions {
   token: string;
 }
 
+export interface BotInfo {
+  id: number;
+  firstName: string;
+  username?: string;
+}
+
+export interface SentMessage {
+  messageId: number;
+  date: number;
+}
+
 export interface BotClient {
   start(): Promise<void>;
   stop(): Promise<void>;
   onMessage: (handler: (msg: TelegramMessage) => void) => void;
-  sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<void>;
+  sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage>;
   downloadFile(fileId: string): Promise<Buffer>;
   raw(): Bot;
+  botUserId(): string;
+  botInfo(): BotInfo | undefined;
 }
 
 export interface SendOptions {
@@ -51,9 +64,14 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     log.withError(err.error).error('Bot error');
   });
 
+  // Bot user ID extracted from token (available immediately, no getMe needed)
+  const userId = options.token.split(':')[0]!;
+  let info: BotInfo | undefined;
+
   const start = async () => {
     log.log('Starting bot...');
     const me = await bot.api.getMe();
+    info = { id: me.id, firstName: me.first_name, username: me.username };
     log.withFields({
       id: me.id,
       username: me.username,
@@ -73,13 +91,14 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     log.log('Bot stopped');
   };
 
-  const sendMessage = async (chatId: string | number, text: string, options?: SendOptions) => {
-    await bot.api.sendMessage(chatId, text, {
+  const sendMessage = async (chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage> => {
+    const sent = await bot.api.sendMessage(chatId, text, {
       reply_parameters: options?.replyToMessageId
         ? { message_id: options.replyToMessageId }
         : undefined,
       parse_mode: options?.parseMode,
     });
+    return { messageId: sent.message_id, date: sent.date };
   };
 
   return {
@@ -89,5 +108,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     sendMessage,
     downloadFile,
     raw: () => bot,
+    botUserId: () => userId,
+    botInfo: () => info,
   };
 };

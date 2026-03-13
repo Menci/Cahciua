@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { renderMarkdownString } from '@velin-dev/core';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const template = readFileSync(resolve(__dirname, '../../docs/system-prompt.velin.md'), 'utf-8');
 const basePath = resolve(__dirname, '../../package.json');
 
