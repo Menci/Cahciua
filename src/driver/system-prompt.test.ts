@@ -33,6 +33,15 @@ describe('system prompt (velin)', () => {
     expect(rendered).not.toContain('v-if=');
     expect(rendered).not.toContain('v-for=');
     expect(rendered).not.toContain('defineProps');
+
+    // Removed features should not appear
+    expect(rendered).not.toContain('Inbox');
+    expect(rendered).not.toContain('Heartbeat');
+    expect(rendered).not.toContain('Schedule');
+    expect(rendered).not.toContain('Subagent');
+    expect(rendered).not.toContain('use_skill');
+    expect(rendered).not.toContain('search_memory');
+    expect(rendered).not.toContain('get_contacts');
   });
 
   it('renders language header', async () => {
@@ -61,58 +70,13 @@ describe('system prompt (velin)', () => {
     expect(rendered).toContain('Be helpful.');
   });
 
-  it('renders skills list', async () => {
-    const rendered = await renderPrompt({
-      timeNow: '2025-01-01T00:00:00Z',
-      skills: [
-        { name: 'search', description: 'Search the web' },
-        { name: 'calculator', description: 'Do math' },
-      ],
-    });
-
-    expect(rendered).toContain('2 skills available');
-    expect(rendered).toContain('search');
-    expect(rendered).toContain('calculator');
-  });
-
-  it('renders enabled skill content', async () => {
-    const rendered = await renderPrompt({
-      timeNow: '2025-01-01T00:00:00Z',
-      skills: [],
-      enabledSkills: [
-        { name: 'web_search', description: 'Search the web', content: 'Use this tool to search.' },
-      ],
-    });
-
-    expect(rendered).toContain('Use this tool to search.');
-  });
-
-  it('renders inbox when present', async () => {
-    const rendered = await renderPrompt({
-      timeNow: '2025-01-01T00:00:00Z',
-      inbox: [
-        { id: '1', source: 'discord', header: 'New msg', content: 'Hello from Discord', createdAt: '2025-01-01T00:00:00Z' },
-      ],
-    });
-
-    expect(rendered).toContain('Inbox (1 unread)');
-    expect(rendered).toContain('Hello from Discord');
-  });
-
-  it('omits inbox section when empty', async () => {
-    const rendered = await renderPrompt({ timeNow: '2025-01-01T00:00:00Z', inbox: [] });
-    expect(rendered).not.toContain('Inbox (0 unread)');
-  });
-
   it('renders dynamic context footer', async () => {
     const rendered = await renderPrompt({
-      channels: ['telegram', 'discord'],
       currentChannel: 'discord',
       maxContextLoadTime: 720,
       timeNow: '2025-06-15T08:30:00Z',
     });
 
-    expect(rendered).toContain('telegram,discord');
     expect(rendered).toContain('discord');
     expect(rendered).toContain('720');
     expect(rendered).toContain('12.00');
