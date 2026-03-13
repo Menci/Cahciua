@@ -7,6 +7,7 @@ import { adaptDelete, adaptEdit, adaptMessage } from './adaptation';
 import { loadEnv } from './config/env';
 import { setupLogger, useLogger } from './config/logger';
 import { createDatabase, loadEvents, loadKnownChatIds, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
+import { createDriver } from './driver';
 import { createEmptyIC, reduce } from './projection';
 import type { IntermediateContext } from './projection';
 import { rcToXml, render } from './rendering';
@@ -113,6 +114,20 @@ const main = async () => {
     resolveChatId: messageIds => lookupChatId(db, messageIds),
   }, logger);
 
+  const driver = createDriver({
+    apiBaseUrl: env.LLM_API_BASE_URL,
+    apiKey: env.LLM_API_KEY,
+    model: env.LLM_MODEL,
+    maxContextTokens: env.LLM_MAX_CONTEXT_TOKENS,
+    chatIds: env.DRIVER_CHAT_IDS,
+  }, {
+    db,
+    sendMessage: (chatId, text, replyToMessageId) => telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined),
+    logger,
+  });
+
+  logger.withFields({ chatIds: env.DRIVER_CHAT_IDS }).log('Driver initialized');
+
   telegram.onMessage(msg => {
     logger.withFields({
       source: msg.source,
@@ -133,6 +148,7 @@ const main = async () => {
     }
 
     reduceAndLog(sessions, renderedSessions, event.chatId, event);
+    driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
   });
 
   telegram.onMessageEdit(edit => {
@@ -154,6 +170,7 @@ const main = async () => {
     }
 
     reduceAndLog(sessions, renderedSessions, event.chatId, event);
+    driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
   });
 
   telegram.onMessageDelete(del => {
@@ -172,10 +189,12 @@ const main = async () => {
     }
 
     reduceAndLog(sessions, renderedSessions, event.chatId, event);
+    driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
   });
 
   const shutdown = async () => {
     logger.log('Shutting down...');
+    driver.stop();
     await telegram.stop();
     process.exit(0);
   };

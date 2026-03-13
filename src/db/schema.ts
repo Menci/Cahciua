@@ -79,3 +79,17 @@ export const events = sqliteTable('events', {
 }, table => [
   index('events_chat_id_idx').on(table.chatId),
 ]);
+
+export const turnResponses = sqliteTable('turn_responses', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  chatId: text('chat_id').notNull(),
+  requestedAt: integer('requested_at').notNull(),
+  provider: text('provider').notNull(),
+  data: text('data', { mode: 'json' }).notNull().$type<unknown[]>(),
+  sessionMeta: text('session_meta', { mode: 'json' }),
+  inputTokens: integer('input_tokens').notNull(),
+  outputTokens: integer('output_tokens').notNull(),
+  responseEnvelope: text('response_envelope', { mode: 'json' }),
+}, table => [
+  index('turn_responses_chat_requested_idx').on(table.chatId, table.requestedAt),
+]);

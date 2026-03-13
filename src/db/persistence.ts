@@ -1,7 +1,7 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, gte, inArray } from 'drizzle-orm';
 
 import type { DB } from './client';
-import { events, messages, users } from './schema';
+import { events, messages, turnResponses, users } from './schema';
 import { contentToPlainText } from '../adaptation';
 import type {
   CanonicalDeleteEvent,
@@ -222,4 +222,35 @@ export const loadKnownChatIds = (db: DB): string[] => {
     .from(events)
     .all();
   return rows.map(r => r.chatId);
+};
+
+export const persistTurnResponse = (db: DB, chatId: string, tr: {
+  requestedAtMs: number;
+  provider: string;
+  data: unknown[];
+  sessionMeta?: unknown;
+  inputTokens: number;
+  outputTokens: number;
+  responseEnvelope?: unknown;
+}) => {
+  db.insert(turnResponses).values({
+    chatId,
+    requestedAt: tr.requestedAtMs,
+    provider: tr.provider,
+    data: tr.data,
+    sessionMeta: tr.sessionMeta ?? null,
+    inputTokens: tr.inputTokens,
+    outputTokens: tr.outputTokens,
+    responseEnvelope: tr.responseEnvelope ?? null,
+  }).run();
+};
+
+export const loadTurnResponses = (db: DB, chatId: string, afterMs?: number) => {
+  const query = afterMs != null
+    ? db.select().from(turnResponses)
+        .where(and(eq(turnResponses.chatId, chatId), gte(turnResponses.requestedAt, afterMs)))
+    : db.select().from(turnResponses)
+        .where(eq(turnResponses.chatId, chatId));
+
+  return query.orderBy(turnResponses.requestedAt, turnResponses.id).all();
 };
