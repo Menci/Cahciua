@@ -39,6 +39,7 @@
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@velin-dev/core": "^0.3.4",
     "drizzle-kit": "^0.30.0",
     "eslint": "^9.0.0",
     "eslint-import-resolver-typescript": "^3.7.0",
