@@ -10,6 +10,13 @@ const contentPieceToMessagePart = (piece: RenderedContentPiece) =>
 
 // Merge RC segments and TRs into an xsai Message[] array.
 //
+// Design: RC is intentionally a flat array of individually-timestamped segments.
+// The Rendering layer produces segments without any knowledge of TRs — it only
+// sees IC and RenderParams. This merge function re-groups consecutive RC segments
+// (those not separated by a TR) into single user messages. The grouping boundary
+// is determined by TR timestamps, which is Driver-layer knowledge. This keeps the
+// Rendering → Driver dependency one-directional and the Rendering layer pure.
+//
 // Each entry is assigned a sort key: RC segments use receivedAtMs,
 // TR entries use (requestedAtMs, step) where step is the array index
 // within the TR's data. This provides a unified timeline without

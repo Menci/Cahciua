@@ -1,82 +1,16 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-
-import { createPatch } from 'diff';
-
 import { adaptDelete, adaptEdit, adaptMessage, contentToPlainText } from './adaptation';
 import { loadConfig } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { createDatabase, loadEvents, loadKnownChatIds, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, persistTurnResponse, runMigrations } from './db';
 import { createDriver } from './driver';
-import { createEmptyIC, reduce } from './projection';
-import type { IntermediateContext } from './projection';
-import { rcToXml, render } from './rendering';
-import type { RenderedContext, RenderParams } from './rendering';
+import { createPipeline } from './pipeline';
+import type { RenderParams } from './rendering';
 import { createTelegramManager } from './telegram';
 import { loadSession } from './telegram/session';
 
 setupLogger();
 
 const logger = useLogger('cahciua');
-const projLogger = useLogger('projection');
-const renderLogger = useLogger('rendering');
-
-const DUMP_DIR = '/tmp/cahciua';
-mkdirSync(DUMP_DIR, { recursive: true });
-
-const icToJson = (ic: IntermediateContext): string =>
-  JSON.stringify({
-    sessionId: ic.sessionId,
-    nodes: ic.nodes,
-    users: Object.fromEntries(ic.users),
-  }, null, 2);
-
-const dumpIC = (ic: IntermediateContext) => {
-  writeFileSync(`${DUMP_DIR}/${ic.sessionId}.ic.json`, icToJson(ic));
-};
-
-const dumpRC = (sessionId: string, rc: RenderedContext) => {
-  writeFileSync(`${DUMP_DIR}/${sessionId}.rc.xml`, rcToXml(rc));
-};
-
-const logProjection = (oldIC: IntermediateContext, newIC: IntermediateContext) => {
-  const oldStr = icToJson(oldIC);
-  const newStr = icToJson(newIC);
-  if (oldStr === newStr) return;
-  const patch = createPatch(`IC(${newIC.sessionId})`, oldStr, newStr, 'before', 'after', { context: 3 });
-  projLogger.log(`IC diff:\n${patch}`);
-};
-
-const logRendering = (sessionId: string, oldRC: RenderedContext | undefined, newRC: RenderedContext) => {
-  const newXml = rcToXml(newRC);
-  if (!oldRC) {
-    renderLogger.log(`RC(${sessionId}) full:\n${newXml}`);
-    return;
-  }
-  const oldXml = rcToXml(oldRC);
-  if (oldXml === newXml) return;
-  const patch = createPatch(`RC(${sessionId})`, oldXml, newXml, 'before', 'after', { context: 3 });
-  renderLogger.log(`RC diff:\n${patch}`);
-};
-
-const reduceAndLog = (
-  sessions: Map<string, IntermediateContext>,
-  renderedSessions: Map<string, RenderedContext>,
-  chatId: string,
-  event: Parameters<typeof reduce>[1],
-  renderParams: RenderParams,
-) => {
-  const oldIC = sessions.get(chatId) ?? createEmptyIC(chatId);
-  const newIC = reduce(oldIC, event);
-  sessions.set(chatId, newIC);
-  logProjection(oldIC, newIC);
-  dumpIC(newIC);
-
-  const oldRC = renderedSessions.get(chatId);
-  const newRC = render(newIC, renderParams);
-  renderedSessions.set(chatId, newRC);
-  logRendering(chatId, oldRC, newRC);
-  dumpRC(chatId, newRC);
-};
 
 const main = async () => {
   const config = loadConfig();
@@ -88,25 +22,12 @@ const main = async () => {
   const botUserId = config.telegram.botToken.split(':')[0]!;
   const renderParams: RenderParams = { botUserId };
 
+  const pipeline = createPipeline(renderParams);
+
   // Cold-start: replay events per chat to rebuild IC + RC
-  const sessions = new Map<string, IntermediateContext>();
-  const renderedSessions = new Map<string, RenderedContext>();
-  for (const chatId of loadKnownChatIds(db)) {
-    let ic = createEmptyIC(chatId);
-    const events = loadEvents(db, chatId);
-    for (const event of events)
-      ic = reduce(ic, event);
-    sessions.set(chatId, ic);
-    dumpIC(ic);
-
-    const rc = render(ic, renderParams);
-    renderedSessions.set(chatId, rc);
-    logRendering(chatId, undefined, rc);
-    dumpRC(chatId, rc);
-
-    logger.withFields({ chatId, events: events.length, nodes: ic.nodes.length, users: ic.users.size }).log('Replayed session');
-  }
-  logger.withFields({ sessions: sessions.size }).log('Cold start complete');
+  for (const chatId of loadKnownChatIds(db))
+    pipeline.replayChat(chatId, loadEvents(db, chatId));
+  logger.withFields({ sessions: pipeline.getChatIds().length }).log('Cold start complete');
 
   const telegram = createTelegramManager({
     botToken: config.telegram.botToken,
@@ -168,12 +89,12 @@ const main = async () => {
       event.isSelfSent = true;
 
       // Detect userbot winning the race — message already in IC before synthetic bypass
-      const ic = sessions.get(chatId);
+      const ic = pipeline.getIC(chatId);
       if (ic?.nodes.some(n => n.type === 'message' && n.messageId === event.messageId))
         logger.withFields({ chatId, messageId: event.messageId }).warn('Synthetic bypass: userbot arrived first (isSelfSent merged via dedup)');
 
       persistEvent(db, event);
-      reduceAndLog(sessions, renderedSessions, chatId, event, renderParams);
+      pipeline.pushEvent(chatId, event);
       // Don't call driver.handleEvent — we're inside the Driver's LLM call;
       // the self-loop check will prevent re-triggering on bot-only messages.
 
@@ -185,8 +106,10 @@ const main = async () => {
   logger.withFields({ chatIds: config.driver.chatIds }).log('Driver initialized');
 
   // Feed replayed sessions into Driver so it can respond to un-answered messages
-  for (const [chatId, rc] of renderedSessions)
-    driver.handleEvent(chatId, rc);
+  for (const chatId of pipeline.getChatIds()) {
+    const rc = pipeline.getRC(chatId);
+    if (rc) driver.handleEvent(chatId, rc);
+  }
 
   telegram.onMessage(msg => {
     logger.withFields({
@@ -201,14 +124,10 @@ const main = async () => {
     const event = adaptMessage(msg);
     persistEvent(db, event);
 
-    try {
-      persistMessage(db, msg);
-    } catch (err) {
-      logger.withError(err).error('Failed to persist message');
-    }
+    try { persistMessage(db, msg); } catch (err) { logger.withError(err).error('Failed to persist message'); }
 
-    reduceAndLog(sessions, renderedSessions, event.chatId, event, renderParams);
-    driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
+    const rc = pipeline.pushEvent(event.chatId, event);
+    driver.handleEvent(event.chatId, rc);
   });
 
   telegram.onMessageEdit(edit => {
@@ -240,14 +159,10 @@ const main = async () => {
 
     persistEvent(db, event);
 
-    try {
-      persistMessageEdit(db, edit);
-    } catch (err) {
-      logger.withError(err).error('Failed to persist message edit');
-    }
+    try { persistMessageEdit(db, edit); } catch (err) { logger.withError(err).error('Failed to persist message edit'); }
 
-    reduceAndLog(sessions, renderedSessions, event.chatId, event, renderParams);
-    driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
+    const rc = pipeline.pushEvent(event.chatId, event);
+    driver.handleEvent(event.chatId, rc);
   });
 
   telegram.onMessageDelete(del => {
@@ -259,14 +174,10 @@ const main = async () => {
     const event = adaptDelete(del);
     persistEvent(db, event);
 
-    try {
-      persistMessageDelete(db, del);
-    } catch (err) {
-      logger.withError(err).error('Failed to persist message delete');
-    }
+    try { persistMessageDelete(db, del); } catch (err) { logger.withError(err).error('Failed to persist message delete'); }
 
-    reduceAndLog(sessions, renderedSessions, event.chatId, event, renderParams);
-    driver.handleEvent(event.chatId, renderedSessions.get(event.chatId)!);
+    const rc = pipeline.pushEvent(event.chatId, event);
+    driver.handleEvent(event.chatId, rc);
   });
 
   const shutdown = async () => {
