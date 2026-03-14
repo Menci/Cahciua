@@ -231,7 +231,7 @@ export const persistTurnResponse = (db: DB, chatId: string, tr: {
   sessionMeta?: unknown;
   inputTokens: number;
   outputTokens: number;
-  reasoningCompat?: string;
+  reasoningSignatureCompat?: string;
 }) => {
   db.insert(turnResponses).values({
     chatId,
@@ -241,7 +241,7 @@ export const persistTurnResponse = (db: DB, chatId: string, tr: {
     sessionMeta: tr.sessionMeta ?? null,
     inputTokens: tr.inputTokens,
     outputTokens: tr.outputTokens,
-    reasoningCompat: tr.reasoningCompat ?? '',
+    reasoningSignatureCompat: tr.reasoningSignatureCompat ?? '',
   }).run();
 };
 

@@ -22,17 +22,17 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 |-------|--------|-------|
 | Telegram integration | Done | Bot + userbot, dedup, thumbnail, fileId merge, credential redaction |
 | Adaptation | Done | Types, conversion, dual timestamps, rich text parsing, string IDs, phantom edit filtering |
-| DB / Persistence | Done | events table (canonical), messages table (raw platform), 10 migrations |
+| DB / Persistence | Done | events, messages, turn_responses tables; 13 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
 | Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces |
-| Driver | Not started | Merges RC + TRs, owns compaction and tool call loops |
+| Driver | Done | xsai `chat()` + manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization |
 
 ## Tech Stack
 
 - **Runtime**: Node.js (>=22), TypeScript, tsx (dev), tsdown (build).
 - **Telegram Bot API**: grammY — primary message handling, sending replies, commands.
 - **Telegram User API**: gramjs (`telegram` on npm) — MTProto client for history fetching, reply-to context resolution, seeing other bots' messages.
-- **LLM**: xsAI (planned) — ultra-lightweight OpenAI-compatible SDK.
+- **LLM**: xsAI — `chat()` primitive for single API calls + manual tool execution loop. `generateText()` not used (its internal tool loop swallows per-step data).
 - **Database**: SQLite via better-sqlite3, Drizzle ORM.
 - **State management**: Immer — immutable IC updates in Projection reducers.
 - **Validation**: Valibot — schema validation for env, config, canonical events.
@@ -63,10 +63,18 @@ src/
 │   ├── types.ts            # RenderParams, RenderedContentPiece, RenderedContextSegment, RenderedContext
 │   ├── index.ts            # render(), rcToXml(), XML serialization of ContentNode/attachments
 │   └── index.test.ts       # Rendering unit tests
+├── driver/                 # Driver: RC + TRs → LLM API calls
+│   ├── types.ts            # TurnResponse, DriverConfig
+│   ├── merge.ts            # mergeContext(RC, TRs) → Message[] — timestamp-ordered interleave
+│   ├── merge.test.ts       # Merge logic tests
+│   ├── prompt.ts           # System prompt rendering (velin template)
+│   ├── system-prompt.test.ts # System prompt tests
+│   ├── tools.ts            # send_message tool definition (xsai Tool)
+│   └── index.ts            # createDriver() — debounce, step loop, token trimming, reasoning sanitization
 ├── db/
 │   ├── client.ts           # Database init (better-sqlite3 + Drizzle), WAL mode
-│   ├── schema.ts           # Drizzle schema: users, messages, events tables
-│   ├── persistence.ts      # CRUD: persistEvent, persistMessage, loadEvents, etc.
+│   ├── schema.ts           # Drizzle schema: users, messages, events, turnResponses tables
+│   ├── persistence.ts      # CRUD: persistEvent, persistMessage, persistTurnResponse, loadEvents, loadTurnResponses, etc.
 │   └── index.ts            # Barrel exports
 └── telegram/
     ├── index.ts             # TelegramManager — unified facade, thumbnail hydration, dedup dispatch
@@ -126,6 +134,7 @@ Projection reducers must be pure: `(IC, CanonicalIMEvent) => IC'`. No I/O, no si
 Every `CanonicalIMEvent` carries two timestamps:
 - `receivedAtMs` (milliseconds): local receive time, set by `Date.now()` at adaptation. **Ordering source of truth** — ensures cold-start replay matches live processing.
 - `timestampSec` (seconds): server-reported time, shown to the AI. For delete events (no server time), derived as `Math.floor(receivedAtMs / 1000)`.
+- `utcOffsetMin`: timezone offset at adaptation time (`-new Date().getTimezoneOffset()`). Rendering converts `timestampSec` to local time using this per-event offset.
 
 DB queries order by `(received_at, id)`.
 
@@ -134,7 +143,7 @@ DB queries order by `(received_at, id)`.
 - **grammY** (Bot API): receives messages from non-bot users, sends replies, handles `/commands`.
 - **gramjs** (User API): fetches history, resolves reply-to chains, sees other bots' messages (invisible to Bot API), receives edit/delete events.
 
-Messages from both clients are deduplicated by `(chatId, messageId)` in the TelegramManager. Userbot events are filtered to bot-joined chats only (`botChats` set, seeded from events table on startup). When the bot version arrives second, its `fileId` is merged into the in-flight message for Bot API download preference.
+Messages from both clients are deduplicated by `(chatId, messageId)` in the TelegramManager. Userbot events are filtered to bot-joined chats only (`botChats` set, seeded from events table on startup). When the bot version arrives second, its `fileId` is merged into the in-flight message for Bot API download preference. Delete events without `chatId` (MTProto private chat deletes) are dropped — `lookupChatId` attempts resolution from the messages table, but if the message was never persisted the event is lost.
 
 ### Phantom Edit Filtering
 
@@ -164,6 +173,14 @@ Debounce lives in Driver (not a separate orchestration layer) because tool call 
 
 Each LLM API call = one TR (not the entire loop as one TR). Before each loop iteration, Driver re-renders IC to pick up new chat messages. New messages' `receivedAtMs` > previous TR's `requestedAtMs` (causality), so they merge correctly after the TR's tool results and before the next assistant response. See `docs/dcp-design.md §Tool Call Loop Interleaving` for merge details.
 
+### Reasoning Signature Sanitization
+
+Anthropic models return reasoning as thinking text + cryptographic signature. The signature is only valid within the same provider family. Each TR records its `reasoningSignatureCompat` group. On replay: same compat → keep reasoning (model can resume); different/empty → strip all reasoning fields (`reasoning_text`, `reasoning_opaque`, thinking blocks). The pair is always kept or stripped together.
+
+### Debug Dumps
+
+Driver writes the full LLM request JSON to `/tmp/cahciua/<chatId>.request.json` before each API call. This is intentional debug output — the project is not production-deployed. Do not flag as an issue.
+
 ### RC and TRs — Orthogonal Merge
 
 RC (from Rendering) and TRs (from Driver) are two independent sorted streams:
@@ -185,10 +202,10 @@ TRs are stored in a `turn_responses` DB table (raw provider format, not provider
 | requested_at | INTEGER NOT NULL | millisecond timestamp, merge ordering key |
 | provider | TEXT NOT NULL | e.g. 'openai-chat', 'anthropic-messages' |
 | data | TEXT (JSON) NOT NULL | raw provider response entries (assistant message + tool results) |
-| session_meta | TEXT (JSON) | top-level state from response (e.g. response.id for Responses API) |
+| session_meta | TEXT (JSON) | reserved for Compaction — compressed summaries replace full historical replay |
 | input_tokens | INTEGER NOT NULL | for statistics / cost tracking |
 | output_tokens | INTEGER NOT NULL | for statistics / cost tracking |
-| response_envelope | TEXT (JSON) | raw response with content stripped (model, finish_reason, usage, etc.) |
+| reasoning_signature_compat | TEXT DEFAULT '' | provider compat group for reasoning signature validation |
 
 Same-provider reads are zero-conversion. Cross-provider reads use explicit A→B converter functions.
 

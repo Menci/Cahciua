@@ -1,12 +1,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 import type { Logger } from '@guiiai/logg';
-import type { Message } from 'xsai';
+import type { Message, Tool } from 'xsai';
+import { chat, responseJSON } from 'xsai';
 
 import { mergeContext } from './merge';
 import { renderSystemPrompt } from './prompt';
 import { createSendMessageTool } from './tools';
-import type { DriverConfig, ToolDef, TurnResponse } from './types';
+import type { DriverConfig, TurnResponse } from './types';
 import type { DB } from '../db/client';
 import { loadTurnResponses, persistTurnResponse } from '../db/persistence';
 import type { RenderedContext } from '../rendering/types';
@@ -113,7 +114,7 @@ const sanitizeReasoningForTR = (tr: TurnResponse, currentCompat: string | undefi
     const m = entry as AnyMsg;
     if (m.role !== 'assistant') return entry;
 
-    const compatMatch = !!currentCompat && !!tr.reasoningCompat && tr.reasoningCompat === currentCompat;
+    const compatMatch = !!currentCompat && !!tr.reasoningSignatureCompat && tr.reasoningSignatureCompat === currentCompat;
     if (compatMatch) return entry;
 
     // Compat mismatch — strip all reasoning
@@ -152,40 +153,26 @@ export const createDriver = (config: DriverConfig, deps: {
   const running = new Set<string>();
   const pendingRetrigger = new Set<string>();
 
-  // Single chat completion API call. No automatic tool execution or multi-step loop —
-  // we handle tools and step control ourselves for full visibility and interruptibility.
+  // Single chat completion API call via xsai. No automatic tool execution —
+  // we handle tools and step control ourselves for full visibility.
   const chatCompletion = async (params: {
     messages: Message[];
     system?: string;
-    tools?: ToolDef[];
+    tools?: Tool[];
   }) => {
-    const body: Record<string, unknown> = {
+    const res = await chat({
+      baseURL: config.apiBaseUrl,
+      apiKey: config.apiKey,
       model: config.model,
       messages: params.messages,
-    };
-    if (params.system) body.system = params.system;
-    if (params.tools?.length)
-      body.tools = params.tools.map(t => ({ type: t.type, function: t.function }));
-
-    const url = `${config.apiBaseUrl.replace(/\/+$/, '')}/chat/completions`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify(body),
+      tools: params.tools,
+      system: params.system,
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`LLM API ${res.status}: ${text}`);
-    }
-
-    return res.json() as Promise<{
+    return await responseJSON<{
       choices: Array<{ finish_reason: string; message: AnyMsg }>;
       usage: { prompt_tokens: number; completion_tokens: number };
-    }>;
+    }>(res);
   };
 
   // Load RC + TRs, run self-loop check, sanitize reasoning, merge and trim.
@@ -202,7 +189,7 @@ export const createDriver = (config: DriverConfig, deps: {
       sessionMeta: r.sessionMeta,
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
-      reasoningCompat: r.reasoningCompat ?? '',
+      reasoningSignatureCompat: r.reasoningSignatureCompat ?? '',
     }));
 
     // Self-loop prevention: skip if all RC segments after the last TR are from bot
@@ -315,7 +302,7 @@ export const createDriver = (config: DriverConfig, deps: {
             try {
               const args = JSON.parse(tc.function.arguments);
               const result = tool
-                ? await tool.execute(args)
+                ? await tool.execute(args, { messages: currentMessages, toolCallId: tc.id })
                 : { error: `Unknown tool: ${tc.function.name}` };
               stepData.push({
                 role: 'tool',
@@ -349,7 +336,7 @@ export const createDriver = (config: DriverConfig, deps: {
           data: stepData,
           inputTokens: response.usage.prompt_tokens,
           outputTokens: response.usage.completion_tokens,
-          reasoningCompat: config.reasoningSignatureCompat ?? '',
+          reasoningSignatureCompat: config.reasoningSignatureCompat ?? '',
         });
 
         // No tool calls → model is done

@@ -1,0 +1,1 @@
+ALTER TABLE turn_responses RENAME COLUMN reasoning_compat TO reasoning_signature_compat;

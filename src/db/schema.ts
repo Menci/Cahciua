@@ -89,7 +89,7 @@ export const turnResponses = sqliteTable('turn_responses', {
   sessionMeta: text('session_meta', { mode: 'json' }),
   inputTokens: integer('input_tokens').notNull(),
   outputTokens: integer('output_tokens').notNull(),
-  reasoningCompat: text('reasoning_compat').default(''),
+  reasoningSignatureCompat: text('reasoning_signature_compat').default(''),
 }, table => [
   index('turn_responses_chat_requested_idx').on(table.chatId, table.requestedAt),
 ]);

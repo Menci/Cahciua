@@ -5,7 +5,7 @@ export interface TurnResponse {
   sessionMeta?: unknown;
   inputTokens: number;
   outputTokens: number;
-  reasoningCompat?: string;
+  reasoningSignatureCompat?: string;
 }
 
 export interface DriverConfig {
@@ -15,14 +15,4 @@ export interface DriverConfig {
   maxContextTokens: number;
   chatIds: string[];
   reasoningSignatureCompat?: string;
-}
-
-export interface ToolDef {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-  execute: (args: unknown) => Promise<unknown>;
 }

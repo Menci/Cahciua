@@ -1,8 +1,8 @@
-import type { ToolDef } from './types';
+import type { Tool } from 'xsai';
 
 export const createSendMessageTool = (
   send: (text: string, replyTo?: string) => Promise<void>,
-): ToolDef => ({
+): Tool => ({
   type: 'function',
   function: {
     name: 'send_message',
