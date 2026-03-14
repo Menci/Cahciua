@@ -1,4 +1,4 @@
-import type { FeatureFlags } from '../config/features';
+import type { FeatureFlags } from '../config/config';
 
 export interface TurnResponse {
   requestedAtMs: number;
@@ -20,4 +20,4 @@ export interface DriverConfig {
   featureFlags: FeatureFlags;
 }
 
-export type { FeatureFlags } from '../config/features';
+export type { FeatureFlags } from '../config/config';

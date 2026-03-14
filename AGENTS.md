@@ -36,7 +36,7 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 - **Database**: SQLite via better-sqlite3, Drizzle ORM.
 - **State management**: Immer — immutable IC updates in Projection reducers.
 - **Reactivity**: alien-signals — signal/computed/effect graph for Driver orchestration.
-- **Validation**: Valibot — schema validation for env, config, canonical events.
+- **Validation**: Valibot — schema validation for config, canonical events.
 - **Logging**: @guiiai/logg — structured logger with pretty/JSON output.
 - **Testing**: Vitest.
 - **Linting**: ESLint with `@typescript-eslint`, `@stylistic/eslint-plugin`, `eslint-plugin-import`.
@@ -49,8 +49,7 @@ src/
 ├── index.ts                # Entry point — wires adaptation, persistence, telegram
 ├── http.ts                 # HTTP client with credential redaction (registerHttpSecret)
 ├── config/
-│   ├── env.ts              # Environment variable schema (Valibot)
-│   ├── features.ts         # Feature flags — Chromium-style env-controlled toggles
+│   ├── config.ts           # Unified YAML config loader (Valibot schema)
 │   └── logger.ts           # @guiiai/logg setup (pretty in dev, JSON in prod)
 ├── adaptation/             # Layer 1: Platform Event → Canonical Event
 │   ├── types.ts            # CanonicalIMEvent, CanonicalUser, ContentNode, etc.
@@ -112,7 +111,7 @@ Canonical types (`CanonicalIMEvent`, `CanonicalUser`, `ContentNode`, etc.) are d
 
 Use relative paths for all internal imports:
 ```ts
-import { loadEnv } from './config/env';
+import { loadConfig } from './config/config';
 import type { CanonicalIMEvent } from '../adaptation/types';
 ```
 
@@ -232,14 +231,14 @@ Bot's own sent messages are marked `isSelfSent: true` at creation time (in the s
 
 ### Feature Flags
 
-Chromium-style feature flags for experimental optimizations. Controlled via env vars (`FEATURE_<NAME>=1`). Defined in `src/config/features.ts`, loaded at startup, passed to Driver via `DriverConfig.featureFlags`.
+Feature flags for experimental optimizations. Controlled via `config.yaml` under the `features` key. Defined in `src/config/config.ts` as part of the `Config` schema, loaded at startup, passed to Driver via `DriverConfig.featureFlags`.
 
-| Flag | Env Var | Effect |
-|------|---------|--------|
-| `trimStaleNoToolCallTurnResponses` | `FEATURE_TRIM_STALE_NO_TOOL_CALL_TRS` | Keep only latest 5 TRs without tool calls; older pure-text TRs are dropped before merge |
-| `trimSelfMessagesCoveredBySendToolCalls` | `FEATURE_TRIM_SELF_MESSAGES_COVERED_BY_SEND_TOOL_CALLS` | Filter RC segments with `isSelfSent=true` from context assembly (removes duplicate representation — bot messages exist in both RC via userbot and TRs via tool call results) |
+| Flag | Config Key | Effect |
+|------|------------|--------|
+| `trimStaleNoToolCallTurnResponses` | `features.trimStaleNoToolCallTurnResponses` | Keep only latest 5 TRs without tool calls; older pure-text TRs are dropped before merge |
+| `trimSelfMessagesCoveredBySendToolCalls` | `features.trimSelfMessagesCoveredBySendToolCalls` | Filter RC segments with `isSelfSent=true` from context assembly (removes duplicate representation — bot messages exist in both RC via userbot and TRs via tool call results) |
 
-Feature flags must not affect correctness — only context efficiency. Add new flags to `FeatureFlags` interface, `FeaturesSchema` in `src/config/features.ts`, and this table.
+Feature flags must not affect correctness — only context efficiency. Add new flags to the `features` section in `ConfigSchema` in `src/config/config.ts` and this table.
 
 ## Coding Conventions
 

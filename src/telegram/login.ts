@@ -2,24 +2,22 @@ import { stdin, stdout } from 'node:process';
 import * as readline from 'node:readline/promises';
 
 import { Format, initLogger, LogLevel, useGlobalLogger } from '@guiiai/logg';
-import dotenv from 'dotenv';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 
 import { patchGramjsLogger } from './gramjs-logger';
 import { loadSession, saveSession } from './session';
-import { loadEnv } from '../config/env';
+import { loadConfig } from '../config/config';
 
 const main = async () => {
-  dotenv.config();
   initLogger(LogLevel.Log, Format.Pretty);
   const log = useGlobalLogger('login');
 
-  const env = loadEnv();
-  const existingSession = loadSession(env.TELEGRAM_SESSION);
+  const config = loadConfig();
+  const existingSession = loadSession(config.telegram.session);
 
   const session = new StringSession(existingSession);
-  const client = new TelegramClient(session, env.TELEGRAM_API_ID, env.TELEGRAM_API_HASH, {
+  const client = new TelegramClient(session, config.telegram.apiId, config.telegram.apiHash, {
     connectionRetries: 3,
   });
 

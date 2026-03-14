@@ -1,12 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 import { createPatch } from 'diff';
-import dotenv from 'dotenv';
 
 import { adaptDelete, adaptEdit, adaptMessage, captureUtcOffset, parseContent } from './adaptation';
 import type { CanonicalMessageEvent } from './adaptation';
-import { loadEnv } from './config/env';
-import { loadFeatureFlags } from './config/features';
+import { loadConfig } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { createDatabase, loadEvents, loadKnownChatIds, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
 import { createDriver } from './driver';
@@ -17,7 +15,6 @@ import type { RenderedContext, RenderParams } from './rendering';
 import { createTelegramManager } from './telegram';
 import { loadSession } from './telegram/session';
 
-dotenv.config();
 setupLogger();
 
 const logger = useLogger('cahciua');
@@ -83,14 +80,13 @@ const reduceAndLog = (
 };
 
 const main = async () => {
-  const env = loadEnv();
-  const featureFlags = loadFeatureFlags();
+  const config = loadConfig();
 
-  const db = createDatabase(env.DB_PATH, logger);
+  const db = createDatabase(config.database.path, logger);
   runMigrations(db, logger);
 
   // Bot user ID from token — available immediately, used for myself detection
-  const botUserId = env.TELEGRAM_BOT_TOKEN.split(':')[0]!;
+  const botUserId = config.telegram.botToken.split(':')[0]!;
   const renderParams: RenderParams = { botUserId };
 
   // Cold-start: replay events per chat to rebuild IC + RC
@@ -114,22 +110,22 @@ const main = async () => {
   logger.withFields({ sessions: sessions.size }).log('Cold start complete');
 
   const telegram = createTelegramManager({
-    botToken: env.TELEGRAM_BOT_TOKEN,
-    apiId: env.TELEGRAM_API_ID,
-    apiHash: env.TELEGRAM_API_HASH,
-    session: loadSession(env.TELEGRAM_SESSION),
+    botToken: config.telegram.botToken,
+    apiId: config.telegram.apiId,
+    apiHash: config.telegram.apiHash,
+    session: loadSession(config.telegram.session),
     initialChatIds: loadKnownChatIds(db),
     resolveChatId: messageIds => lookupChatId(db, messageIds),
   }, logger);
 
   const driver = createDriver({
-    apiBaseUrl: env.LLM_API_BASE_URL,
-    apiKey: env.LLM_API_KEY,
-    model: env.LLM_MODEL,
-    maxContextTokens: env.LLM_MAX_CONTEXT_TOKENS,
-    chatIds: env.DRIVER_CHAT_IDS,
-    reasoningSignatureCompat: env.LLM_REASONING_SIGNATURE_COMPAT,
-    featureFlags,
+    apiBaseUrl: config.llm.apiBaseUrl,
+    apiKey: config.llm.apiKey,
+    model: config.llm.model,
+    maxContextTokens: config.llm.maxContextTokens,
+    chatIds: config.driver.chatIds,
+    reasoningSignatureCompat: config.llm.reasoningSignatureCompat,
+    featureFlags: config.features,
   }, {
     db,
     sendMessage: async (chatId, text, replyToMessageId) => {
@@ -173,7 +169,7 @@ const main = async () => {
     logger,
   });
 
-  logger.withFields({ chatIds: env.DRIVER_CHAT_IDS }).log('Driver initialized');
+  logger.withFields({ chatIds: config.driver.chatIds }).log('Driver initialized');
 
   // Feed replayed sessions into Driver so it can respond to un-answered messages
   for (const [chatId, rc] of renderedSessions)

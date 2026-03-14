@@ -60,8 +60,8 @@ md.renderer.rules.code_block = (tokens, idx) =>
 // --- Image: degrade to link ---
 
 md.renderer.rules.image = (tokens, idx, options, env, self) => {
-  const src = tokens[idx]!.attrGet('src') || '';
-  const alt = self.renderInlineAsText(tokens[idx]!.children || [], options, env);
+  const src = tokens[idx]!.attrGet('src') ?? '';
+  const alt = self.renderInlineAsText(tokens[idx]!.children ?? [], options, env);
   return alt
     ? `<a href="${md.utils.escapeHtml(src)}">${md.utils.escapeHtml(alt)}</a>`
     : md.utils.escapeHtml(src);

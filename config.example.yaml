@@ -1,0 +1,22 @@
+telegram:
+  botToken: ""
+  apiId: 0
+  apiHash: ""
+  session: ""
+
+llm:
+  apiBaseUrl: ""
+  apiKey: ""
+  model: "claude-opus-4-6"
+  maxContextTokens: 512000
+  reasoningSignatureCompat: "anthropic"
+
+driver:
+  chatIds: []
+
+database:
+  path: "./data/cahciua.db"
+
+features:
+  trimStaleNoToolCallTurnResponses: false
+  trimSelfMessagesCoveredBySendToolCalls: false

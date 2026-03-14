@@ -26,7 +26,6 @@
     "alien-signals": "^3.1.2",
     "better-sqlite3": "^11.7.0",
     "diff": "^8.0.3",
-    "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.0",
     "grammy": "^1.35.0",
     "immer": "^10.1.1",
@@ -34,7 +33,8 @@
     "sharp": "^0.34.5",
     "telegram": "^2.26.22",
     "valibot": "^1.2.0",
-    "xsai": "^0.4.4"
+    "xsai": "^0.4.4",
+    "yaml": "^2.8.2"
   },
   "pnpm": {
     "overrides": {

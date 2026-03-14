@@ -1,0 +1,41 @@
+import { readFileSync } from 'node:fs';
+
+import * as v from 'valibot';
+import { parse as parseYaml } from 'yaml';
+
+const ConfigSchema = v.object({
+  telegram: v.object({
+    botToken: v.string(),
+    apiId: v.number(),
+    apiHash: v.string(),
+    session: v.optional(v.string(), ''),
+  }),
+  llm: v.object({
+    apiBaseUrl: v.string(),
+    apiKey: v.string(),
+    model: v.string(),
+    maxContextTokens: v.number(),
+    reasoningSignatureCompat: v.optional(v.string()),
+  }),
+  driver: v.object({
+    chatIds: v.array(v.string()),
+  }),
+  database: v.optional(v.object({
+    path: v.optional(v.string(), './data/cahciua.db'),
+  }), {}),
+  features: v.optional(v.object({
+    trimStaleNoToolCallTurnResponses: v.optional(v.boolean(), false),
+    trimSelfMessagesCoveredBySendToolCalls: v.optional(v.boolean(), false),
+  }), {}),
+});
+
+export type Config = v.InferOutput<typeof ConfigSchema>;
+export type FeatureFlags = Config['features'];
+
+const CONFIG_PATH = process.env.CONFIG_PATH ?? 'config.yaml';
+
+export const loadConfig = (): Config => {
+  const raw = readFileSync(CONFIG_PATH, 'utf-8');
+  const parsed = parseYaml(raw);
+  return v.parse(ConfigSchema, parsed);
+};

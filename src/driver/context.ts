@@ -2,7 +2,7 @@ import type { Message } from 'xsai';
 
 import { mergeContext } from './merge';
 import type { TurnResponse } from './types';
-import type { FeatureFlags } from '../config/features';
+import type { FeatureFlags } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
 
 type AnyMsg = Record<string, any>;
