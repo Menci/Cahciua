@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 
 import type { DB } from './client';
 import { events, messages, turnResponses, users } from './schema';
@@ -147,6 +147,18 @@ export const persistEvent = (db: DB, event: CanonicalIMEvent) => {
 };
 
 type EventRow = typeof events.$inferSelect;
+
+// Load the most recent message/edit event for a given message to detect phantom edits.
+export const loadLatestMessageContent = (db: DB, chatId: string, messageId: string) =>
+  db.select({ text: events.text, content: events.content, attachments: events.attachments })
+    .from(events)
+    .where(and(
+      eq(events.chatId, chatId),
+      eq(events.messageId, messageId),
+    ))
+    .orderBy(desc(events.id))
+    .limit(1)
+    .get();
 
 const reconstructMessageEvent = (row: EventRow): CanonicalMessageEvent => {
   const event: CanonicalMessageEvent = {

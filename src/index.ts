@@ -2,11 +2,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 
 import { createPatch } from 'diff';
 
-import { adaptDelete, adaptEdit, adaptMessage, captureUtcOffset, parseContent } from './adaptation';
+import { adaptDelete, adaptEdit, adaptMessage, captureUtcOffset, contentToPlainText, parseContent } from './adaptation';
 import type { CanonicalMessageEvent } from './adaptation';
 import { loadConfig } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
-import { createDatabase, loadEvents, loadKnownChatIds, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
+import { createDatabase, loadEvents, loadKnownChatIds, loadLatestMessageContent, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, runMigrations } from './db';
 import { createDriver } from './driver';
 import { createEmptyIC, reduce } from './projection';
 import type { IntermediateContext } from './projection';
@@ -208,6 +208,23 @@ const main = async () => {
     }).log('Message edited');
 
     const event = adaptEdit(edit);
+
+    // Phantom edit detection: Telegram fires updateEditMessage with editDate set
+    // for metadata-only changes (link preview resolved, reactions, client re-saves).
+    // Skip if text, content, and attachments are identical to the stored event.
+    const prev = loadLatestMessageContent(db, event.chatId, event.messageId);
+    if (prev) {
+      const newText = contentToPlainText(event.content) || null;
+      const newContent = event.content.length > 0 ? event.content : null;
+      const newAttachments = event.attachments.length > 0 ? event.attachments : null;
+      if (prev.text === newText
+        && JSON.stringify(prev.content) === JSON.stringify(newContent)
+        && JSON.stringify(prev.attachments) === JSON.stringify(newAttachments)) {
+        logger.withFields({ chatId: edit.chatId, messageId: edit.messageId }).log('Phantom edit skipped (content unchanged)');
+        return;
+      }
+    }
+
     persistEvent(db, event);
 
     try {
