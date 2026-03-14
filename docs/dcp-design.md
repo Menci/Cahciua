@@ -214,7 +214,9 @@ TurnResponse {
   data: unknown                  — raw provider array entries (assistant message + tool results),
                                    exactly as they'd appear in the request array, unwrapped from
                                    response envelope
-  sessionMeta?: unknown          — top-level state from response (e.g. response.id for Responses API)
+  sessionMeta?: unknown          — reserved for compaction: compressed summaries replace full
+                                   historical replay
+  reasoningSignatureCompat?: string — provider compat group for reasoning signature validation
 }
 ```
 
@@ -234,14 +236,14 @@ TRs are stored in a `turn_responses` DB table, one row per TR:
 | requested_at | INTEGER NOT NULL | millisecond timestamp, merge ordering key |
 | provider | TEXT NOT NULL | e.g. 'openai-chat', 'anthropic-messages' |
 | data | TEXT (JSON) NOT NULL | raw provider response entries |
-| session_meta | TEXT (JSON) | top-level state from response |
+| session_meta | TEXT (JSON) | reserved for compaction summaries |
 | input_tokens | INTEGER NOT NULL | for statistics / cost tracking |
 | output_tokens | INTEGER NOT NULL | for statistics / cost tracking |
-| response_envelope | TEXT (JSON) | raw response with content/output stripped (already in `data`). Includes model, finish_reason, usage, system_fingerprint, etc. |
+| reasoning_signature_compat | TEXT DEFAULT '' | provider compat group for reasoning signature validation |
 
 Index: `(chat_id, requested_at)` for loading a session's TRs in order.
 
-Compaction state (cursor + summary) is session-level, not per-TR. Stored separately — either in a dedicated session-state table or as metadata on the oldest remaining TR after GC. Exact mechanism TBD when implementing compaction.
+Compaction state (cursor + summary) is session-level, not per-TR. Stored in `session_meta` of a dedicated compaction TR (or the first TR after GC). Exact mechanism TBD — see §Aggressive Compaction below.
 
 ## Other Design Decisions
 
@@ -262,3 +264,104 @@ Projection runs immediately on every event — IC is always current. The Driver 
 - Load TRs with `requested_at >= T`
 - Replay events with `received_at >= T` through Projection to rebuild IC
 - Optional catch-up: fetch missed messages from Telegram API by comparing DB max messageId with Telegram history
+
+## Planned Directions
+
+### Aggressive Compaction with Topic Index and Recall Tool
+
+Human cognition model: people reading group chat don't retain more than a screenful of recent messages. Older content exists as vague "topic impressions" that can be actively recalled when needed. The compaction design mirrors this:
+
+**Small working window** (16k–32k tokens of raw messages): recent messages kept verbatim. This is sufficient for the LLM to understand the active conversation flow — who's talking, current tone, immediate context.
+
+**Compaction summary with topic index**: when context exceeds the working window, a compaction turn runs (larger context budget) and produces a structured summary:
+- Recent topics (2–5 bullet points) with message ID ranges
+- Key participants and their positions
+- Unresolved questions or action items
+- Prepended as a "previously on..." block before the working window
+
+**`recall_messages` tool**: when the LLM needs details from older context, it calls a recall tool with message IDs (referenced from the topic index). The tool returns the original rendered messages. This makes old context accessible on-demand without bloating every turn.
+
+```
+Compaction turn flow:
+1. Driver detects context exceeds working window threshold
+2. Runs a compaction LLM call with larger budget (no send_message tool, only summarize)
+3. Stores summary + topic index in sessionMeta of a compaction TR
+4. Advances compact cursor T
+5. Subsequent turns: summary prefix + working window + recall tool
+```
+
+Compaction is itself a special TR — a turn where the LLM's job is to compress rather than respond. The compaction summary is not user-visible and has no tool side effects. Its `data` contains the LLM's compaction output; `sessionMeta` stores the structured topic index.
+
+**Open questions**:
+- Should the recall tool return rendered XML (same as original context) or raw text?
+- How many message IDs should the topic index carry? Too many defeats the purpose.
+- Should compaction be proactive (triggered by token budget) or lazy (triggered when the LLM hits the window boundary)?
+
+### Token Estimation Calibration
+
+The current `CHARS_PER_TOKEN = 2` is a hardcoded heuristic. CJK-heavy content has ~1.5 chars/token, English-heavy ~4 chars/token, base64 data URLs have ~4 chars/token. A fixed ratio can over- or under-estimate by 50%+.
+
+**Bootstrap calibration**: on the first LLM call of a session, compare `usage.prompt_tokens` (from the API response) against our estimated token count. Derive `actualCharsPerToken = totalInputChars / prompt_tokens`. Use this calibrated ratio for all subsequent `estimateMessageTokens` calls.
+
+The tokenizer is deterministic for a given model, so one calibration per model is sufficient. If the model changes (config update), the ratio resets and recalibrates on the next call.
+
+**Exponential backoff variant**: if the first call fails due to context-too-long, halve the context window estimate and retry. This handles cold start with a completely unknown model where even the initial estimate might exceed the true limit. Converges in O(log n) retries.
+
+```
+calibration state per model:
+  charsPerToken: number | null    — null = uncalibrated
+  calibratedFromModel: string     — model name for cache invalidation
+
+on first successful response:
+  charsPerToken = totalInputChars / usage.prompt_tokens
+```
+
+### Reactive Driver Architecture
+
+The current Driver is imperative: debounce timers, running/pendingRetrigger flags, manual `prepareContext` calls. This works but makes the state propagation graph implicit — it's easy to miss a retrigger path or introduce a state inconsistency.
+
+The three DCP layers (Adaptation, Projection, Rendering) are already pure functions. The Driver's impure effects can be modeled as a reactive system analogous to React function components:
+
+| React | DCP Driver |
+|-------|-----------|
+| `props` | new events (CanonicalIMEvent) |
+| `useState` | compaction cursor, driver state (running, pending) |
+| `useMemo` / derived state | `render(IC, params)` → RC, `merge(RC, TRs)` → context |
+| `useEffect` | "new external messages → trigger LLM call", "turn complete → check retrigger" |
+| `setState` (async batch) | advance compaction cursor, persist TR |
+| re-render | full pipeline re-derive (event → reduce → render → merge) |
+
+**Key insight**: advancing the compaction cursor is a `setState` — it changes derived state (IC working set, RC, merged context) and may trigger effects (new LLM call with compacted context). The debounce timer is a `useEffect` cleanup. The pendingRetrigger flag is an effect dependency.
+
+```
+// Pseudocode — reactive Driver
+const ic = derive(() => replayEvents(compactCursor()).reduce(reduce, emptyIC()));
+const rc = derive(() => render(ic(), renderParams));
+const context = derive(() => merge(rc(), loadTRs(compactCursor())));
+
+// Effect: new external messages → schedule LLM call
+watch([rc, lastTrTime], ([rc, lastTr]) => {
+  if (hasNewExternal(rc, lastTr))
+    debounce(() => triggerLLMCall());
+});
+
+// Effect: context too large → schedule compaction
+watch([context], ([ctx]) => {
+  if (estimateTokens(ctx) > compactionThreshold)
+    scheduleCompaction();
+});
+
+// State update: compaction advances cursor → re-derives ic, rc, context
+const advanceCompactCursor = (newT: number) => {
+  setCompactCursor(newT);  // triggers re-derive of ic → rc → context
+};
+```
+
+**Benefits**:
+- State propagation paths are explicit and declarative
+- Retrigger logic is automatic (effect re-runs when dependencies change)
+- Compaction cursor advancement naturally cascades through the pipeline
+- Testable: mock signal sources, assert effect triggers
+- No manual flag management (running, pendingRetrigger sets become derived state)
+
+**Implementation note**: this does NOT require importing Vue/Solid/React. A minimal signal/effect primitive (20–30 lines) or explicit EventEmitter-based dependency tracking is sufficient. The goal is to make the dependency graph explicit, not to adopt a UI framework.
