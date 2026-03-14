@@ -46,7 +46,8 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 
 ```
 src/
-├── index.ts                # Entry point — wires adaptation, persistence, telegram
+├── index.ts                # Entry point — thin wiring shell (config, DB, telegram, pipeline, driver)
+├── pipeline.ts             # Per-chat IC/RC state manager (reduce → render → log → dump)
 ├── http.ts                 # HTTP client with credential redaction (registerHttpSecret)
 ├── config/
 │   ├── config.ts           # Unified YAML config loader (Valibot schema)
