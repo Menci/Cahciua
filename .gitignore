@@ -6,6 +6,7 @@ yarn-debug.log*
 
 # Local data (DB, session, etc.)
 data/
+*.db
 yarn-error.log*
 lerna-debug.log*
 
