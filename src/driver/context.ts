@@ -262,7 +262,7 @@ export const composeContext = (
   reasoningSignatureCompat: string | undefined,
   featureFlags?: FeatureFlags,
   compactSummary?: string,
-): { messages: Message[]; estimatedTokens: number } | null => {
+): { messages: Message[]; estimatedTokens: number; rawEstimatedTokens: number } | null => {
   let effectiveRC = rc;
   if (featureFlags?.trimSelfMessagesCoveredBySendToolCalls)
     effectiveRC = filterSelfSentSegments(effectiveRC);
@@ -301,5 +301,7 @@ export const composeContext = (
     return !(m.role === 'assistant' && !('content' in m) && !m.tool_calls);
   });
 
-  return trimContext(cleaned, maxTokens);
+  const rawEstimatedTokens = cleaned.reduce((acc, msg) => acc + estimateMessageTokens(asMsg(msg)), 0);
+  const trimmed = trimContext(cleaned, maxTokens);
+  return { ...trimmed, rawEstimatedTokens };
 };
