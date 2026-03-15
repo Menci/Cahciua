@@ -92,19 +92,19 @@ export const streamingChat = async (params: StreamingChatParams): Promise<Stream
     // Content text
     if (delta.content) {
       textBuf += delta.content;
-      if (!message.content) message.content = '';
+      message.content ??= '';
       message.content += delta.content;
     }
 
     // Reasoning (OpenAI-compat extended thinking)
     if (delta.reasoning_text) {
       reasoningBuf += delta.reasoning_text;
-      if (!message.reasoning_text) message.reasoning_text = '';
+      message.reasoning_text ??= '';
       message.reasoning_text += delta.reasoning_text;
     }
     if (delta.reasoning_content) {
       reasoningBuf += delta.reasoning_content;
-      if (!message.reasoning_content) message.reasoning_content = '';
+      message.reasoning_content ??= '';
       message.reasoning_content += delta.reasoning_content;
     }
 
@@ -115,16 +115,14 @@ export const streamingChat = async (params: StreamingChatParams): Promise<Stream
 
     // Tool calls — accumulate incrementally
     if (delta.tool_calls) {
-      if (!message.tool_calls) message.tool_calls = [];
+      message.tool_calls ??= [];
       for (const tc of delta.tool_calls) {
         const idx = tc.index ?? 0;
-        if (!message.tool_calls[idx]) {
-          message.tool_calls[idx] = {
-            id: tc.id ?? '',
-            type: 'function',
-            function: { name: '', arguments: '' },
-          };
-        }
+        message.tool_calls[idx] ??= {
+          id: tc.id ?? '',
+          type: 'function',
+          function: { name: '', arguments: '' },
+        };
         const existing = message.tool_calls[idx];
         if (tc.id) existing.id = tc.id;
         if (tc.function?.name) {
@@ -140,7 +138,6 @@ export const streamingChat = async (params: StreamingChatParams): Promise<Stream
     }
   };
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;

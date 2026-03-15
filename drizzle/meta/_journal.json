@@ -127,6 +127,13 @@
       "when": 1773648000001,
       "tag": "0017_compactions_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1773648000002,
+      "tag": "0018_compactions_token_stats",
+      "breakpoints": true
     }
   ]
 }

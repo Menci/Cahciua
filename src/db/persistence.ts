@@ -278,6 +278,8 @@ export const persistCompaction = (db: DB, chatId: string, meta: CompactionSessio
       oldCursorMs: meta.oldCursorMs,
       newCursorMs: meta.newCursorMs,
       summary: meta.summary,
+      inputTokens: meta.inputTokens,
+      outputTokens: meta.outputTokens,
       createdAt: Date.now(),
     })
     .run();
@@ -294,5 +296,7 @@ export const loadCompaction = (db: DB, chatId: string): CompactionSessionMeta | 
     oldCursorMs: row.oldCursorMs,
     newCursorMs: row.newCursorMs,
     summary: row.summary,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
   };
 };

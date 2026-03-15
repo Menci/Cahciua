@@ -14,7 +14,6 @@ const ConfigSchema = v.object({
     apiBaseUrl: v.string(),
     apiKey: v.string(),
     model: v.string(),
-    maxContextTokens: v.number(),
     reasoningSignatureCompat: v.optional(v.string()),
   }),
   driver: v.object({
@@ -25,7 +24,8 @@ const ConfigSchema = v.object({
   }), {}),
   compaction: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
-    workingWindowTokens: v.optional(v.number(), 8000),
+    maxContextEstTokens: v.optional(v.number(), 200000),
+    workingWindowEstTokens: v.optional(v.number(), 8000),
     compactModel: v.optional(v.string()),
     dryRun: v.optional(v.boolean(), false),
   }), {}),

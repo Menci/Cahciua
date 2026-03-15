@@ -48,7 +48,6 @@ const main = async () => {
     apiBaseUrl: config.llm.apiBaseUrl,
     apiKey: config.llm.apiKey,
     model: config.llm.model,
-    maxContextTokens: config.llm.maxContextTokens,
     chatIds: config.driver.chatIds,
     reasoningSignatureCompat: config.llm.reasoningSignatureCompat,
     featureFlags: config.features,

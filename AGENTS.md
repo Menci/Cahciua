@@ -12,7 +12,7 @@ Cahciua is a Telegram group chat bot built on the **Deterministic Context Pipeli
 2. **Projection**: `IC' = Reducers(IC, CanonicalIMEvent)` — pure-function state machine producing an Intermediate Context (IC).
 3. **Rendering**: `RC = Render(IC, RenderParams)` — serialization with viewport filtering and late-binding injection, producing Rendered Context (RC).
 
-The Driver layer sits after Rendering: it merges RC (chat context) with its own TRs (bot responses, tool results) by timestamp to assemble the final LLM API request. Driver owns tool call loops and reactive scheduling. Compaction and multi-provider adaptation are designed but not yet implemented (current implementation uses OpenAI Chat Completions compatible endpoints only).
+The Driver layer sits after Rendering: it merges RC (chat context) with its own TRs (bot responses, tool results) by timestamp to assemble the final LLM API request. Driver owns tool call loops, reactive scheduling, and context compaction. Current implementation uses OpenAI Chat Completions compatible endpoints with SSE streaming.
 
 Key design goals: KV Cache friendly (append-only history, static system prompt, epoch-based compaction), group chat native (message batching, multi-user identity tracking, anti-injection via XML fencing), autonomous reply (bot decides whether to respond via Tool Call, not synchronous response).
 
@@ -22,17 +22,17 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 |-------|--------|-------|
 | Telegram integration | Done | Bot + userbot, dedup, thumbnail, fileId merge, credential redaction |
 | Adaptation | Done | Types, conversion, dual timestamps, rich text parsing, string IDs, phantom edit filtering |
-| DB / Persistence | Done | events, messages, turn_responses tables; 16 migrations |
+| DB / Persistence | Done | events, messages, turn_responses, compactions tables; 18 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
 | Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces |
-| Driver | Core done | xsai `chat()` + manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization, reactive orchestration (alien-signals). Planned: compaction, late-binding injection, multi-provider support |
+| Driver | Done | SSE streaming via xsai `chat()`, manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization, reactive orchestration (alien-signals), context compaction (LLM-based summarization with append-only history). Planned: late-binding injection, multi-provider support |
 
 ## Tech Stack
 
 - **Runtime**: Node.js (>=22), TypeScript, tsx (dev), tsdown (build).
 - **Telegram Bot API**: grammY — primary message handling, sending replies, commands.
 - **Telegram User API**: gramjs (`telegram` on npm) — MTProto client for history fetching, reply-to context resolution, seeing other bots' messages.
-- **LLM**: xsAI — `chat()` primitive for single API calls + manual tool execution loop. `generateText()` not used (its internal tool loop swallows per-step data).
+- **LLM**: xsAI — `chat()` with `stream: true` for SSE streaming + manual tool execution loop. `generateText()` not used (its internal tool loop swallows per-step data). SSE streaming helper in `src/driver/streaming.ts` parses chunks and logs deltas in real time.
 - **Database**: SQLite via better-sqlite3, Drizzle ORM.
 - **State management**: Immer — immutable IC updates in Projection reducers.
 - **Reactivity**: alien-signals — signal/computed/effect graph for Driver orchestration.
@@ -66,26 +66,29 @@ src/
 │   ├── index.ts            # render(), rcToXml(), XML serialization of ContentNode/attachments
 │   └── index.test.ts       # Rendering unit tests
 ├── driver/                 # Driver: RC + TRs → LLM API calls
-│   ├── types.ts            # TurnResponse, DriverConfig
-│   ├── context.ts          # Pure functions: context composition, token trimming, reasoning sanitization
+│   ├── types.ts            # TurnResponse, DriverConfig, CompactionSessionMeta, CompactionConfig
+│   ├── context.ts          # Pure functions: context composition, token trimming, reasoning sanitization, working window cursor
+│   ├── context.test.ts     # Context composition tests
 │   ├── merge.ts            # mergeContext(RC, TRs) → Message[] — timestamp-ordered interleave
 │   ├── merge.test.ts       # Merge logic tests
-│   ├── runner.ts           # LLM step loop: xsai chat() + manual tool execution
+│   ├── runner.ts           # LLM step loop: SSE streaming + manual tool execution
+│   ├── streaming.ts        # SSE streaming chat: parses OpenAI-compat SSE into ChatCompletion result with per-chunk logging
+│   ├── compaction.ts       # Context compaction: LLM-based conversation summarization
 │   ├── prompt.ts           # System prompt rendering (velin template)
 │   ├── system-prompt.test.ts # System prompt tests
 │   ├── tools.ts            # send_message tool definition (xsai Tool)
 │   └── index.ts            # createDriver() — reactive orchestration (alien-signals)
 ├── db/
 │   ├── client.ts           # Database init (better-sqlite3 + Drizzle), WAL mode
-│   ├── schema.ts           # Drizzle schema: users, messages, events, turnResponses tables
-│   ├── persistence.ts      # CRUD: persistEvent, persistMessage, persistTurnResponse, loadEvents, loadTurnResponses, etc.
+│   ├── schema.ts           # Drizzle schema: users, messages, events, turnResponses, compactions tables
+│   ├── persistence.ts      # CRUD: persistEvent, persistMessage, persistTurnResponse, persistCompaction, loadEvents, loadTurnResponses, loadCompaction, etc.
 │   └── index.ts            # Barrel exports
 └── telegram/
     ├── index.ts             # TelegramManager — unified facade, thumbnail hydration, dedup dispatch
     ├── bot.ts               # grammY Bot API client
     ├── userbot.ts           # gramjs MTProto client
     ├── event-bus.ts         # Simple typed pub/sub
-    ├── thumbnail.ts         # sharp-based thumbnail generation (512×512 webp)
+    ├── thumbnail.ts         # sharp-based thumbnail generation (pixel-budget ≤75k pixels ≈ 100 Claude tokens)
     ├── gramjs-logger.ts     # Patches gramjs internal logger to @guiiai/logg
     ├── session.ts           # Session file load/save
     ├── login.ts             # Interactive MTProto login script (pnpm login)
@@ -206,7 +209,7 @@ TRs are stored in a `turn_responses` DB table (raw provider format, not provider
 | requested_at | INTEGER NOT NULL | millisecond timestamp, merge ordering key |
 | provider | TEXT NOT NULL | e.g. 'openai-chat', 'anthropic-messages' |
 | data | TEXT (JSON) NOT NULL | raw provider response entries (assistant message + tool results) |
-| session_meta | TEXT (JSON) | reserved for Compaction — compressed summaries replace full historical replay |
+| session_meta | TEXT (JSON) | deprecated — compaction now uses dedicated `compactions` table |
 | input_tokens | INTEGER NOT NULL | for statistics / cost tracking |
 | output_tokens | INTEGER NOT NULL | for statistics / cost tracking |
 | reasoning_signature_compat | TEXT DEFAULT '' | provider compat group for reasoning signature validation |
@@ -224,7 +227,7 @@ User content in the rendered context is fenced with XML structure. Identity info
 - System prompt is static and positioned first.
 - Chat history is append-only within an epoch.
 - **Planned**: Dynamic content (memory recall, cross-session awareness) will be injected at the end of the last user message via late binding.
-- **Planned**: Compaction replaces old messages with a summary rather than sliding a window per-turn.
+- Compaction creates epoch boundaries — see [Context Compaction](#context-compaction) below.
 
 ### isSelfSent Pipeline
 
@@ -238,8 +241,50 @@ Feature flags for experimental optimizations. Controlled via `config.yaml` under
 |------|------------|--------|
 | `trimStaleNoToolCallTurnResponses` | `features.trimStaleNoToolCallTurnResponses` | Keep only latest 5 TRs without tool calls; older pure-text TRs are dropped before merge |
 | `trimSelfMessagesCoveredBySendToolCalls` | `features.trimSelfMessagesCoveredBySendToolCalls` | Filter RC segments with `isSelfSent=true` from context assembly (removes duplicate representation — bot messages exist in both RC via userbot and TRs via tool call results) |
+| `trimToolResults` | `features.trimToolResults` | Distance-based mechanical trimming of `TRToolResultEntry.content` in older TRs (keep last 2 untrimmed, trim results >512 chars in older ones). Keeps `TRAssistantEntry` (call structure + reasoning) intact |
 
 Feature flags must not affect correctness — only context efficiency. Add new flags to the `features` section in `ConfigSchema` in `src/config/config.ts` and this table.
+
+### Context Compaction
+
+Compaction proactively summarizes historical conversation context to prevent LLM context overflow. Implemented as an independent reactive effect (`alien-signals`) that runs in parallel with the main reply flow.
+
+**Dual water mark strategy** (all thresholds use estimated tokens via `CHARS_PER_TOKEN = 2` heuristic, not actual tokenizer counts):
+- **High water mark** (`compaction.maxContextEstTokens`): compaction triggers when estimated raw content (RC + TRs after cursor, excluding summary) exceeds this threshold.
+- **Low water mark** (`compaction.workingWindowEstTokens`): after compaction, only this many estimated tokens of raw content are retained in the working window. The rest is replaced by a structured summary prepended as the first user message.
+
+**Data flow**:
+1. `compactionMeta` signal initialized from DB on cold start (`loadCompaction`)
+2. `cursorMs` and `summary` derived as `computed()` from `compactionMeta`
+3. Cursor auto-apply effect watches `cursorMs` → calls `pipeline.setCompactCursor()` → pipeline re-renders RC excluding segments before cursor
+4. Reply effect reads `cursorMs()` and `summary()` from signals — no runtime DB queries
+5. Compaction effect: when `estimatedTokens > maxContextEstTokens`, calls `runCompaction()` → `persistCompaction()` → updates `compactionMeta` signal → cursor effect auto-applies
+
+**Compaction storage** (`compactions` table): append-only — each compaction inserts a new row. `loadCompaction` reads the latest by `ORDER BY id DESC LIMIT 1`. Rolling back = deleting the latest row. Never upsert.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER PK | autoincrement |
+| chat_id | TEXT NOT NULL | indexed |
+| old_cursor_ms | INTEGER NOT NULL | start of compacted window |
+| new_cursor_ms | INTEGER NOT NULL | end of compacted window (= new cursor position) |
+| summary | TEXT NOT NULL | structured plain-text summary |
+| input_tokens | INTEGER NOT NULL | LLM input tokens for this compaction call |
+| output_tokens | INTEGER NOT NULL | LLM output tokens for this compaction call |
+| created_at | INTEGER NOT NULL | millisecond timestamp |
+
+**Compaction is NOT a turn**: compaction has its own dedicated table, not stored in `turn_responses`. It produces a summary (pure text with structured sections), not a provider-format response.
+
+**Token estimation**: Context size is estimated using a `CHARS_PER_TOKEN = 2` heuristic (not an actual tokenizer). Summary size is excluded from the compaction trigger check to prevent the summary from growing until it fills the budget (which would degrade compaction into a sliding window). `findWorkingWindowCursor` counts both RC segments and TRs when determining the cursor position.
+
+**Config** (`compaction` section in `config.yaml`):
+- `enabled` (boolean, default `false`): whether to run compaction. When disabled, existing compaction data is still loaded (cursor + summary applied), but no new compaction runs.
+- `maxContextEstTokens` (number, default `200000`): high water mark — trigger compaction when estimated context exceeds this. Also used by `trimContext` to cap the LLM request size.
+- `workingWindowEstTokens` (number, default `8000`): low water mark — how many estimated tokens of raw content to retain after compaction.
+- `compactModel` (string, optional): override model for compaction LLM calls. Defaults to `llm.model`.
+- `dryRun` (boolean, default `false`): call LLM and log summary, but don't persist or apply.
+
+**Empty content sanitization**: Anthropic API rejects assistant messages with empty `content` (empty string, null, or pure-thinking entries with no content/tool_calls). `composeContext` sanitizes these: `content: '' | null | undefined` → `delete content`; empty-shell assistant messages (no content, no tool_calls) are filtered out entirely.
 
 ## Coding Conventions
 
@@ -292,3 +337,4 @@ When existing data doesn't match the current schema or design, fix it with a **D
 - Use Conventional Commits: `feat:`, `fix:`, `refactor:`, `test:`, `chore:`, etc.
 - Keep commits focused and scoped.
 - When a commit changes project structure, key patterns, or completes a milestone, update this file in the same commit.
+- **NEVER commit or push without explicit human instruction.** Always wait for the user to verify changes, run the application, and explicitly request a commit. Unauthorized commits are strictly forbidden.

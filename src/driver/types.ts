@@ -38,7 +38,6 @@ export interface DriverConfig {
   apiBaseUrl: string;
   apiKey: string;
   model: string;
-  maxContextTokens: number;
   chatIds: string[];
   reasoningSignatureCompat?: string;
   featureFlags: FeatureFlags;
@@ -47,7 +46,8 @@ export interface DriverConfig {
 
 export interface CompactionConfig {
   enabled: boolean;
-  workingWindowTokens: number;
+  maxContextEstTokens: number;
+  workingWindowEstTokens: number;
   compactModel?: string;
   dryRun?: boolean;
 }
@@ -56,6 +56,8 @@ export interface CompactionSessionMeta {
   oldCursorMs: number;
   newCursorMs: number;
   summary: string;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export type { FeatureFlags } from '../config/config';

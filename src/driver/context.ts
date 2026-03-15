@@ -138,20 +138,39 @@ export const latestExternalEventMs = (
   return latest;
 };
 
-// Walk backward from the newest RC segment, accumulate estimated tokens,
-// stop when the budget is reached. Returns the receivedAtMs of the cutoff segment.
+// Walk backward from the newest RC segment, accumulate estimated tokens
+// from both RC and TRs (interleaved by timestamp), stop when the budget
+// is reached. Returns the receivedAtMs of the cutoff point.
+// Previous version only counted RC tokens, causing TRs to push the total
+// over budget and immediately re-trigger compaction.
 export const findWorkingWindowCursor = (
-  rc: RenderedContext, budgetTokens: number,
+  rc: RenderedContext, trs: TurnResponse[], budgetTokens: number,
 ): number => {
-  let accum = 0;
-  for (let i = rc.length - 1; i >= 0; i--) {
-    const seg = rc[i]!;
-    const segTokens = seg.content.reduce((a, p) =>
+  // Build a unified timeline of token costs, sorted newest-first
+  type Entry = { timeMs: number; tokens: number };
+  const entries: Entry[] = [];
+
+  for (const seg of rc) {
+    const tokens = seg.content.reduce((a, p) =>
       a + (p.type === 'text' ? Math.ceil(p.text.length / CHARS_PER_TOKEN) : IMAGE_TOKENS), 0);
-    accum += segTokens;
-    if (accum > budgetTokens) return seg.receivedAtMs;
+    entries.push({ timeMs: seg.receivedAtMs, tokens });
   }
-  return rc[0]?.receivedAtMs ?? 0;
+
+  for (const tr of trs) {
+    const tokens = tr.data.reduce((a, entry) =>
+      a + Math.ceil(JSON.stringify(entry).length / CHARS_PER_TOKEN), 0);
+    entries.push({ timeMs: tr.requestedAtMs, tokens });
+  }
+
+  // Sort newest-first
+  entries.sort((a, b) => b.timeMs - a.timeMs);
+
+  let accum = 0;
+  for (const entry of entries) {
+    accum += entry.tokens;
+    if (accum > budgetTokens) return entry.timeMs;
+  }
+  return entries.at(-1)?.timeMs ?? 0;
 };
 
 // --- Feature flag: trimStaleNoToolCallTurnResponses ---
@@ -248,7 +267,7 @@ export const composeContext = (
 
   // Drop assistant messages that became completely empty after reasoning stripping
   // (pure-thinking entries with no content and no tool_calls).
-  const cleaned = allMessages.filter((msg) => {
+  const cleaned = allMessages.filter(msg => {
     const m = msg as Record<string, any>;
     return !(m.role === 'assistant' && !('content' in m) && !m.tool_calls);
   });

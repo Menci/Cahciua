@@ -111,7 +111,7 @@ export const createDriver = (config: DriverConfig, deps: {
             const sum = summary();
 
             const trs = loadTRs(chatId, cursor);
-            const ctx = composeContext(rc(), trs, config.maxContextTokens, config.reasoningSignatureCompat, config.featureFlags, sum);
+            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, config.reasoningSignatureCompat, config.featureFlags, sum);
             if (!ctx) return;
 
             log.withFields({
@@ -194,18 +194,22 @@ export const createDriver = (config: DriverConfig, deps: {
             // Estimate tokens WITHOUT summary — summary should not count toward
             // the working window budget, otherwise it grows until it fills the
             // budget and compaction degrades into a sliding window.
-            const ctx = composeContext(rc(), trs, config.maxContextTokens, config.reasoningSignatureCompat, config.featureFlags);
+            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, config.reasoningSignatureCompat, config.featureFlags);
             if (!ctx) return;
-            if (ctx.estimatedTokens <= config.compaction.workingWindowTokens) return;
+            // Trigger at maxContextEstTokens (high water mark), compact down to
+            // workingWindowEstTokens (low water mark). This gives a wide gap
+            // before the next compaction fires.
+            if (ctx.estimatedTokens <= config.compaction.maxContextEstTokens) return;
 
-            const newCursorMs = findWorkingWindowCursor(rc(), config.compaction.workingWindowTokens);
+            const newCursorMs = findWorkingWindowCursor(rc(), trs, config.compaction.workingWindowEstTokens);
 
             log.withFields({
               chatId,
               oldCursorMs: cursor ?? 0,
               newCursorMs,
               estimatedTokens: ctx.estimatedTokens,
-              budget: config.compaction.workingWindowTokens,
+              triggerAt: config.compaction.maxContextEstTokens,
+              retainBudget: config.compaction.workingWindowEstTokens,
               dryRun: !!config.compaction.dryRun,
             }).log('Triggering compaction');
 

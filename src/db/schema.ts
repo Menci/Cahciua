@@ -104,6 +104,8 @@ export const compactions = sqliteTable('compactions', {
   oldCursorMs: integer('old_cursor_ms').notNull(),
   newCursorMs: integer('new_cursor_ms').notNull(),
   summary: text('summary').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
   createdAt: integer('created_at').notNull(),
 }, table => [
   index('compactions_chat_id_idx').on(table.chatId),

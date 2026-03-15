@@ -102,6 +102,8 @@ export const runCompaction = async (params: CompactionParams): Promise<Compactio
   // Retry loop — extended thinking models may produce thinking-only responses
   // (content: null) when no tools are provided. Retry on empty content.
   let summary = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const result = await streamingChat({
       baseURL: params.apiBaseUrl,
@@ -116,6 +118,8 @@ export const runCompaction = async (params: CompactionParams): Promise<Compactio
     writeFileSync(`${DUMP_DIR}/${params.chatId}.compact-response.json`, JSON.stringify(result, null, 2));
 
     summary = result.choices[0]?.message?.content ?? '';
+    inputTokens = result.usage.prompt_tokens;
+    outputTokens = result.usage.completion_tokens;
     if (summary) break;
 
     params.log.withFields({ chatId: params.chatId, attempt, maxRetries: MAX_RETRIES })
@@ -126,5 +130,7 @@ export const runCompaction = async (params: CompactionParams): Promise<Compactio
     oldCursorMs: params.oldCursorMs,
     newCursorMs: params.newCursorMs,
     summary,
+    inputTokens,
+    outputTokens,
   };
 };
