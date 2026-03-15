@@ -1,4 +1,7 @@
 import type { FeatureFlags } from '../config/config';
+import type { RenderedContentPiece } from '../rendering/types';
+
+export type ProviderFormat = 'openai-chat' | 'responses';
 
 // OpenAI Chat Completions format entries stored in TR data.
 // No DB migration needed — these types describe the existing JSON shape.
@@ -27,8 +30,8 @@ export type TRDataEntry = TRAssistantEntry | TRToolResultEntry;
 
 export interface TurnResponse {
   requestedAtMs: number;
-  provider: string;
-  data: TRDataEntry[];
+  provider: ProviderFormat;
+  data: unknown[];
   inputTokens: number;
   outputTokens: number;
   reasoningSignatureCompat?: string;
@@ -38,9 +41,15 @@ export interface LlmEndpoint {
   apiBaseUrl: string;
   apiKey: string;
   model: string;
+  apiFormat?: ProviderFormat;
   reasoningSignatureCompat?: string;
   maxImagesAllowed?: number;
 }
+
+// ContextChunk — merge output intermediate representation
+export type ContextChunk =
+  | { type: 'rc'; time: number; step: -1; content: RenderedContentPiece[] }
+  | { type: 'tr'; provider: ProviderFormat; time: number; step: number; data: unknown };
 
 export interface DriverConfig {
   primaryModel: LlmEndpoint;

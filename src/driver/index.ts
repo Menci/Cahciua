@@ -4,16 +4,19 @@ import type { Message } from 'xsai';
 
 import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, latestExternalEventMs, trimImages } from './context';
+import { messagesToResponsesInput } from './convert';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
+import type { ResponseOutputFunctionCall } from './responses-types';
 import { createRunner } from './runner';
 import { streamingChat } from './streaming';
+import { streamingResponses } from './streaming-responses';
 import { createSendMessageTool } from './tools';
-import type { CompactionSessionMeta, DriverConfig, TurnResponse } from './types';
+import type { CompactionSessionMeta, DriverConfig, ProviderFormat, TurnResponse } from './types';
 import type { RenderedContext } from '../rendering/types';
 
 export { mergeContext } from './merge';
 export { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
-export type { DriverConfig, TurnResponse } from './types';
+export type { DriverConfig, ProviderFormat, TurnResponse } from './types';
 
 const MAX_STEPS = 5;
 
@@ -46,10 +49,13 @@ export const createDriver = (config: DriverConfig, deps: {
   const log = logger.withContext('driver');
   const chatIds = new Set(config.chatIds);
 
+  const primaryApiFormat: ProviderFormat = config.primaryModel.apiFormat ?? 'openai-chat';
+
   const runner = createRunner({
     apiBaseUrl: config.primaryModel.apiBaseUrl,
     apiKey: config.primaryModel.apiKey,
     model: config.primaryModel.model,
+    apiFormat: primaryApiFormat,
   });
 
   const loadTRs = (chatId: string, afterMs?: number): TurnResponse[] =>
@@ -187,35 +193,78 @@ export const createDriver = (config: DriverConfig, deps: {
                 // have receivedAtMs > probeRequestedAt and won't be swallowed.
                 const probeRequestedAt = Date.now();
 
-                const probeResult = await streamingChat({
-                  baseURL: config.probe.model.apiBaseUrl,
-                  apiKey: config.probe.model.apiKey,
-                  model: config.probe.model.model,
-                  messages: probeMessages,
-                  system,
-                  tools: [sendMessageTool],
-                  log,
-                  label: `probe:${chatId}`,
-                });
+                const probeApiFormat: ProviderFormat = config.probe.model.apiFormat ?? 'openai-chat';
+                let hasToolCalls = false;
+                let probeData: Record<string, any>[] = [];
+                let probeInputTokens = 0;
+                let probeOutputTokens = 0;
 
-                const probeMsg = probeResult.choices[0]?.message;
-                const toolCalls = (probeMsg?.tool_calls ?? []) as { function: { name: string; arguments: string } }[];
-                const hasToolCalls = toolCalls.length > 0;
+                if (probeApiFormat === 'responses') {
+                  const probeResult = await streamingResponses({
+                    baseURL: config.probe.model.apiBaseUrl,
+                    apiKey: config.probe.model.apiKey,
+                    model: config.probe.model.model,
+                    input: messagesToResponsesInput(probeMessages),
+                    instructions: system,
+                    tools: [sendMessageTool].map(t => ({
+                      type: 'function' as const,
+                      name: t.function.name,
+                      parameters: t.function.parameters as Record<string, unknown>,
+                      ...(t.function.description ? { description: t.function.description } : {}),
+                    })),
+                    log,
+                    label: `probe:${chatId}`,
+                  });
 
-                log.withFields({
-                  chatId,
-                  hasToolCalls,
-                  toolCalls: toolCalls.map(tc => ({ name: tc.function.name, args: tc.function.arguments })),
-                  content: probeMsg?.content ?? null,
-                  usage: probeResult.usage,
-                }).log('Probe result');
+                  const functionCalls = probeResult.output.filter(
+                    (item): item is ResponseOutputFunctionCall => item.type === 'function_call',
+                  );
+                  hasToolCalls = functionCalls.length > 0;
+                  probeData = probeResult.output as Record<string, any>[];
+                  probeInputTokens = probeResult.usage.input_tokens;
+                  probeOutputTokens = probeResult.usage.output_tokens;
+
+                  log.withFields({
+                    chatId,
+                    hasToolCalls,
+                    toolCalls: functionCalls.map(fc => ({ name: fc.name, args: fc.arguments })),
+                    outputItems: probeResult.output.length,
+                    usage: probeResult.usage,
+                  }).log('Probe result');
+                } else {
+                  const probeResult = await streamingChat({
+                    baseURL: config.probe.model.apiBaseUrl,
+                    apiKey: config.probe.model.apiKey,
+                    model: config.probe.model.model,
+                    messages: probeMessages,
+                    system,
+                    tools: [sendMessageTool],
+                    log,
+                    label: `probe:${chatId}`,
+                  });
+
+                  const probeMsg = probeResult.choices[0]?.message;
+                  const toolCalls = (probeMsg?.tool_calls ?? []) as { function: { name: string; arguments: string } }[];
+                  hasToolCalls = toolCalls.length > 0;
+                  probeData = probeMsg ? [probeMsg] : [];
+                  probeInputTokens = probeResult.usage.prompt_tokens;
+                  probeOutputTokens = probeResult.usage.completion_tokens;
+
+                  log.withFields({
+                    chatId,
+                    hasToolCalls,
+                    toolCalls: toolCalls.map(tc => ({ name: tc.function.name, args: tc.function.arguments })),
+                    content: probeMsg?.content ?? null,
+                    usage: probeResult.usage,
+                  }).log('Probe result');
+                }
 
                 deps.persistProbeResponse(chatId, {
                   requestedAtMs: probeRequestedAt,
-                  provider: 'openai-chat',
-                  data: probeMsg ? [probeMsg] : [],
-                  inputTokens: probeResult.usage.prompt_tokens,
-                  outputTokens: probeResult.usage.completion_tokens,
+                  provider: probeApiFormat,
+                  data: probeData,
+                  inputTokens: probeInputTokens,
+                  outputTokens: probeOutputTokens,
                   reasoningSignatureCompat: config.probe.model.reasoningSignatureCompat ?? '',
                   isActivated: hasToolCalls,
                 });
@@ -249,7 +298,7 @@ export const createDriver = (config: DriverConfig, deps: {
               onStepComplete: (stepData, usage, requestedAtMs) => {
                 deps.persistTurnResponse(chatId, {
                   requestedAtMs,
-                  provider: 'openai-chat',
+                  provider: primaryApiFormat,
                   data: stepData,
                   inputTokens: usage.prompt_tokens,
                   outputTokens: usage.completion_tokens,
@@ -324,6 +373,7 @@ export const createDriver = (config: DriverConfig, deps: {
               apiBaseUrl: compactEndpoint.apiBaseUrl,
               apiKey: compactEndpoint.apiKey,
               model: compactEndpoint.model,
+              apiFormat: compactEndpoint.apiFormat,
               chatId,
               rcWindow: rc().filter(s => s.receivedAtMs >= (cursor ?? 0) && s.receivedAtMs < newCursorMs),
               trsWindow: trs.filter(t => t.requestedAtMs >= (cursor ?? 0) && t.requestedAtMs < newCursorMs),

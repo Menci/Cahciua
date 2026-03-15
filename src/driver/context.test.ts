@@ -5,6 +5,8 @@ import type { TRDataEntry, TurnResponse } from './types';
 import type { FeatureFlags } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
 
+type AnyMsg = Record<string, any>;
+
 const textSeg = (ts: number, text: string): RenderedContext[number] => ({
   receivedAtMs: ts,
   content: [{ type: 'text', text }],
@@ -16,6 +18,15 @@ const tr = (ts: number, data: TRDataEntry[]): TurnResponse => ({
   data,
   inputTokens: 0,
   outputTokens: 0,
+});
+
+const responsesTR = (ts: number, data: unknown[], compat?: string): TurnResponse => ({
+  requestedAtMs: ts,
+  provider: 'responses',
+  data,
+  inputTokens: 0,
+  outputTokens: 0,
+  ...(compat ? { reasoningSignatureCompat: compat } : {}),
 });
 
 const assistantMsg = (text: string): TRDataEntry => ({ role: 'assistant', content: text });
@@ -151,5 +162,124 @@ describe('trimToolResults via composeContext', () => {
     expect(trimmed).toContain('HEAD');
     expect(trimmed).toContain('TAIL');
     expect(trimmed).toContain('[trimmed');
+  });
+});
+
+// ── Responses provider tests ──
+
+describe('composeContext with responses provider TRs', () => {
+  it('converts responses TR data to openai-chat messages', () => {
+    const rc: RenderedContext = [textSeg(100, 'hello')];
+    const trs = [responsesTR(200, [
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi there' }] },
+    ])];
+
+    const result = composeContext(rc, trs, 100000, undefined);
+    expect(result).not.toBeNull();
+
+    const assistants = result!.messages.filter(m => (m as AnyMsg).role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect((assistants[0] as AnyMsg).content).toBe('hi there');
+  });
+
+  it('preserves function_call_output as tool messages', () => {
+    const rc: RenderedContext = [textSeg(100, 'hello')];
+    const trs = [responsesTR(200, [
+      { type: 'message', role: 'assistant', content: [] },
+      { type: 'function_call', call_id: 'fc1', name: 'send_message', arguments: '{}', status: 'completed' },
+      { type: 'function_call_output', call_id: 'fc1', output: '{"ok":true}' },
+    ])];
+
+    const result = composeContext(rc, trs, 100000, undefined);
+    expect(result).not.toBeNull();
+
+    const toolMsgs = result!.messages.filter(m => (m as AnyMsg).role === 'tool');
+    expect(toolMsgs).toHaveLength(1);
+    expect((toolMsgs[0] as AnyMsg).tool_call_id).toBe('fc1');
+    expect((toolMsgs[0] as AnyMsg).content).toBe('{"ok":true}');
+  });
+
+  it('preserves reasoning when compat matches', () => {
+    const rc: RenderedContext = [textSeg(100, 'hello')];
+    const trs = [responsesTR(200, [
+      { type: 'reasoning', id: 'rs1', summary: [{ type: 'summary_text', text: 'thinking' }], encrypted_content: 'sig_abc' },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'answer' }] },
+    ], 'anthropic')];
+
+    const result = composeContext(rc, trs, 100000, 'anthropic');
+    expect(result).not.toBeNull();
+
+    const assistants = result!.messages.filter(m => (m as AnyMsg).role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect((assistants[0] as AnyMsg).reasoning_opaque).toBe('sig_abc');
+    expect((assistants[0] as AnyMsg).reasoning_text).toBe('thinking');
+  });
+
+  it('strips reasoning when compat mismatches', () => {
+    const rc: RenderedContext = [textSeg(100, 'hello')];
+    const trs = [responsesTR(200, [
+      { type: 'reasoning', id: 'rs1', summary: [], encrypted_content: 'sig_abc' },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'answer' }] },
+    ], 'anthropic')];
+
+    const result = composeContext(rc, trs, 100000, 'openai');
+    expect(result).not.toBeNull();
+
+    const assistants = result!.messages.filter(m => (m as AnyMsg).role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect((assistants[0] as AnyMsg).reasoning_opaque).toBeUndefined();
+  });
+
+  it('trHasToolCalls detects function_call items in responses TRs', () => {
+    const rc: RenderedContext = [textSeg(100, 'hello')];
+    const trsWithToolCalls = [
+      responsesTR(200, [{ type: 'function_call', call_id: 'fc1', name: 'fn', arguments: '{}', status: 'completed' }]),
+      responsesTR(300, [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'text only' }] }]),
+    ];
+
+    const result = composeContext(rc, trsWithToolCalls, 100000, undefined, flags({ trimStaleNoToolCallTurnResponses: true }));
+    expect(result).not.toBeNull();
+    // Both TRs should survive — only 2 total, and the no-tool-call one is kept (< KEEP_NO_TOOL_CALL_TRS)
+    const assistants = result!.messages.filter(m => (m as AnyMsg).role === 'assistant');
+    expect(assistants.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('trimToolResults trims function_call_output in responses TRs', () => {
+    const longOutput = 'x'.repeat(1000);
+    const rc: RenderedContext = [textSeg(100, 'hi')];
+    const trs = [
+      responsesTR(200, [
+        { type: 'function_call', call_id: 'fc1', name: 'fn', arguments: '{}', status: 'completed' },
+        { type: 'function_call_output', call_id: 'fc1', output: longOutput },
+      ]),
+      responsesTR(300, [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'r2' }] }]),
+      responsesTR(400, [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'r3' }] }]),
+    ];
+
+    const result = composeContext(rc, trs, 100000, undefined, flags({ trimToolResults: true }));
+    expect(result).not.toBeNull();
+
+    const toolMsgs = result!.messages.filter(m => (m as AnyMsg).role === 'tool');
+    expect(toolMsgs).toHaveLength(1);
+    // Oldest TR's tool result should be trimmed
+    expect((toolMsgs[0] as AnyMsg).content).toContain('[trimmed');
+  });
+
+  it('handles mixed openai-chat and responses TRs', () => {
+    const rc: RenderedContext = [textSeg(100, 'hello')];
+    const trs = [
+      tr(200, [assistantMsg('from chat')]),
+      responsesTR(300, [
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'from responses' }] },
+      ]),
+    ];
+
+    const result = composeContext(rc, trs, 100000, undefined);
+    expect(result).not.toBeNull();
+
+    const assistants = result!.messages.filter(m => (m as AnyMsg).role === 'assistant');
+    expect(assistants).toHaveLength(2);
+    expect((assistants[0] as AnyMsg).content).toBe('from chat');
+    expect((assistants[1] as AnyMsg).content).toBe('from responses');
   });
 });

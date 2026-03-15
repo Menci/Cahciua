@@ -1,9 +1,10 @@
-import type { Message } from 'xsai';
+import type { Message, UserMessage } from 'xsai';
 
+import { responsesOutputToMessages } from './convert';
 import { mergeContext } from './merge';
-import type { TRAssistantEntry, TRDataEntry, TurnResponse } from './types';
+import type { ContextChunk, TRAssistantEntry, TRDataEntry, TurnResponse } from './types';
 import type { FeatureFlags } from '../config/config';
-import type { RenderedContext } from '../rendering/types';
+import type { RenderedContext, RenderedContentPiece } from '../rendering/types';
 
 type AnyMsg = Record<string, any>;
 const asMsg = (m: Message): AnyMsg => m as unknown as AnyMsg;
@@ -92,23 +93,35 @@ const trimContext = (messages: Message[], maxTokens: number): { messages: Messag
 // In Anthropic native content-array format:
 //   - thinking block with `thinking` field    + `signature` field
 //
+// In Responses API format, reasoning appears as output items with type 'reasoning',
+// carrying id, summary, and encrypted_content fields.
+//
 // Signatures are only valid within the same provider family (e.g. "anthropic").
 // Each TR records which compat group produced it. On replay:
 //   - Same compat group  -> keep all reasoning (signature valid, model can resume)
 //   - Different / empty  -> strip all reasoning (signature invalid, would error)
 //
 // The pair is always kept or stripped together — never one without the other.
-const sanitizeReasoningForTR = (tr: TurnResponse, currentCompat: string | undefined): TRDataEntry[] =>
-  tr.data.map(entry => {
-    if (entry.role !== 'assistant') return entry;
+const sanitizeReasoningForTR = (tr: TurnResponse, currentCompat: string | undefined): unknown[] => {
+  const compatMatch = !!currentCompat && !!tr.reasoningSignatureCompat && tr.reasoningSignatureCompat === currentCompat;
 
-    const compatMatch = !!currentCompat && !!tr.reasoningSignatureCompat && tr.reasoningSignatureCompat === currentCompat;
+  if (tr.provider === 'responses') {
+    if (compatMatch) return tr.data;
+    // Strip reasoning items from responses data
+    return (tr.data as AnyMsg[]).filter(item => item.type !== 'reasoning');
+  }
+
+  // openai-chat provider
+  return tr.data.map(entry => {
+    const e = entry as TRDataEntry;
+    if (e.role !== 'assistant') return entry;
+
     if (compatMatch) return entry;
 
     // Compat mismatch — strip all reasoning fields, keeping only role/content/tool_calls
     const rest: TRAssistantEntry = { role: 'assistant' };
-    if (entry.content !== undefined) rest.content = entry.content;
-    if (entry.tool_calls) rest.tool_calls = entry.tool_calls;
+    if (e.content !== undefined) rest.content = e.content;
+    if (e.tool_calls) rest.tool_calls = e.tool_calls;
 
     // Strip thinking blocks from content array
     if (Array.isArray(rest.content)) {
@@ -122,6 +135,7 @@ const sanitizeReasoningForTR = (tr: TurnResponse, currentCompat: string | undefi
 
     return rest;
   });
+};
 
 // Returns the receivedAtMs of the latest external message after afterMs,
 // or null if there are none. Replaces hasNewExternalMessages — one function
@@ -157,7 +171,7 @@ export const findWorkingWindowCursor = (
   }
 
   for (const tr of trs) {
-    const tokens = tr.data.reduce((a, entry) =>
+    const tokens = (tr.data as unknown[]).reduce<number>((a, entry) =>
       a + Math.ceil(JSON.stringify(entry).length / CHARS_PER_TOKEN), 0);
     entries.push({ timeMs: tr.requestedAtMs, tokens });
   }
@@ -178,9 +192,16 @@ export const findWorkingWindowCursor = (
 // Keep only the latest N, trim older ones before merge.
 const KEEP_NO_TOOL_CALL_TRS = 5;
 
-const trHasToolCalls = (tr: TurnResponse): boolean =>
-  tr.data.some(entry =>
-    entry.role === 'assistant' && Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0);
+const trHasToolCalls = (tr: TurnResponse): boolean => {
+  if (tr.provider === 'responses') {
+    return (tr.data as AnyMsg[]).some(item => item.type === 'function_call');
+  }
+  // openai-chat
+  return tr.data.some(entry => {
+    const e = entry as TRDataEntry;
+    return e.role === 'assistant' && Array.isArray(e.tool_calls) && e.tool_calls.length > 0;
+  });
+};
 
 const trimStaleNoToolCallTRs = (trs: TurnResponse[]): TurnResponse[] => {
   // Partition: indices of TRs without tool calls
@@ -197,8 +218,8 @@ const trimStaleNoToolCallTRs = (trs: TurnResponse[]): TurnResponse[] => {
 };
 
 // --- Feature flag: trimToolResults ---
-// Tool result trimming — distance-based mechanical trimming of TRToolResultEntry.content.
-// Keeps TRAssistantEntry (call structure + reasoning) intact.
+// Tool result trimming — distance-based mechanical trimming of tool result content.
+// Keeps assistant entries (call structure + reasoning) intact.
 // Unlike OpenClaw's context pruning, no head protection needed — Cahciua injects
 // identity via system prompt, not via bootstrap tool calls before first user message.
 const TOOL_RESULT_TRIM_THRESHOLD = 512; // chars — results shorter than this are kept
@@ -209,7 +230,21 @@ const trimToolResults = (trs: TurnResponse[]): TurnResponse[] => {
 
   return trs.map((tr, i) => {
     if (i >= trs.length - TOOL_RESULT_KEEP_RECENT) return tr;
-    const data = tr.data.map((entry): TRDataEntry => {
+
+    if (tr.provider === 'responses') {
+      // Trim function_call_output items
+      const data = (tr.data as AnyMsg[]).map((item): unknown => {
+        if (item.type !== 'function_call_output') return item;
+        if ((item.output as string).length <= TOOL_RESULT_TRIM_THRESHOLD) return item;
+        const head = (item.output as string).slice(0, 200);
+        const tail = (item.output as string).slice(-200);
+        return { ...item, output: `${head}\n... [trimmed ${(item.output as string).length} chars] ...\n${tail}` };
+      });
+      return { ...tr, data };
+    }
+
+    // openai-chat
+    const data = (tr.data as TRDataEntry[]).map((entry): TRDataEntry => {
       if (entry.role !== 'tool') return entry;
       if (entry.content.length <= TOOL_RESULT_TRIM_THRESHOLD) return entry;
       const head = entry.content.slice(0, 200);
@@ -255,6 +290,56 @@ export const trimImages = (messages: Message[], maxImages: number): void => {
   }
 };
 
+// Convert ContextChunk[] to openai-chat Message[].
+// RC chunks → user messages. TR chunks → converted to openai-chat messages.
+const contentPieceToMessagePart = (piece: RenderedContentPiece) =>
+  piece.type === 'text'
+    ? { type: 'text' as const, text: piece.text }
+    : { type: 'image_url' as const, image_url: { url: piece.url, detail: 'low' as const } };
+
+const chunksToMessages = (chunks: ContextChunk[]): Message[] => {
+  const messages: Message[] = [];
+  let pendingParts: ReturnType<typeof contentPieceToMessagePart>[] = [];
+
+  const flushRC = () => {
+    if (pendingParts.length > 0) {
+      messages.push({ role: 'user', content: pendingParts } as UserMessage);
+      pendingParts = [];
+    }
+  };
+
+  // Collect consecutive TR chunks from same provider to batch-convert responses data
+  let responsesBuffer: unknown[] = [];
+
+  const flushResponsesBuffer = () => {
+    if (responsesBuffer.length > 0) {
+      const converted = responsesOutputToMessages(responsesBuffer as any[]);
+      messages.push(...converted);
+      responsesBuffer = [];
+    }
+  };
+
+  for (const chunk of chunks) {
+    if (chunk.type === 'rc') {
+      flushResponsesBuffer();
+      pendingParts.push(...chunk.content.map(contentPieceToMessagePart));
+    } else {
+      flushRC();
+      if (chunk.provider === 'responses') {
+        responsesBuffer.push(chunk.data);
+      } else {
+        flushResponsesBuffer();
+        messages.push(chunk.data as Message);
+      }
+    }
+  }
+
+  flushRC();
+  flushResponsesBuffer();
+
+  return messages;
+};
+
 export const composeContext = (
   rc: RenderedContext,
   trs: TurnResponse[],
@@ -278,7 +363,8 @@ export const composeContext = (
   if (featureFlags?.trimToolResults)
     sanitizedTRs = trimToolResults(sanitizedTRs);
 
-  const allMessages = mergeContext(effectiveRC, sanitizedTRs);
+  const chunks = mergeContext(effectiveRC, sanitizedTRs);
+  const allMessages = chunksToMessages(chunks);
   if (allMessages.length === 0 && !compactSummary) return null;
 
   if (compactSummary)

@@ -1,7 +1,6 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentNode } from '../adaptation/types';
-import type { TRDataEntry } from '../driver/types';
 import type { Attachment, ForwardInfo, MessageEntity } from '../telegram/message/types';
 
 type AnyMsg = Record<string, any>;
@@ -91,7 +90,7 @@ export const turnResponses = sqliteTable('turn_responses', {
   chatId: text('chat_id').notNull(),
   requestedAt: integer('requested_at').notNull(),
   provider: text('provider').notNull(),
-  data: text('data', { mode: 'json' }).notNull().$type<TRDataEntry[]>(),
+  data: text('data', { mode: 'json' }).notNull().$type<unknown[]>(),
   sessionMeta: text('session_meta', { mode: 'json' }),
   inputTokens: integer('input_tokens').notNull(),
   outputTokens: integer('output_tokens').notNull(),

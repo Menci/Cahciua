@@ -4,6 +4,7 @@ models:
     apiKey: ""
     model: "claude-opus-4-6"
     reasoningSignatureCompat: "anthropic"
+    # apiFormat: "responses"        # optional: 'openai-chat' (default) or 'responses'
     # maxImagesAllowed: 100     # optional: drop oldest images when context exceeds this limit
   probe:
     apiBaseUrl: ""

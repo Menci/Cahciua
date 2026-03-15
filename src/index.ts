@@ -63,7 +63,7 @@ const main = async () => {
       const rows = loadTurnResponses(db, chatId, afterMs);
       return rows.map(r => ({
         requestedAtMs: r.requestedAt,
-        provider: r.provider,
+        provider: r.provider as 'openai-chat' | 'responses',
         data: r.data,
         inputTokens: r.inputTokens,
         outputTokens: r.outputTokens,
