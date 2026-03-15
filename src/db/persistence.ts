@@ -326,3 +326,13 @@ export const persistProbeResponse = (db: DB, chatId: string, probe: {
     createdAt: Date.now(),
   }).run();
 };
+
+export const loadLastProbeTime = (db: DB, chatId: string): number => {
+  const row = db.select({ requestedAt: probeResponses.requestedAt })
+    .from(probeResponses)
+    .where(eq(probeResponses.chatId, chatId))
+    .orderBy(desc(probeResponses.id))
+    .limit(1)
+    .get();
+  return row?.requestedAt ?? 0;
+};

@@ -1,7 +1,7 @@
 import { adaptDelete, adaptEdit, adaptMessage, contentToPlainText } from './adaptation';
 import { loadConfig } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
-import { createDatabase, loadCompaction, loadEvents, loadKnownChatIds, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { RenderParams } from './rendering';
@@ -116,6 +116,7 @@ const main = async () => {
       return sent;
     },
     loadCompaction: chatId => loadCompaction(db, chatId),
+    loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
     persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
     setCompactCursor: (chatId, cursorMs) => pipeline.setCompactCursor(chatId, cursorMs),
     logger,

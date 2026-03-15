@@ -30,6 +30,7 @@ export const createDriver = (config: DriverConfig, deps: {
   }) => void;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number) => Promise<{ messageId: number; date: number }>;
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
+  loadLastProbeTime: (chatId: string) => number;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
   setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
   logger: Logger;
@@ -47,10 +48,11 @@ export const createDriver = (config: DriverConfig, deps: {
   const loadTRs = (chatId: string, afterMs?: number): TurnResponse[] =>
     deps.loadTurnResponses(chatId, afterMs);
 
-  const getLastTrTime = (chatId: string): number => {
+  const getLastProcessedTime = (chatId: string): number => {
     const trs = deps.loadTurnResponses(chatId);
-    if (trs.length === 0) return 0;
-    return trs[trs.length - 1]!.requestedAtMs;
+    const lastTr = trs.length > 0 ? trs[trs.length - 1]!.requestedAtMs : 0;
+    const lastProbe = deps.loadLastProbeTime(chatId);
+    return Math.max(lastTr, lastProbe);
   };
 
   const chatScopes = new Map<string, {
@@ -63,7 +65,7 @@ export const createDriver = (config: DriverConfig, deps: {
     if (existing) return existing;
 
     const rc = signal<RenderedContext>([]);
-    const lastTrTimeMs = signal(getLastTrTime(chatId));
+    const lastProcessedMs = signal(getLastProcessedTime(chatId));
     const running = signal(false);
     const failedRc = signal<RenderedContext | null>(null);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -98,7 +100,7 @@ export const createDriver = (config: DriverConfig, deps: {
       const rcVal = rc();
       if (rcVal.length === 0) return false;
       if (rcVal === failedRc()) return false;
-      return latestExternalEventMs(rcVal, lastTrTimeMs()) != null;
+      return latestExternalEventMs(rcVal, lastProcessedMs()) != null;
     });
 
     const disposeReplyEffect = effect(() => {
@@ -152,10 +154,10 @@ export const createDriver = (config: DriverConfig, deps: {
               const lastMentionedAtMs = rc().reduce((max, seg) =>
                 (seg.mentionsMe || seg.repliesToMe) ? Math.max(max, seg.receivedAtMs) : max, 0);
 
-              const needsProbe = lastMentionedAtMs <= lastTrTimeMs();
+              const needsProbe = lastMentionedAtMs <= lastProcessedMs();
 
               if (needsProbe) {
-                log.withFields({ chatId, lastMentionedAtMs, lastTrTimeMs: lastTrTimeMs() }).log('Running probe');
+                log.withFields({ chatId, lastMentionedAtMs, lastProcessedMs: lastProcessedMs() }).log('Running probe');
 
                 // Probe may have stricter image limits — trim a shallow copy
                 const probeMessages = ctx.messages.map(m => {
@@ -164,6 +166,10 @@ export const createDriver = (config: DriverConfig, deps: {
                 });
                 if (config.probe.maxImagesAllowed != null)
                   trimImages(probeMessages, config.probe.maxImagesAllowed);
+
+                // Capture before probe call — events arriving during the call
+                // have receivedAtMs > probeRequestedAt and won't be swallowed.
+                const probeRequestedAt = Date.now();
 
                 const probeResult = await streamingChat({
                   baseURL: config.probe.apiBaseUrl,
@@ -177,10 +183,19 @@ export const createDriver = (config: DriverConfig, deps: {
                 });
 
                 const probeMsg = probeResult.choices[0]?.message;
-                const hasToolCalls = !!(probeMsg?.tool_calls as unknown[] | undefined)?.length;
+                const toolCalls = (probeMsg?.tool_calls ?? []) as { function: { name: string; arguments: string } }[];
+                const hasToolCalls = toolCalls.length > 0;
+
+                log.withFields({
+                  chatId,
+                  hasToolCalls,
+                  toolCalls: toolCalls.map(tc => ({ name: tc.function.name, args: tc.function.arguments })),
+                  content: probeMsg?.content ?? null,
+                  usage: probeResult.usage,
+                }).log('Probe result');
 
                 deps.persistProbeResponse(chatId, {
-                  requestedAtMs: Date.now(),
+                  requestedAtMs: probeRequestedAt,
                   provider: 'openai-chat',
                   data: probeMsg ? [probeMsg] : [],
                   inputTokens: probeResult.usage.prompt_tokens,
@@ -188,6 +203,9 @@ export const createDriver = (config: DriverConfig, deps: {
                   reasoningSignatureCompat: config.probe.reasoningSignatureCompat ?? '',
                   isActivated: hasToolCalls,
                 });
+
+                // Advance processed marker — probe has evaluated these events.
+                lastProcessedMs(probeRequestedAt);
 
                 if (!hasToolCalls) {
                   log.withFields({ chatId }).log('Probe: model chose silence');
@@ -216,11 +234,11 @@ export const createDriver = (config: DriverConfig, deps: {
                   outputTokens: usage.completion_tokens,
                   reasoningSignatureCompat: config.reasoningSignatureCompat ?? '',
                 });
-                lastTrTimeMs(requestedAtMs);
+                lastProcessedMs(requestedAtMs);
               },
               checkInterrupt: () => {
                 if (rc() === rcAtStart) return false;
-                return latestExternalEventMs(rc(), lastTrTimeMs()) != null;
+                return latestExternalEventMs(rc(), lastProcessedMs()) != null;
               },
               log,
             });
