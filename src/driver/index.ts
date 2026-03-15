@@ -283,7 +283,7 @@ export const createDriver = (config: DriverConfig, deps: {
             // Trigger at maxContextEstTokens (high water mark), compact down to
             // workingWindowEstTokens (low water mark). This gives a wide gap
             // before the next compaction fires.
-            if (ctx.estimatedTokens <= config.compaction.maxContextEstTokens) return;
+            if (ctx.rawEstimatedTokens <= config.compaction.maxContextEstTokens) return;
 
             const newCursorMs = findWorkingWindowCursor(rc(), trs, config.compaction.workingWindowEstTokens);
 
@@ -291,7 +291,7 @@ export const createDriver = (config: DriverConfig, deps: {
               chatId,
               oldCursorMs: cursor ?? 0,
               newCursorMs,
-              estimatedTokens: ctx.estimatedTokens,
+              rawEstimatedTokens: ctx.rawEstimatedTokens,
               triggerAt: config.compaction.maxContextEstTokens,
               retainBudget: config.compaction.workingWindowEstTokens,
               dryRun: !!config.compaction.dryRun,
