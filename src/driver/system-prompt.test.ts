@@ -4,8 +4,8 @@ import { resolve } from 'node:path';
 import { renderMarkdownString } from '@velin-dev/core';
 import { describe, expect, it } from 'vitest';
 
-const template = readFileSync(resolve(__dirname, '../../docs/system-prompt.velin.md'), 'utf-8');
-const lateBindingTemplate = readFileSync(resolve(__dirname, '../../docs/late-binding-prompt.velin.md'), 'utf-8');
+const template = readFileSync(resolve(__dirname, '../../prompts/primary-system.velin.md'), 'utf-8');
+const lateBindingTemplate = readFileSync(resolve(__dirname, '../../prompts/primary-late-binding.velin.md'), 'utf-8');
 // basePath must be a file (not directory) so createRequire resolves pnpm's node_modules
 const basePath = resolve(__dirname, '../../package.json');
 

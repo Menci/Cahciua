@@ -7,8 +7,10 @@ import { renderMarkdownString } from '@velin-dev/core';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const basePath = resolve(__dirname, '../../package.json');
 
-const systemPromptTemplate = readFileSync(resolve(__dirname, '../../docs/system-prompt.velin.md'), 'utf-8');
-const lateBindingTemplate = readFileSync(resolve(__dirname, '../../docs/late-binding-prompt.velin.md'), 'utf-8');
+const systemPromptTemplate = readFileSync(resolve(__dirname, '../../prompts/primary-system.velin.md'), 'utf-8');
+const lateBindingTemplate = readFileSync(resolve(__dirname, '../../prompts/primary-late-binding.velin.md'), 'utf-8');
+const compactionSystemTemplate = readFileSync(resolve(__dirname, '../../prompts/compaction-system.velin.md'), 'utf-8');
+const compactionUserTemplate = readFileSync(resolve(__dirname, '../../prompts/compaction-late-binding.velin.md'), 'utf-8');
 
 export const renderSystemPrompt = async (params: {
   language?: string;
@@ -28,5 +30,15 @@ export const renderLateBindingPrompt = async (params: {
   isReplied?: boolean;
 }) => {
   const { rendered } = await renderMarkdownString(lateBindingTemplate, params, basePath);
+  return rendered;
+};
+
+export const renderCompactionSystemPrompt = async () => {
+  const { rendered } = await renderMarkdownString(compactionSystemTemplate, {}, basePath);
+  return rendered;
+};
+
+export const renderCompactionUserInstruction = async () => {
+  const { rendered } = await renderMarkdownString(compactionUserTemplate, {}, basePath);
   return rendered;
 };

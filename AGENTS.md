@@ -37,6 +37,7 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 - **State management**: Immer — immutable IC updates in Projection reducers.
 - **Reactivity**: alien-signals — signal/computed/effect graph for Driver orchestration.
 - **Validation**: Valibot — schema validation for config, canonical events.
+- **Prompts**: @velin-dev/core — all LLM prompts are velin templates (`.velin.md`) in the `prompts/` directory, rendered via `renderMarkdownString`. Never hardcode prompt strings in source code.
 - **Logging**: @guiiai/logg — structured logger with pretty/JSON output.
 - **Testing**: Vitest.
 - **Linting**: ESLint with `@typescript-eslint`, `@stylistic/eslint-plugin`, `eslint-plugin-import`.
@@ -74,7 +75,7 @@ src/
 │   ├── runner.ts           # LLM step loop: SSE streaming + manual tool execution
 │   ├── streaming.ts        # SSE streaming chat: parses OpenAI-compat SSE into ChatCompletion result with per-chunk logging
 │   ├── compaction.ts       # Context compaction: LLM-based conversation summarization
-│   ├── prompt.ts           # System prompt rendering (velin template)
+│   ├── prompt.ts           # Prompt rendering — loads all velin templates from prompts/
 │   ├── system-prompt.test.ts # System prompt tests
 │   ├── tools.ts            # send_message tool definition (xsai Tool)
 │   └── index.ts            # createDriver() — reactive orchestration (alien-signals)
@@ -100,8 +101,14 @@ src/
         └── index.ts         # Barrel exports
 ```
 
-Top-level docs:
-- `docs/dcp-design.md` — architecture rationale and Driver/TR design
+Top-level directories:
+- `prompts/` — all LLM prompt templates (velin `.velin.md` files), rendered at runtime via `@velin-dev/core`
+  - `primary-system.velin.md` — main system prompt for chat LLM calls
+  - `primary-late-binding.velin.md` — context-aware injection (probe/mention/reply state)
+  - `compaction-system.velin.md` — compaction LLM system prompt
+  - `compaction-late-binding.velin.md` — compaction LLM user instruction (output format)
+- `docs/` — architecture and design documents (not prompts)
+  - `dcp-design.md` — architecture rationale and Driver/TR design
 - `dcp-updates.md` — implementation deltas from the original RFC
 - `gpt-review.md` — repository-wide code/doc review notes and consistency audit
 
@@ -281,7 +288,7 @@ Compaction proactively summarizes historical conversation context to prevent LLM
 - `enabled` (boolean, default `false`): whether to run compaction. When disabled, existing compaction data is still loaded (cursor + summary applied), but no new compaction runs.
 - `maxContextEstTokens` (number, default `200000`): high water mark — trigger compaction when estimated context exceeds this. Also used by `trimContext` to cap the LLM request size.
 - `workingWindowEstTokens` (number, default `8000`): low water mark — how many estimated tokens of raw content to retain after compaction.
-- `compactModel` (string, optional): override model for compaction LLM calls. Defaults to `llm.model`.
+- `model` (string, optional): override model for compaction LLM calls (references a key in the `models` registry). Defaults to `llm.model`.
 - `dryRun` (boolean, default `false`): call LLM and log summary, but don't persist or apply.
 
 **Empty content sanitization**: Anthropic API rejects assistant messages with empty `content` (empty string, null, or pure-thinking entries with no content/tool_calls). `composeContext` sanitizes these: `content: '' | null | undefined` → `delete content`; empty-shell assistant messages (no content, no tool_calls) are filtered out entirely.
@@ -324,8 +331,7 @@ In group chats, most messages don't require a bot response. To avoid wasting tok
 
 **Config** (`probe` section in `config.yaml`):
 - `enabled` (boolean, default `false`): whether to use probe gate
-- `apiBaseUrl`, `apiKey`, `model`: probe model endpoint (independent from `llm` section)
-- `reasoningSignatureCompat` (string, optional): provider compat group for reasoning sanitization
+- `model`: probe model (references a key in the `models` registry)
 
 ## Coding Conventions
 
