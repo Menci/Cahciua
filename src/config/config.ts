@@ -23,9 +23,16 @@ const ConfigSchema = v.object({
   database: v.optional(v.object({
     path: v.optional(v.string(), './data/cahciua.db'),
   }), {}),
+  compaction: v.optional(v.object({
+    enabled: v.optional(v.boolean(), false),
+    workingWindowTokens: v.optional(v.number(), 8000),
+    compactModel: v.optional(v.string()),
+    dryRun: v.optional(v.boolean(), false),
+  }), {}),
   features: v.optional(v.object({
     trimStaleNoToolCallTurnResponses: v.optional(v.boolean(), false),
     trimSelfMessagesCoveredBySendToolCalls: v.optional(v.boolean(), false),
+    trimToolResults: v.optional(v.boolean(), false),
   }), {}),
 });
 

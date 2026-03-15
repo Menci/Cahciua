@@ -12,9 +12,15 @@ const asMsg = (m: Message): AnyMsg => m as unknown as AnyMsg;
 // For images, use actual base64 URL length (dominates HTTP payload).
 const CHARS_PER_TOKEN = 2;
 
+// Image token estimation: thumbnails are generated at ≤75,000 pixels
+// (see telegram/thumbnail.ts), which maps to ~100 tokens under Claude's
+// formula (ceil(w*h/750)). We don't have image dimensions at estimation
+// time, so use a fixed constant matching our thumbnail budget.
+const IMAGE_TOKENS = 100;
+
 const estimatePartTokens = (part: Record<string, any>): number => {
-  if (part.type === 'image_url' && part.image_url?.url)
-    return Math.ceil((part.image_url.url as string).length / CHARS_PER_TOKEN);
+  if (part.type === 'image_url' || (part.type === 'image' && part.source))
+    return IMAGE_TOKENS;
   return Math.ceil(((part.text as string)?.length ?? 0) / CHARS_PER_TOKEN);
 };
 
@@ -108,8 +114,11 @@ const sanitizeReasoningForTR = (tr: TurnResponse, currentCompat: string | undefi
     if (Array.isArray(rest.content)) {
       const filtered = rest.content.filter(part =>
         typeof part !== 'object' || part === null || !('type' in part) || part.type !== 'thinking');
-      rest.content = filtered.length > 0 ? filtered : '';
+      rest.content = filtered.length > 0 ? filtered : undefined;
     }
+
+    // Anthropic rejects empty-string text content blocks — normalize to undefined
+    if (rest.content === '' || rest.content === null) rest.content = undefined;
 
     return rest;
   });
@@ -127,6 +136,22 @@ export const latestExternalEventMs = (
       latest = seg.receivedAtMs > (latest ?? 0) ? seg.receivedAtMs : latest;
   }
   return latest;
+};
+
+// Walk backward from the newest RC segment, accumulate estimated tokens,
+// stop when the budget is reached. Returns the receivedAtMs of the cutoff segment.
+export const findWorkingWindowCursor = (
+  rc: RenderedContext, budgetTokens: number,
+): number => {
+  let accum = 0;
+  for (let i = rc.length - 1; i >= 0; i--) {
+    const seg = rc[i]!;
+    const segTokens = seg.content.reduce((a, p) =>
+      a + (p.type === 'text' ? Math.ceil(p.text.length / CHARS_PER_TOKEN) : IMAGE_TOKENS), 0);
+    accum += segTokens;
+    if (accum > budgetTokens) return seg.receivedAtMs;
+  }
+  return rc[0]?.receivedAtMs ?? 0;
 };
 
 // --- Feature flag: trimStaleNoToolCallTurnResponses ---
@@ -152,6 +177,30 @@ const trimStaleNoToolCallTRs = (trs: TurnResponse[]): TurnResponse[] => {
   return trs.filter((_, i) => !dropSet.has(i));
 };
 
+// --- Feature flag: trimToolResults ---
+// Tool result trimming — distance-based mechanical trimming of TRToolResultEntry.content.
+// Keeps TRAssistantEntry (call structure + reasoning) intact.
+// Unlike OpenClaw's context pruning, no head protection needed — Cahciua injects
+// identity via system prompt, not via bootstrap tool calls before first user message.
+const TOOL_RESULT_TRIM_THRESHOLD = 512; // chars — results shorter than this are kept
+const TOOL_RESULT_KEEP_RECENT = 2;      // keep last N TRs' tool results untrimmed
+
+const trimToolResults = (trs: TurnResponse[]): TurnResponse[] => {
+  if (trs.length <= TOOL_RESULT_KEEP_RECENT) return trs;
+
+  return trs.map((tr, i) => {
+    if (i >= trs.length - TOOL_RESULT_KEEP_RECENT) return tr;
+    const data = tr.data.map((entry): TRDataEntry => {
+      if (entry.role !== 'tool') return entry;
+      if (entry.content.length <= TOOL_RESULT_TRIM_THRESHOLD) return entry;
+      const head = entry.content.slice(0, 200);
+      const tail = entry.content.slice(-200);
+      return { ...entry, content: `${head}\n... [trimmed ${entry.content.length} chars] ...\n${tail}` };
+    });
+    return { ...tr, data };
+  });
+};
+
 // --- Feature flag: trimSelfMessagesCoveredBySendToolCalls ---
 // Bot's own messages enter RC via userbot AND exist in TRs as tool call results.
 // Filter RC segments marked isSelfSent=true to remove the duplicate representation.
@@ -164,6 +213,7 @@ export const composeContext = (
   maxTokens: number,
   reasoningSignatureCompat: string | undefined,
   featureFlags?: FeatureFlags,
+  compactSummary?: string,
 ): { messages: Message[]; estimatedTokens: number } | null => {
   let effectiveRC = rc;
   if (featureFlags?.trimSelfMessagesCoveredBySendToolCalls)
@@ -177,8 +227,31 @@ export const composeContext = (
   if (featureFlags?.trimStaleNoToolCallTurnResponses)
     sanitizedTRs = trimStaleNoToolCallTRs(sanitizedTRs);
 
-  const allMessages = mergeContext(effectiveRC, sanitizedTRs);
-  if (allMessages.length === 0) return null;
+  if (featureFlags?.trimToolResults)
+    sanitizedTRs = trimToolResults(sanitizedTRs);
 
-  return trimContext(allMessages, maxTokens);
+  const allMessages = mergeContext(effectiveRC, sanitizedTRs);
+  if (allMessages.length === 0 && !compactSummary) return null;
+
+  if (compactSummary)
+    allMessages.unshift({ role: 'user', content: `[Conversation summary]\n${compactSummary}` } as Message);
+
+  // Anthropic rejects empty text content blocks (content: "", null, or undefined
+  // on assistant messages). Normalize: delete content key when it's empty so the
+  // message only carries tool_calls. For user/tool roles this shouldn't happen,
+  // but guard defensively.
+  for (const msg of allMessages) {
+    const m = msg as Record<string, any>;
+    if (m.content === '' || m.content === null || m.content === undefined)
+      delete m.content;
+  }
+
+  // Drop assistant messages that became completely empty after reasoning stripping
+  // (pure-thinking entries with no content and no tool_calls).
+  const cleaned = allMessages.filter((msg) => {
+    const m = msg as Record<string, any>;
+    return !(m.role === 'assistant' && !('content' in m) && !m.tool_calls);
+  });
+
+  return trimContext(cleaned, maxTokens);
 };

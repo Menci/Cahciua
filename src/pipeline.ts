@@ -1,5 +1,3 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-
 import { createPatch } from 'diff';
 
 import type { CanonicalIMEvent } from './adaptation/types';
@@ -9,67 +7,41 @@ import type { IntermediateContext } from './projection';
 import { rcToXml, render } from './rendering';
 import type { RenderedContext, RenderParams } from './rendering';
 
-const DUMP_DIR = '/tmp/cahciua';
-mkdirSync(DUMP_DIR, { recursive: true });
-
-const icToJson = (ic: IntermediateContext): string =>
-  JSON.stringify({
-    sessionId: ic.sessionId,
-    nodes: ic.nodes,
-    users: Object.fromEntries(ic.users),
-  }, null, 2);
-
 // Per-chat IC/RC state manager. Encapsulates the Projection → Rendering
 // pipeline, debug dumping, and diff logging.
 export const createPipeline = (renderParams: RenderParams) => {
   const logger = useLogger('pipeline');
-  const projLogger = useLogger('projection');
   const renderLogger = useLogger('rendering');
 
   const sessions = new Map<string, IntermediateContext>();
   const renderedSessions = new Map<string, RenderedContext>();
+  const cursors = new Map<string, number>();
 
-  const dumpIC = (ic: IntermediateContext) => {
-    writeFileSync(`${DUMP_DIR}/${ic.sessionId}.ic.json`, icToJson(ic));
-  };
-
-  const dumpRC = (sessionId: string, rc: RenderedContext) => {
-    writeFileSync(`${DUMP_DIR}/${sessionId}.rc.xml`, rcToXml(rc));
-  };
-
-  const logProjection = (oldIC: IntermediateContext, newIC: IntermediateContext) => {
-    const oldStr = icToJson(oldIC);
-    const newStr = icToJson(newIC);
-    if (oldStr === newStr) return;
-    const patch = createPatch(`IC(${newIC.sessionId})`, oldStr, newStr, 'before', 'after', { context: 3 });
-    projLogger.log(`IC diff:\n${patch}`);
+  // Compute effective RenderParams for a chat, merging per-chat cursor with base params.
+  const effectiveParams = (chatId: string): RenderParams => {
+    const cursor = cursors.get(chatId);
+    return cursor != null ? { ...renderParams, compactCursorMs: cursor } : renderParams;
   };
 
   const logRendering = (sessionId: string, oldRC: RenderedContext | undefined, newRC: RenderedContext) => {
-    const newXml = rcToXml(newRC);
-    if (!oldRC) {
-      renderLogger.log(`RC(${sessionId}) full:\n${newXml}`);
-      return;
-    }
+    if (!oldRC) return; // Skip full RC log on cold start — too noisy
     const oldXml = rcToXml(oldRC);
+    const newXml = rcToXml(newRC);
     if (oldXml === newXml) return;
     const patch = createPatch(`RC(${sessionId})`, oldXml, newXml, 'before', 'after', { context: 3 });
     renderLogger.log(`RC diff:\n${patch}`);
   };
 
-  // Push a single canonical event through the pipeline: reduce IC → render RC → log → dump.
+  // Push a single canonical event through the pipeline: reduce IC → render RC → log diff.
   const pushEvent = (chatId: string, event: CanonicalIMEvent): RenderedContext => {
     const oldIC = sessions.get(chatId) ?? createEmptyIC(chatId);
     const newIC = reduce(oldIC, event);
     sessions.set(chatId, newIC);
-    logProjection(oldIC, newIC);
-    dumpIC(newIC);
 
     const oldRC = renderedSessions.get(chatId);
-    const newRC = render(newIC, renderParams);
+    const newRC = render(newIC, effectiveParams(chatId));
     renderedSessions.set(chatId, newRC);
     logRendering(chatId, oldRC, newRC);
-    dumpRC(chatId, newRC);
 
     return newRC;
   };
@@ -80,20 +52,32 @@ export const createPipeline = (renderParams: RenderParams) => {
     for (const event of events)
       ic = reduce(ic, event);
     sessions.set(chatId, ic);
-    dumpIC(ic);
 
-    const rc = render(ic, renderParams);
+    const rc = render(ic, effectiveParams(chatId));
     renderedSessions.set(chatId, rc);
-    logRendering(chatId, undefined, rc);
-    dumpRC(chatId, rc);
 
     logger.withFields({ chatId, events: events.length, nodes: ic.nodes.length, users: ic.users.size }).log('Replayed session');
     return rc;
   };
 
+  // Update compact cursor for a chat. Re-renders RC with the new cursor so
+  // segments before the cursor are excluded.
+  const setCompactCursor = (chatId: string, cursorMs: number): RenderedContext | undefined => {
+    cursors.set(chatId, cursorMs);
+    const ic = sessions.get(chatId);
+    if (!ic) return;
+    const oldRC = renderedSessions.get(chatId);
+    const rc = render(ic, effectiveParams(chatId));
+    renderedSessions.set(chatId, rc);
+    logRendering(chatId, oldRC, rc);
+    logger.withFields({ chatId, cursorMs }).log('Compact cursor updated');
+    return rc;
+  };
+
+  const getCompactCursor = (chatId: string) => cursors.get(chatId);
   const getIC = (chatId: string) => sessions.get(chatId);
   const getRC = (chatId: string) => renderedSessions.get(chatId);
   const getChatIds = (): string[] => [...renderedSessions.keys()];
 
-  return { pushEvent, replayChat, getIC, getRC, getChatIds };
+  return { pushEvent, replayChat, setCompactCursor, getCompactCursor, getIC, getRC, getChatIds };
 };

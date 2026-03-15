@@ -29,7 +29,6 @@ export interface TurnResponse {
   requestedAtMs: number;
   provider: string;
   data: TRDataEntry[];
-  sessionMeta?: unknown;
   inputTokens: number;
   outputTokens: number;
   reasoningSignatureCompat?: string;
@@ -43,6 +42,20 @@ export interface DriverConfig {
   chatIds: string[];
   reasoningSignatureCompat?: string;
   featureFlags: FeatureFlags;
+  compaction: CompactionConfig;
+}
+
+export interface CompactionConfig {
+  enabled: boolean;
+  workingWindowTokens: number;
+  compactModel?: string;
+  dryRun?: boolean;
+}
+
+export interface CompactionSessionMeta {
+  oldCursorMs: number;
+  newCursorMs: number;
+  summary: string;
 }
 
 export type { FeatureFlags } from '../config/config';

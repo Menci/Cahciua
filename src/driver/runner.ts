@@ -2,8 +2,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 
 import type { Logger } from '@guiiai/logg';
 import type { Message, Tool } from 'xsai';
-import { chat, responseJSON } from 'xsai';
 
+import { streamingChat } from './streaming';
 import { isToolResult } from './tools';
 import type { TRAssistantEntry, TRDataEntry, TRToolResultEntry } from './types';
 
@@ -19,26 +19,6 @@ export interface RunnerConfig {
 }
 
 export const createRunner = (config: RunnerConfig) => {
-  const chatCompletion = async (params: {
-    messages: Message[];
-    system?: string;
-    tools?: Tool[];
-  }) => {
-    const res = await chat({
-      baseURL: config.apiBaseUrl,
-      apiKey: config.apiKey,
-      model: config.model,
-      messages: params.messages,
-      tools: params.tools,
-      system: params.system,
-    });
-
-    return await responseJSON<{
-      choices: Array<{ finish_reason: string; message: AnyMsg }>;
-      usage: { prompt_tokens: number; completion_tokens: number };
-    }>(res);
-  };
-
   const runStepLoop = async (params: {
     chatId: string;
     messages: Message[];
@@ -67,10 +47,15 @@ export const createRunner = (config: RunnerConfig) => {
       // and won't be missed by the self-loop check on the next turn.
       const stepRequestedAt = Date.now();
 
-      const response = await chatCompletion({
+      const response = await streamingChat({
+        baseURL: config.apiBaseUrl,
+        apiKey: config.apiKey,
+        model: config.model,
         messages: currentMessages,
         system: params.system,
         tools: params.tools,
+        log: params.log,
+        label: `step:${step}`,
       });
       const choice = response.choices[0];
 

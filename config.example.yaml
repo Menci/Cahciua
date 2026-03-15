@@ -17,6 +17,14 @@ driver:
 database:
   path: "./data/cahciua.db"
 
+compaction:
+  enabled: true
+  workingWindowTokens: 8000
+  compactModel: ""        # optional: override model for compaction calls
+  dryRun: false            # true = call LLM and log summary, but don't apply
+
+# All feature flags should be enabled in local dev config.
 features:
   trimStaleNoToolCallTurnResponses: false
   trimSelfMessagesCoveredBySendToolCalls: false
+  trimToolResults: false

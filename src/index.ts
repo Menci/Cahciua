@@ -1,7 +1,7 @@
 import { adaptDelete, adaptEdit, adaptMessage, contentToPlainText } from './adaptation';
 import { loadConfig } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
-import { createDatabase, loadEvents, loadKnownChatIds, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, persistTurnResponse, runMigrations } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadKnownChatIds, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, persistTurnResponse, runMigrations } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { RenderParams } from './rendering';
@@ -24,9 +24,15 @@ const main = async () => {
 
   const pipeline = createPipeline(renderParams);
 
-  // Cold-start: replay events per chat to rebuild IC + RC
-  for (const chatId of loadKnownChatIds(db))
+  // Cold-start: replay events per chat to rebuild IC + RC.
+  // If a compaction cursor exists, set it before replay so rendering
+  // skips nodes before the cursor. IC still replays all events (user map, etc.).
+  for (const chatId of loadKnownChatIds(db)) {
+    const compaction = loadCompaction(db, chatId);
+    if (compaction)
+      pipeline.setCompactCursor(chatId, compaction.newCursorMs);
     pipeline.replayChat(chatId, loadEvents(db, chatId));
+  }
   logger.withFields({ sessions: pipeline.getChatIds().length }).log('Cold start complete');
 
   const telegram = createTelegramManager({
@@ -46,14 +52,14 @@ const main = async () => {
     chatIds: config.driver.chatIds,
     reasoningSignatureCompat: config.llm.reasoningSignatureCompat,
     featureFlags: config.features,
+    compaction: config.compaction,
   }, {
-    loadTurnResponses: chatId => {
-      const rows = loadTurnResponses(db, chatId);
+    loadTurnResponses: (chatId, afterMs) => {
+      const rows = loadTurnResponses(db, chatId, afterMs);
       return rows.map(r => ({
         requestedAtMs: r.requestedAt,
         provider: r.provider,
         data: r.data,
-        sessionMeta: r.sessionMeta,
         inputTokens: r.inputTokens,
         outputTokens: r.outputTokens,
         reasoningSignatureCompat: r.reasoningSignatureCompat ?? '',
@@ -100,12 +106,17 @@ const main = async () => {
 
       return sent;
     },
+    loadCompaction: chatId => loadCompaction(db, chatId),
+    persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
+    setCompactCursor: (chatId, cursorMs) => pipeline.setCompactCursor(chatId, cursorMs),
     logger,
   });
 
   logger.withFields({ chatIds: config.driver.chatIds }).log('Driver initialized');
 
   // Feed replayed sessions into Driver so it can respond to un-answered messages
+  // and trigger compaction check if context exceeds budget (compaction effect fires
+  // automatically when conditions are met — no explicit startup trigger needed).
   for (const chatId of pipeline.getChatIds()) {
     const rc = pipeline.getRC(chatId);
     if (rc) driver.handleEvent(chatId, rc);

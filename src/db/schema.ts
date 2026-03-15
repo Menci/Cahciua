@@ -97,3 +97,14 @@ export const turnResponses = sqliteTable('turn_responses', {
 }, table => [
   index('turn_responses_chat_requested_idx').on(table.chatId, table.requestedAt),
 ]);
+
+export const compactions = sqliteTable('compactions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  chatId: text('chat_id').notNull(),
+  oldCursorMs: integer('old_cursor_ms').notNull(),
+  newCursorMs: integer('new_cursor_ms').notNull(),
+  summary: text('summary').notNull(),
+  createdAt: integer('created_at').notNull(),
+}, table => [
+  index('compactions_chat_id_idx').on(table.chatId),
+]);

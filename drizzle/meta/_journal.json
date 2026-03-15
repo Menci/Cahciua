@@ -113,6 +113,20 @@
       "when": 1773496800009,
       "tag": "0015_events_is_self_sent",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1773648000000,
+      "tag": "0016_create_compactions_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1773648000001,
+      "tag": "0017_compactions_append_only",
+      "breakpoints": true
     }
   ]
 }

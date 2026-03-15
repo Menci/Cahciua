@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 
 import type { DB } from './client';
-import { events, messages, turnResponses, users } from './schema';
+import { compactions, events, messages, turnResponses, users } from './schema';
 import { contentToPlainText } from '../adaptation';
 import type {
   CanonicalDeleteEvent,
@@ -9,7 +9,7 @@ import type {
   CanonicalIMEvent,
   CanonicalMessageEvent,
 } from '../adaptation/types';
-import type { TRDataEntry } from '../driver/types';
+import type { CompactionSessionMeta, TRDataEntry } from '../driver/types';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
 
 export const upsertUser = (db: DB, user: TelegramUser) => {
@@ -243,7 +243,6 @@ export const persistTurnResponse = (db: DB, chatId: string, tr: {
   requestedAtMs: number;
   provider: string;
   data: TRDataEntry[];
-  sessionMeta?: unknown;
   inputTokens: number;
   outputTokens: number;
   reasoningSignatureCompat?: string;
@@ -253,7 +252,7 @@ export const persistTurnResponse = (db: DB, chatId: string, tr: {
     requestedAt: tr.requestedAtMs,
     provider: tr.provider,
     data: tr.data,
-    sessionMeta: tr.sessionMeta ?? null,
+    sessionMeta: null,
     inputTokens: tr.inputTokens,
     outputTokens: tr.outputTokens,
     reasoningSignatureCompat: tr.reasoningSignatureCompat ?? '',
@@ -268,4 +267,32 @@ export const loadTurnResponses = (db: DB, chatId: string, afterMs?: number) => {
         .where(eq(turnResponses.chatId, chatId));
 
   return query.orderBy(turnResponses.requestedAt, turnResponses.id).all();
+};
+
+// --- Compaction storage (append-only) ---
+
+export const persistCompaction = (db: DB, chatId: string, meta: CompactionSessionMeta) => {
+  db.insert(compactions)
+    .values({
+      chatId,
+      oldCursorMs: meta.oldCursorMs,
+      newCursorMs: meta.newCursorMs,
+      summary: meta.summary,
+      createdAt: Date.now(),
+    })
+    .run();
+};
+
+export const loadCompaction = (db: DB, chatId: string): CompactionSessionMeta | null => {
+  const row = db.select().from(compactions)
+    .where(eq(compactions.chatId, chatId))
+    .orderBy(desc(compactions.id))
+    .limit(1)
+    .get();
+  if (!row) return null;
+  return {
+    oldCursorMs: row.oldCursorMs,
+    newCursorMs: row.newCursorMs,
+    summary: row.summary,
+  };
 };

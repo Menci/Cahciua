@@ -1,11 +1,12 @@
 import type { Logger } from '@guiiai/logg';
 import { computed, effect, signal } from 'alien-signals';
 
-import { composeContext, latestExternalEventMs } from './context';
+import { runCompaction } from './compaction';
+import { composeContext, findWorkingWindowCursor, latestExternalEventMs } from './context';
 import { renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { createSendMessageTool } from './tools';
-import type { DriverConfig, TurnResponse } from './types';
+import type { CompactionSessionMeta, DriverConfig, TurnResponse } from './types';
 import type { RenderedContext } from '../rendering/types';
 
 export { mergeContext } from './merge';
@@ -16,9 +17,12 @@ const DEBOUNCE_MS = 2000;
 const MAX_STEPS = 5;
 
 export const createDriver = (config: DriverConfig, deps: {
-  loadTurnResponses: (chatId: string) => TurnResponse[];
-  persistTurnResponse: (chatId: string, tr: Omit<TurnResponse, 'sessionMeta'> & { sessionMeta?: unknown }) => void;
+  loadTurnResponses: (chatId: string, afterMs?: number) => TurnResponse[];
+  persistTurnResponse: (chatId: string, tr: TurnResponse) => void;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number) => Promise<{ messageId: number; date: number }>;
+  loadCompaction: (chatId: string) => CompactionSessionMeta | null;
+  persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
+  setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
   logger: Logger;
 }) => {
   const { logger } = deps;
@@ -31,8 +35,8 @@ export const createDriver = (config: DriverConfig, deps: {
     model: config.model,
   });
 
-  const loadTRs = (chatId: string): TurnResponse[] =>
-    deps.loadTurnResponses(chatId);
+  const loadTRs = (chatId: string, afterMs?: number): TurnResponse[] =>
+    deps.loadTurnResponses(chatId, afterMs);
 
   const getLastTrTime = (chatId: string): number => {
     const trs = deps.loadTurnResponses(chatId);
@@ -52,14 +56,32 @@ export const createDriver = (config: DriverConfig, deps: {
     const rc = signal<RenderedContext>([]);
     const lastTrTimeMs = signal(getLastTrTime(chatId));
     const running = signal(false);
-    // Failure latch: blocks retrigger on the same RC that caused a failure.
-    // Cleared automatically when rc changes (new event arrives).
     const failedRc = signal<RenderedContext | null>(null);
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    // Pure derived deadline: latest external event timestamp + debounce window.
-    // Event-time based — on restart, old events yield a past deadline (fire
-    // immediately), recent events yield a future deadline (wait remaining).
+    // --- Compaction state as signal ---
+    // Initialized from DB on scope creation (cold start). Updated by the
+    // compaction effect when it completes. Read by the reply effect to
+    // get cursor + summary. No runtime DB queries.
+    const compactionMeta = signal<CompactionSessionMeta | null>(
+      deps.loadCompaction(chatId),
+    );
+
+    // Derived values for convenience
+    const cursorMs = computed(() => compactionMeta()?.newCursorMs);
+    const summary = computed(() => compactionMeta()?.summary);
+
+    // --- Auto-apply cursor to pipeline when compaction state changes ---
+    // When compactionMeta updates (from cold start init or compaction completion),
+    // tell the pipeline to re-render RC excluding nodes before the cursor.
+    const disposeCursorEffect = effect(() => {
+      const cursor = cursorMs();
+      if (cursor == null) return;
+      const newRC = deps.setCompactCursor(chatId, cursor);
+      if (newRC) rc(newRC);
+    });
+
+    // --- Main LLM reply effect ---
     const deadline = computed(() => {
       const rcVal = rc();
       if (rcVal.length === 0) return null;
@@ -69,7 +91,7 @@ export const createDriver = (config: DriverConfig, deps: {
       return latestMs + DEBOUNCE_MS;
     });
 
-    const disposeEffect = effect(() => {
+    const disposeReplyEffect = effect(() => {
       const isRunning = running();
       if (timer) { clearTimeout(timer); timer = undefined; }
       if (isRunning) return;
@@ -79,32 +101,35 @@ export const createDriver = (config: DriverConfig, deps: {
 
       const remaining = Math.max(0, d - Date.now());
       timer = setTimeout(() => {
-        // Heavy work deferred to after debounce expires
-        const trs = loadTRs(chatId);
-        const ctx = composeContext(rc(), trs, config.maxContextTokens, config.reasoningSignatureCompat, config.featureFlags);
-        if (!ctx) return;
-
         const rcAtStart = rc();
         running(true);
 
-        log.withFields({
-          chatId,
-          messages: ctx.messages.length,
-          estimatedTokens: ctx.estimatedTokens,
-        }).log('Triggering LLM call');
-
-        const sendMessageTool = createSendMessageTool(async (text, replyTo) => {
-          log.withFields({
-            chatId,
-            text: text.length > 100 ? `${text.slice(0, 100)}...` : text,
-            replyTo,
-          }).log('send_message tool called');
-          const sent = await deps.sendMessage(chatId, text, replyTo ? Number(replyTo) : undefined);
-          return { messageId: String(sent.messageId) };
-        });
-
         void (async () => {
           try {
+            // Read compaction state from signal — no DB query.
+            const cursor = cursorMs();
+            const sum = summary();
+
+            const trs = loadTRs(chatId, cursor);
+            const ctx = composeContext(rc(), trs, config.maxContextTokens, config.reasoningSignatureCompat, config.featureFlags, sum);
+            if (!ctx) return;
+
+            log.withFields({
+              chatId,
+              messages: ctx.messages.length,
+              estimatedTokens: ctx.estimatedTokens,
+            }).log('Triggering LLM call');
+
+            const sendMessageTool = createSendMessageTool(async (text, replyTo) => {
+              log.withFields({
+                chatId,
+                text: text.length > 100 ? `${text.slice(0, 100)}...` : text,
+                replyTo,
+              }).log('send_message tool called');
+              const sent = await deps.sendMessage(chatId, text, replyTo ? Number(replyTo) : undefined);
+              return { messageId: String(sent.messageId) };
+            });
+
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
               timeNow: new Date().toISOString(),
@@ -129,15 +154,6 @@ export const createDriver = (config: DriverConfig, deps: {
               },
               checkInterrupt: () => {
                 if (rc() === rcAtStart) return false;
-                // Only interrupt for new external messages, not bot's own
-                // messages flowing back via userbot. This improves on the old
-                // behavior where any event would kill the step loop.
-                //
-                // TODO: Bot's own messages enter RC via userbot, duplicating
-                // content already present in tool call results within TRs.
-                // The merge produces redundant segments. Needs a dedup design
-                // — either filter bot segments from RC when TRs cover the
-                // same time range, or mark them so merge can skip them.
                 return latestExternalEventMs(rc(), lastTrTimeMs()) != null;
               },
               log,
@@ -152,9 +168,97 @@ export const createDriver = (config: DriverConfig, deps: {
       }, remaining);
     });
 
+    // --- Independent compaction effect ---
+    let compactionRunning = false;
+    let compactionTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastCheckedRc: RenderedContext | null = null;
+
+    const disposeCompactionEffect = effect(() => {
+      if (!config.compaction.enabled) return;
+      const rcVal = rc();
+      if (rcVal.length === 0) return;
+
+      if (compactionTimer) { clearTimeout(compactionTimer); compactionTimer = undefined; }
+      if (compactionRunning) return;
+      if (rcVal === lastCheckedRc) return;
+
+      compactionTimer = setTimeout(() => {
+        lastCheckedRc = rc();
+        compactionRunning = true;
+
+        void (async () => {
+          try {
+            const cursor = cursorMs();
+            const sum = summary();
+            const trs = loadTRs(chatId, cursor);
+            // Estimate tokens WITHOUT summary — summary should not count toward
+            // the working window budget, otherwise it grows until it fills the
+            // budget and compaction degrades into a sliding window.
+            const ctx = composeContext(rc(), trs, config.maxContextTokens, config.reasoningSignatureCompat, config.featureFlags);
+            if (!ctx) return;
+            if (ctx.estimatedTokens <= config.compaction.workingWindowTokens) return;
+
+            const newCursorMs = findWorkingWindowCursor(rc(), config.compaction.workingWindowTokens);
+
+            log.withFields({
+              chatId,
+              oldCursorMs: cursor ?? 0,
+              newCursorMs,
+              estimatedTokens: ctx.estimatedTokens,
+              budget: config.compaction.workingWindowTokens,
+              dryRun: !!config.compaction.dryRun,
+            }).log('Triggering compaction');
+
+            const compactModel = config.compaction.compactModel ?? config.model;
+            const newMeta = await runCompaction({
+              apiBaseUrl: config.apiBaseUrl,
+              apiKey: config.apiKey,
+              model: compactModel,
+              chatId,
+              rcWindow: rc().filter(s => s.receivedAtMs >= (cursor ?? 0) && s.receivedAtMs < newCursorMs),
+              trsWindow: trs.filter(t => t.requestedAtMs >= (cursor ?? 0) && t.requestedAtMs < newCursorMs),
+              existingSummary: sum,
+              oldCursorMs: cursor ?? 0,
+              newCursorMs,
+              reasoningSignatureCompat: config.reasoningSignatureCompat,
+              featureFlags: config.featureFlags,
+              log,
+            });
+
+            if (config.compaction.dryRun) {
+              log.withFields({
+                chatId,
+                newCursorMs,
+                summaryLength: newMeta.summary.length,
+              }).log(`Compaction dry-run complete. Summary:\n${newMeta.summary}`);
+            } else {
+              // Persist to dedicated compactions table
+              deps.persistCompaction(chatId, newMeta);
+
+              log.withFields({
+                chatId,
+                newCursorMs,
+                summaryLength: newMeta.summary.length,
+              }).log('Compaction complete');
+
+              // Update signal — cursor effect auto-applies to pipeline + rc
+              compactionMeta(newMeta);
+            }
+          } catch (err) {
+            log.withError(err).error('Compaction failed');
+          } finally {
+            compactionRunning = false;
+          }
+        })();
+      }, 0);
+    });
+
     const cleanup = () => {
       if (timer) clearTimeout(timer);
-      disposeEffect();
+      if (compactionTimer) clearTimeout(compactionTimer);
+      disposeCursorEffect();
+      disposeReplyEffect();
+      disposeCompactionEffect();
     };
 
     const entry = { rc, cleanup };
