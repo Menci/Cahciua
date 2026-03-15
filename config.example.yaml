@@ -1,3 +1,17 @@
+models:
+  primary:
+    apiBaseUrl: ""
+    apiKey: ""
+    model: "claude-opus-4-6"
+    reasoningSignatureCompat: "anthropic"
+    # maxImagesAllowed: 100     # optional: drop oldest images when context exceeds this limit
+  probe:
+    apiBaseUrl: ""
+    apiKey: ""
+    model: "claude-haiku-4-5"
+    reasoningSignatureCompat: "anthropic"
+    # maxImagesAllowed: 10     # optional: Gemini Flash allows max 10 images
+
 telegram:
   botToken: ""
   apiId: 0
@@ -5,11 +19,7 @@ telegram:
   session: ""
 
 llm:
-  apiBaseUrl: ""
-  apiKey: ""
-  model: "claude-opus-4-6"
-  reasoningSignatureCompat: "anthropic"
-  # maxImagesAllowed: 100     # optional: drop oldest images when context exceeds this limit
+  model: "primary"            # references a key in models
 
 driver:
   chatIds: []
@@ -21,7 +31,7 @@ compaction:
   enabled: true
   maxContextEstTokens: 512000    # high water mark: trigger compaction when estimated context exceeds this
   workingWindowEstTokens: 8000   # low water mark: how many estimated tokens of raw content to retain after compaction
-  # compactModel: ""          # optional: override model for compaction calls (defaults to llm.model)
+  # model: "primary"           # optional: override model for compaction calls (defaults to llm.model)
   dryRun: false               # true = call LLM and log summary, but don't persist or apply
 
 # Probe: use a small/cheap model to decide whether to respond in group chats.
@@ -30,11 +40,7 @@ compaction:
 # If it produces tool calls, the primary model is activated for the real response.
 probe:
   enabled: false
-  apiBaseUrl: ""
-  apiKey: ""
-  model: "claude-haiku-4-5"
-  reasoningSignatureCompat: "anthropic"
-  # maxImagesAllowed: 10     # optional: Gemini Flash allows max 10 images
+  model: "probe"              # references a key in models
 
 # All feature flags should be enabled in local dev config.
 features:

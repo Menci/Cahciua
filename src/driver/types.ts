@@ -42,27 +42,19 @@ export interface LlmEndpoint {
   maxImagesAllowed?: number;
 }
 
-export interface ProbeConfig extends LlmEndpoint {
-  enabled: boolean;
-}
-
 export interface DriverConfig {
-  apiBaseUrl: string;
-  apiKey: string;
-  model: string;
+  primaryModel: LlmEndpoint;
   chatIds: string[];
-  reasoningSignatureCompat?: string;
-  maxImagesAllowed?: number;
   featureFlags: FeatureFlags;
   compaction: CompactionConfig;
-  probe: ProbeConfig;
+  probe: { enabled: boolean; model: LlmEndpoint };
 }
 
 export interface CompactionConfig {
   enabled: boolean;
   maxContextEstTokens: number;
   workingWindowEstTokens: number;
-  compactModel?: string;
+  model?: LlmEndpoint;
   dryRun?: boolean;
 }
 

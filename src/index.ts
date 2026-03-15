@@ -1,5 +1,5 @@
 import { adaptDelete, adaptEdit, adaptMessage, contentToPlainText } from './adaptation';
-import { loadConfig } from './config/config';
+import { loadConfig, resolveModel } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { createDatabase, loadCompaction, loadEvents, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations } from './db';
 import { createDriver } from './driver';
@@ -44,22 +44,19 @@ const main = async () => {
     resolveChatId: messageIds => lookupChatId(db, messageIds),
   }, logger);
 
+  const primaryModel = resolveModel(config, config.llm.model);
+
   const driver = createDriver({
-    apiBaseUrl: config.llm.apiBaseUrl,
-    apiKey: config.llm.apiKey,
-    model: config.llm.model,
+    primaryModel,
     chatIds: config.driver.chatIds,
-    reasoningSignatureCompat: config.llm.reasoningSignatureCompat,
-    maxImagesAllowed: config.llm.maxImagesAllowed,
     featureFlags: config.features,
-    compaction: config.compaction,
+    compaction: {
+      ...config.compaction,
+      model: config.compaction.model ? resolveModel(config, config.compaction.model) : undefined,
+    },
     probe: {
       enabled: config.probe.enabled,
-      apiBaseUrl: config.probe.apiBaseUrl,
-      apiKey: config.probe.apiKey,
-      model: config.probe.model,
-      reasoningSignatureCompat: config.probe.reasoningSignatureCompat,
-      maxImagesAllowed: config.probe.maxImagesAllowed,
+      model: config.probe.model ? resolveModel(config, config.probe.model) : primaryModel,
     },
   }, {
     loadTurnResponses: (chatId, afterMs) => {

@@ -47,9 +47,9 @@ export const createDriver = (config: DriverConfig, deps: {
   const chatIds = new Set(config.chatIds);
 
   const runner = createRunner({
-    apiBaseUrl: config.apiBaseUrl,
-    apiKey: config.apiKey,
-    model: config.model,
+    apiBaseUrl: config.primaryModel.apiBaseUrl,
+    apiKey: config.primaryModel.apiKey,
+    model: config.primaryModel.model,
   });
 
   const loadTRs = (chatId: string, afterMs?: number): TurnResponse[] =>
@@ -129,7 +129,7 @@ export const createDriver = (config: DriverConfig, deps: {
             const sum = summary();
 
             const trs = loadTRs(chatId, cursor);
-            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, config.reasoningSignatureCompat, config.featureFlags, sum);
+            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, config.primaryModel.reasoningSignatureCompat, config.featureFlags, sum);
             if (!ctx) return;
 
             log.withFields({
@@ -175,8 +175,8 @@ export const createDriver = (config: DriverConfig, deps: {
                   const a = m as Record<string, any>;
                   return Array.isArray(a.content) ? { ...m, content: [...a.content] } : m;
                 });
-                if (config.probe.maxImagesAllowed != null)
-                  trimImages(probeMessages, config.probe.maxImagesAllowed);
+                if (config.probe.model.maxImagesAllowed != null)
+                  trimImages(probeMessages, config.probe.model.maxImagesAllowed);
 
                 const probeLateBinding = await renderLateBindingPrompt({
                   isProbeEnabled: true, isProbing: true, isMentioned, isReplied,
@@ -188,9 +188,9 @@ export const createDriver = (config: DriverConfig, deps: {
                 const probeRequestedAt = Date.now();
 
                 const probeResult = await streamingChat({
-                  baseURL: config.probe.apiBaseUrl,
-                  apiKey: config.probe.apiKey,
-                  model: config.probe.model,
+                  baseURL: config.probe.model.apiBaseUrl,
+                  apiKey: config.probe.model.apiKey,
+                  model: config.probe.model.model,
                   messages: probeMessages,
                   system,
                   tools: [sendMessageTool],
@@ -216,7 +216,7 @@ export const createDriver = (config: DriverConfig, deps: {
                   data: probeMsg ? [probeMsg] : [],
                   inputTokens: probeResult.usage.prompt_tokens,
                   outputTokens: probeResult.usage.completion_tokens,
-                  reasoningSignatureCompat: config.probe.reasoningSignatureCompat ?? '',
+                  reasoningSignatureCompat: config.probe.model.reasoningSignatureCompat ?? '',
                   isActivated: hasToolCalls,
                 });
 
@@ -232,8 +232,8 @@ export const createDriver = (config: DriverConfig, deps: {
               }
             }
 
-            if (config.maxImagesAllowed != null)
-              trimImages(ctx.messages, config.maxImagesAllowed);
+            if (config.primaryModel.maxImagesAllowed != null)
+              trimImages(ctx.messages, config.primaryModel.maxImagesAllowed);
 
             const primaryLateBinding = await renderLateBindingPrompt({
               isProbeEnabled: config.probe.enabled, isProbing: false, isMentioned, isReplied,
@@ -253,7 +253,7 @@ export const createDriver = (config: DriverConfig, deps: {
                   data: stepData,
                   inputTokens: usage.prompt_tokens,
                   outputTokens: usage.completion_tokens,
-                  reasoningSignatureCompat: config.reasoningSignatureCompat ?? '',
+                  reasoningSignatureCompat: config.primaryModel.reasoningSignatureCompat ?? '',
                 });
                 lastProcessedMs(requestedAtMs);
               },
@@ -299,7 +299,7 @@ export const createDriver = (config: DriverConfig, deps: {
             // Estimate tokens WITHOUT summary — summary should not count toward
             // the working window budget, otherwise it grows until it fills the
             // budget and compaction degrades into a sliding window.
-            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, config.reasoningSignatureCompat, config.featureFlags);
+            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, config.primaryModel.reasoningSignatureCompat, config.featureFlags);
             if (!ctx) return;
             // Trigger at maxContextEstTokens (high water mark), compact down to
             // workingWindowEstTokens (low water mark). This gives a wide gap
@@ -318,18 +318,18 @@ export const createDriver = (config: DriverConfig, deps: {
               dryRun: !!config.compaction.dryRun,
             }).log('Triggering compaction');
 
-            const compactModel = config.compaction.compactModel ?? config.model;
+            const compactEndpoint = config.compaction.model ?? config.primaryModel;
             const newMeta = await runCompaction({
-              apiBaseUrl: config.apiBaseUrl,
-              apiKey: config.apiKey,
-              model: compactModel,
+              apiBaseUrl: compactEndpoint.apiBaseUrl,
+              apiKey: compactEndpoint.apiKey,
+              model: compactEndpoint.model,
               chatId,
               rcWindow: rc().filter(s => s.receivedAtMs >= (cursor ?? 0) && s.receivedAtMs < newCursorMs),
               trsWindow: trs.filter(t => t.requestedAtMs >= (cursor ?? 0) && t.requestedAtMs < newCursorMs),
               existingSummary: sum,
               oldCursorMs: cursor ?? 0,
               newCursorMs,
-              reasoningSignatureCompat: config.reasoningSignatureCompat,
+              reasoningSignatureCompat: config.primaryModel.reasoningSignatureCompat,
               featureFlags: config.featureFlags,
               log,
             });

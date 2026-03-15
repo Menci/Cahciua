@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
+import type { LlmEndpoint } from '../driver/types';
+
 const llmEndpointEntries = {
   apiBaseUrl: v.string(),
   apiKey: v.string(),
@@ -12,13 +14,16 @@ const llmEndpointEntries = {
 };
 
 const ConfigSchema = v.object({
+  models: v.record(v.string(), v.object(llmEndpointEntries)),
   telegram: v.object({
     botToken: v.string(),
     apiId: v.number(),
     apiHash: v.string(),
     session: v.optional(v.string(), ''),
   }),
-  llm: v.object(llmEndpointEntries),
+  llm: v.object({
+    model: v.string(),
+  }),
   driver: v.object({
     chatIds: v.array(v.string()),
   }),
@@ -29,16 +34,12 @@ const ConfigSchema = v.object({
     enabled: v.optional(v.boolean(), false),
     maxContextEstTokens: v.optional(v.number(), 200000),
     workingWindowEstTokens: v.optional(v.number(), 8000),
-    compactModel: v.optional(v.string()),
+    model: v.optional(v.string()),
     dryRun: v.optional(v.boolean(), false),
   }), {}),
   probe: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
-    apiBaseUrl: v.optional(v.string(), ''),
-    apiKey: v.optional(v.string(), ''),
     model: v.optional(v.string(), ''),
-    reasoningSignatureCompat: v.optional(v.string()),
-    maxImagesAllowed: v.optional(v.number()),
   }), {}),
   features: v.optional(v.object({
     trimStaleNoToolCallTurnResponses: v.optional(v.boolean(), false),
@@ -56,4 +57,10 @@ export const loadConfig = (): Config => {
   const raw = readFileSync(CONFIG_PATH, 'utf-8');
   const parsed = parseYaml(raw);
   return v.parse(ConfigSchema, parsed);
+};
+
+export const resolveModel = (config: Config, name: string): LlmEndpoint => {
+  const entry = config.models[name];
+  if (!entry) throw new Error(`Unknown model "${name}" — not found in models registry`);
+  return entry;
 };
