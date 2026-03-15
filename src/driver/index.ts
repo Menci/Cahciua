@@ -66,8 +66,6 @@ export const createDriver = (config: DriverConfig, deps: {
     const lastTrTimeMs = signal(getLastTrTime(chatId));
     const running = signal(false);
     const failedRc = signal<RenderedContext | null>(null);
-    // Probe chose silence for this RC — don't re-trigger until new messages arrive
-    const silentRc = signal<RenderedContext | null>(null);
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     // --- Compaction state as signal ---
@@ -100,7 +98,6 @@ export const createDriver = (config: DriverConfig, deps: {
       const rcVal = rc();
       if (rcVal.length === 0) return false;
       if (rcVal === failedRc()) return false;
-      if (rcVal === silentRc()) return false;
       return latestExternalEventMs(rcVal, lastTrTimeMs()) != null;
     });
 
@@ -180,16 +177,7 @@ export const createDriver = (config: DriverConfig, deps: {
                 });
 
                 const probeMsg = probeResult.choices[0]?.message;
-                const toolCalls = (probeMsg?.tool_calls ?? []) as { function: { name: string; arguments: string } }[];
-                const hasToolCalls = toolCalls.length > 0;
-
-                log.withFields({
-                  chatId,
-                  hasToolCalls,
-                  toolCalls: toolCalls.map(tc => ({ name: tc.function.name, args: tc.function.arguments })),
-                  content: probeMsg?.content ?? null,
-                  usage: probeResult.usage,
-                }).log('Probe result');
+                const hasToolCalls = !!(probeMsg?.tool_calls as unknown[] | undefined)?.length;
 
                 deps.persistProbeResponse(chatId, {
                   requestedAtMs: Date.now(),
@@ -203,7 +191,6 @@ export const createDriver = (config: DriverConfig, deps: {
 
                 if (!hasToolCalls) {
                   log.withFields({ chatId }).log('Probe: model chose silence');
-                  silentRc(rcAtStart);
                   return;
                 }
 
