@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { renderMarkdownString } from '@velin-dev/core';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const template = readFileSync(resolve(__dirname, '../../docs/system-prompt.velin.md'), 'utf-8');
 const basePath = resolve(__dirname, '../../package.json');
+
+const systemPromptTemplate = readFileSync(resolve(__dirname, '../../docs/system-prompt.velin.md'), 'utf-8');
+const lateBindingTemplate = readFileSync(resolve(__dirname, '../../docs/late-binding-prompt.velin.md'), 'utf-8');
 
 export const renderSystemPrompt = async (params: {
   language?: string;
@@ -15,6 +17,16 @@ export const renderSystemPrompt = async (params: {
   timeNow: string;
   systemFiles?: { filename: string; content: string }[];
 }) => {
-  const { rendered } = await renderMarkdownString(template, params, basePath);
+  const { rendered } = await renderMarkdownString(systemPromptTemplate, params, basePath);
+  return rendered;
+};
+
+export const renderLateBindingPrompt = async (params: {
+  isProbeEnabled?: boolean;
+  isProbing?: boolean;
+  isMentioned?: boolean;
+  isReplied?: boolean;
+}) => {
+  const { rendered } = await renderMarkdownString(lateBindingTemplate, params, basePath);
   return rendered;
 };

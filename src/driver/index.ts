@@ -1,9 +1,10 @@
 import type { Logger } from '@guiiai/logg';
 import { computed, effect, signal } from 'alien-signals';
+import type { Message } from 'xsai';
 
 import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, latestExternalEventMs, trimImages } from './context';
-import { renderSystemPrompt } from './prompt';
+import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { streamingChat } from './streaming';
 import { createSendMessageTool } from './tools';
@@ -11,10 +12,16 @@ import type { CompactionSessionMeta, DriverConfig, TurnResponse } from './types'
 import type { RenderedContext } from '../rendering/types';
 
 export { mergeContext } from './merge';
-export { renderSystemPrompt } from './prompt';
+export { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 export type { DriverConfig, TurnResponse } from './types';
 
 const MAX_STEPS = 5;
+
+// Append late-binding prompt as a separate user message at the end.
+// Preserves KV cache for system prompt and prior messages.
+const injectLateBindingPrompt = (messages: Message[], prompt: string): void => {
+  messages.push({ role: 'user', content: prompt } as Message);
+};
 
 export const createDriver = (config: DriverConfig, deps: {
   loadTurnResponses: (chatId: string, afterMs?: number) => TurnResponse[];
@@ -146,14 +153,18 @@ export const createDriver = (config: DriverConfig, deps: {
               timeNow: new Date().toISOString(),
             });
 
+            // --- Compute mention/reply state from RC ---
+            const rcVal = rc();
+            const lastMentionedAtMs = rcVal.reduce((max, seg) =>
+              (seg.mentionsMe || seg.repliesToMe) ? Math.max(max, seg.receivedAtMs) : max, 0);
+            const isMentioned = rcVal.some(seg => seg.mentionsMe && seg.receivedAtMs > lastProcessedMs());
+            const isReplied = rcVal.some(seg => seg.repliesToMe && seg.receivedAtMs > lastProcessedMs());
+
             // --- Probe gate ---
             // In group chats, if the bot was not recently @'d or replied to, use a
             // small/cheap probe model to decide whether to respond. If the probe
             // chooses silence (no tool calls), we skip the primary model entirely.
             if (config.probe.enabled) {
-              const lastMentionedAtMs = rc().reduce((max, seg) =>
-                (seg.mentionsMe || seg.repliesToMe) ? Math.max(max, seg.receivedAtMs) : max, 0);
-
               const needsProbe = lastMentionedAtMs <= lastProcessedMs();
 
               if (needsProbe) {
@@ -166,6 +177,11 @@ export const createDriver = (config: DriverConfig, deps: {
                 });
                 if (config.probe.maxImagesAllowed != null)
                   trimImages(probeMessages, config.probe.maxImagesAllowed);
+
+                const probeLateBinding = await renderLateBindingPrompt({
+                  isProbeEnabled: true, isProbing: true, isMentioned, isReplied,
+                });
+                injectLateBindingPrompt(probeMessages, probeLateBinding);
 
                 // Capture before probe call — events arriving during the call
                 // have receivedAtMs > probeRequestedAt and won't be swallowed.
@@ -218,6 +234,11 @@ export const createDriver = (config: DriverConfig, deps: {
 
             if (config.maxImagesAllowed != null)
               trimImages(ctx.messages, config.maxImagesAllowed);
+
+            const primaryLateBinding = await renderLateBindingPrompt({
+              isProbeEnabled: config.probe.enabled, isProbing: false, isMentioned, isReplied,
+            });
+            injectLateBindingPrompt(ctx.messages, primaryLateBinding);
 
             await runner.runStepLoop({
               chatId,

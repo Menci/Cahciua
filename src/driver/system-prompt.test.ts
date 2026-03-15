@@ -5,6 +5,7 @@ import { renderMarkdownString } from '@velin-dev/core';
 import { describe, expect, it } from 'vitest';
 
 const template = readFileSync(resolve(__dirname, '../../docs/system-prompt.velin.md'), 'utf-8');
+const lateBindingTemplate = readFileSync(resolve(__dirname, '../../docs/late-binding-prompt.velin.md'), 'utf-8');
 // basePath must be a file (not directory) so createRequire resolves pnpm's node_modules
 const basePath = resolve(__dirname, '../../package.json');
 
@@ -82,9 +83,65 @@ describe('system prompt (velin)', () => {
     const rendered = await renderPrompt({ timeNow: '2025-01-01T00:00:00Z' });
 
     expect(rendered).toContain('send_message');
-    expect(rendered).toContain('internal thinking');
+    expect(rendered).toContain('internal monologue');
     expect(rendered).toContain('Choosing when to respond');
     expect(rendered).toContain('Stay silent when');
     expect(rendered).not.toContain('Your text output IS your reply');
+  });
+});
+
+const renderLateBinding = (data: Record<string, unknown> = {}) =>
+  renderMarkdownString(lateBindingTemplate, data, basePath).then(r => r.rendered);
+
+describe('late-binding prompt (velin)', () => {
+  it('renders static content without conditionals', async () => {
+    const rendered = await renderLateBinding();
+
+    expect(rendered).toContain('send_message');
+    expect(rendered).toContain('inner monologue');
+    expect(rendered).not.toContain('decided to act');
+    expect(rendered).not.toContain('mentioned');
+    expect(rendered).not.toContain('replied');
+    expect(rendered).not.toContain('defineProps');
+  });
+
+  it('renders activated state (probe enabled, not probing)', async () => {
+    const rendered = await renderLateBinding({ isProbeEnabled: true, isProbing: false });
+
+    expect(rendered).toContain('decided to act');
+    expect(rendered).not.toContain('mentioned');
+    expect(rendered).not.toContain('replied');
+  });
+
+  it('renders mentioned state', async () => {
+    const rendered = await renderLateBinding({ isMentioned: true });
+
+    expect(rendered).toContain('mentioned');
+    expect(rendered).not.toContain('decided to act');
+    expect(rendered).not.toContain('replied');
+  });
+
+  it('renders replied state', async () => {
+    const rendered = await renderLateBinding({ isReplied: true });
+
+    expect(rendered).toContain('replied');
+    expect(rendered).not.toContain('decided to act');
+    expect(rendered).not.toContain('mentioned');
+  });
+
+  it('activated takes priority over mentioned/replied', async () => {
+    const rendered = await renderLateBinding({
+      isProbeEnabled: true, isProbing: false, isMentioned: true, isReplied: true,
+    });
+
+    expect(rendered).toContain('decided to act');
+    expect(rendered).not.toContain('mentioned');
+    expect(rendered).not.toContain('replied');
+  });
+
+  it('probe path does not show activated', async () => {
+    const rendered = await renderLateBinding({ isProbeEnabled: true, isProbing: true });
+
+    expect(rendered).not.toContain('decided to act');
   });
 });
