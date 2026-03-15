@@ -78,7 +78,7 @@ IC 的变更分为两类，KV cache 特性不同：
 
 RFC 的三层管道（Adaptation → Projection → Rendering）在实现中扩展为**四层**。原因：
 
-各 LLM API（OpenAI Chat Completions、OpenAI Responses、Anthropic Messages）的 tool call 格式和必须回传的元数据（ID、签名）各不相同。这些元数据是服务端生成的，无法从 IC 推导，也无法用 provider-agnostic 的方式表达在 Rendering 输出中。
+各 LLM API（OpenAI Chat Completions、OpenAI Responses）的 tool call 格式和必须回传的元数据（ID、签名）各不相同。这些元数据是服务端生成的，无法从 IC 推导，也无法用 provider-agnostic 的方式表达在 Rendering 输出中。两种 API 格式均已实现，通过 `apiFormat` 配置切换。
 
 现在的架构：
 
@@ -104,6 +104,12 @@ RFC 未涉及 bot 自身回复和 tool call 历史的存储。现在的设计：
 - 切换 provider 不改变数据库中的已有数据，只改变读取时的翻译逻辑
 
 设计原则：直接存储比中间格式更简单，避免归一化导致的信息丢失。N*(N-1) 个转换器，N=2-3 → 2-6 个函数，按需实现。
+
+**已实现的 Provider 格式**：
+- `openai-chat`：OpenAI Chat Completions 兼容格式（`TRDataEntry[]`：assistant + tool role entries）
+- `responses`：OpenAI Responses API 格式（output items：`message`、`function_call`、`reasoning`、`function_call_output`）
+
+**转换架构**：`composeContext` 始终输出 openai-chat 格式的 `Message[]` 作为 lingua franca。Responses 格式的 TR 数据在 compose 时通过 `responsesOutputToMessages` 转为 openai-chat 消息。如果目标 API 是 Responses，runner 在发送前通过 `messagesToResponsesInput` 做最终转换。Reasoning 在转换中保留（`encrypted_content` ↔ `reasoning_opaque`，`summary` ↔ `reasoning_text`），跨 provider 的 reasoning 签名由 `sanitizeReasoningForTR` 统一处理。
 
 ## 9. 变更：Compaction 归属从 Orchestrator 移到 Driver
 

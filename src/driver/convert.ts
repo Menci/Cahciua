@@ -8,7 +8,7 @@
 // Mapping: responses encrypted_content ↔ openai-chat reasoning_opaque
 //          responses summary           ↔ openai-chat reasoning_text
 
-import type { Message } from 'xsai';
+import type { Message, Tool } from 'xsai';
 
 import type {
   ResponseFunctionCallOutputItem,
@@ -19,71 +19,60 @@ import type {
   ResponseInputReasoning,
   ResponseOutputFunctionCall,
   ResponseOutputMessage,
+  ResponseTool,
 } from './responses-types';
 import type { TRAssistantEntry, TRDataEntry, TRToolResultEntry } from './types';
 
 type AnyMsg = Record<string, any>;
 
+// ── Shared assistant → Responses input items ──
+// Extracts reasoning, message content, and tool_calls from an openai-chat-shaped
+// assistant entry into Responses input items. Used by both chatTRToResponsesInput
+// and messagesToResponsesInput — the two functions differ only in how they handle
+// user and tool roles.
+const assistantToResponsesItems = (
+  m: AnyMsg,
+  items: ResponseInputItem[],
+) => {
+  // Reasoning → ResponseInputReasoning (before message/tool_calls)
+  if (m.reasoning_opaque)
+    items.push({
+      type: 'reasoning', id: `rs_${items.length}`,
+      summary: m.reasoning_text ? [{ type: 'summary_text', text: m.reasoning_text }] : [],
+      encrypted_content: m.reasoning_opaque,
+    } as ResponseInputReasoning);
+
+  // Text content → message with output_text
+  if (m.content != null) {
+    const content: ResponseInputContent[] = typeof m.content === 'string'
+      ? [{ type: 'output_text', text: m.content }]
+      : Array.isArray(m.content)
+        ? (m.content as AnyMsg[]).flatMap(p => p.type === 'text' ? [{ type: 'output_text' as const, text: p.text as string }] : [])
+        : [];
+    if (content.length > 0)
+      items.push({ type: 'message', role: 'assistant', content } as ResponseInputMessage);
+  }
+
+  // Tool calls → function_call items
+  for (const tc of m.tool_calls ?? [])
+    items.push({
+      type: 'function_call', call_id: tc.id,
+      name: tc.function.name, arguments: tc.function.arguments, status: 'completed',
+    } as ResponseFunctionToolCallItem);
+};
+
 // ── openai-chat TR data → Responses API input items ──
 // Used when replaying openai-chat TRs to a Responses API model.
 export const chatTRToResponsesInput = (entries: TRDataEntry[]): ResponseInputItem[] => {
   const items: ResponseInputItem[] = [];
-
-  for (const entry of entries) {
-    if (entry.role === 'assistant') {
-      const assistant = entry as TRAssistantEntry;
-
-      // Reasoning → ResponseInputReasoning (before message/tool_calls)
-      if (assistant.reasoning_opaque) {
-        items.push({
-          type: 'reasoning',
-          id: `rs_${items.length}`,
-          summary: assistant.reasoning_text
-            ? [{ type: 'summary_text', text: assistant.reasoning_text }]
-            : [],
-          encrypted_content: assistant.reasoning_opaque,
-        } as ResponseInputReasoning);
-      }
-
-      // Text content → message with output_text
-      if (assistant.content != null) {
-        const content: ResponseInputContent[] = [];
-        if (typeof assistant.content === 'string') {
-          content.push({ type: 'output_text', text: assistant.content });
-        } else if (Array.isArray(assistant.content)) {
-          for (const part of assistant.content) {
-            const p = part as AnyMsg;
-            if (p.type === 'text')
-              content.push({ type: 'output_text', text: p.text });
-            // Skip thinking blocks
-          }
-        }
-        if (content.length > 0)
-          items.push({ type: 'message', role: 'assistant', content } as ResponseInputMessage);
-      }
-
-      // Tool calls → function_call items
-      if (assistant.tool_calls) {
-        for (const tc of assistant.tool_calls) {
-          items.push({
-            type: 'function_call',
-            call_id: tc.id,
-            name: tc.function.name,
-            arguments: tc.function.arguments,
-            status: 'completed',
-          } as ResponseFunctionToolCallItem);
-        }
-      }
-    } else if (entry.role === 'tool') {
-      const tool = entry as TRToolResultEntry;
-      items.push({
+  for (const entry of entries)
+    entry.role === 'assistant'
+      ? assistantToResponsesItems(entry as TRAssistantEntry, items)
+      : entry.role === 'tool' && items.push({
         type: 'function_call_output',
-        call_id: tool.tool_call_id,
-        output: tool.content,
+        call_id: (entry as TRToolResultEntry).tool_call_id,
+        output: (entry as TRToolResultEntry).content,
       } as ResponseFunctionCallOutputItem);
-    }
-  }
-
   return items;
 };
 
@@ -99,54 +88,39 @@ export const responsesOutputToMessages = (items: unknown[]): Message[] => {
   let pendingReasoningText: string | undefined;
 
   const flushAssistant = () => {
-    if (pendingContent != null || pendingToolCalls.length > 0
-        || pendingReasoningOpaque != null || pendingReasoningText != null) {
-      const msg: AnyMsg = { role: 'assistant' };
-      if (pendingContent != null) msg.content = pendingContent;
-      if (pendingToolCalls.length > 0) msg.tool_calls = pendingToolCalls;
-      if (pendingReasoningOpaque != null) msg.reasoning_opaque = pendingReasoningOpaque;
-      if (pendingReasoningText != null) msg.reasoning_text = pendingReasoningText;
-      messages.push(msg as Message);
-      pendingContent = undefined;
-      pendingToolCalls = [];
-      pendingReasoningOpaque = undefined;
-      pendingReasoningText = undefined;
-    }
+    if (pendingContent == null && pendingToolCalls.length === 0
+        && pendingReasoningOpaque == null && pendingReasoningText == null) return;
+    const msg: AnyMsg = { role: 'assistant' };
+    if (pendingContent != null) msg.content = pendingContent;
+    if (pendingToolCalls.length > 0) msg.tool_calls = pendingToolCalls;
+    if (pendingReasoningOpaque != null) msg.reasoning_opaque = pendingReasoningOpaque;
+    if (pendingReasoningText != null) msg.reasoning_text = pendingReasoningText;
+    messages.push(msg as Message);
+    pendingContent = undefined;
+    pendingToolCalls = [];
+    pendingReasoningOpaque = undefined;
+    pendingReasoningText = undefined;
   };
 
   for (const raw of items) {
     const item = raw as AnyMsg;
 
     if (item.type === 'message') {
-      const msg = item as ResponseOutputMessage;
-      for (const block of msg.content) {
-        if (block.type === 'output_text')
-          pendingContent = (pendingContent ?? '') + block.text;
-        if (block.type === 'refusal')
-          pendingContent = (pendingContent ?? '') + block.refusal;
-      }
+      for (const block of (item as ResponseOutputMessage).content)
+        pendingContent = (pendingContent ?? '')
+          + (block.type === 'output_text' ? block.text : block.type === 'refusal' ? block.refusal : '');
     } else if (item.type === 'function_call') {
       const fc = item as ResponseOutputFunctionCall;
-      pendingToolCalls.push({
-        id: fc.call_id,
-        type: 'function',
-        function: { name: fc.name, arguments: fc.arguments },
-      });
+      pendingToolCalls.push({ id: fc.call_id, type: 'function', function: { name: fc.name, arguments: fc.arguments } });
     } else if (item.type === 'reasoning') {
-      if (item.encrypted_content)
-        pendingReasoningOpaque = item.encrypted_content as string;
-      if (Array.isArray(item.summary) && item.summary.length > 0) {
-        const text = (item.summary as { text: string }[]).map(s => s.text).join('\n');
-        if (text) pendingReasoningText = text;
-      }
+      if (item.encrypted_content) pendingReasoningOpaque = item.encrypted_content as string;
+      const summaryText = Array.isArray(item.summary)
+        ? (item.summary as { text: string }[]).map(s => s.text).join('\n')
+        : '';
+      if (summaryText) pendingReasoningText = summaryText;
     } else if (item.type === 'function_call_output') {
-      // Flush pending assistant before emitting tool result
       flushAssistant();
-      messages.push({
-        role: 'tool',
-        tool_call_id: item.call_id,
-        content: item.output,
-      } as unknown as Message);
+      messages.push({ role: 'tool', tool_call_id: item.call_id, content: item.output } as unknown as Message);
     }
   }
 
@@ -167,66 +141,27 @@ export const messagesToResponsesInput = (messages: Message[]): ResponseInputItem
       if (typeof m.content === 'string') {
         items.push({ type: 'message', role: 'user', content: m.content } as ResponseInputMessage);
       } else if (Array.isArray(m.content)) {
-        const content: ResponseInputContent[] = [];
-        for (const part of m.content) {
-          if (part.type === 'text')
-            content.push({ type: 'input_text', text: part.text });
-          else if (part.type === 'image_url')
-            content.push({ type: 'input_image', image_url: part.image_url.url, detail: part.image_url.detail ?? 'auto' });
-        }
-        if (content.length > 0)
-          items.push({ type: 'message', role: 'user', content } as ResponseInputMessage);
+        const content = (m.content as AnyMsg[]).flatMap((part): ResponseInputContent[] =>
+          part.type === 'text' ? [{ type: 'input_text', text: part.text as string }]
+            : part.type === 'image_url' ? [{ type: 'input_image', image_url: part.image_url.url as string, detail: (part.image_url.detail ?? 'auto') as 'auto' | 'low' | 'high' }]
+              : []);
+        if (content.length > 0) items.push({ type: 'message', role: 'user', content } as ResponseInputMessage);
       }
     } else if (m.role === 'assistant') {
-      // Reasoning → ResponseInputReasoning (before message/tool_calls)
-      if (m.reasoning_opaque) {
-        items.push({
-          type: 'reasoning',
-          id: `rs_${items.length}`,
-          summary: m.reasoning_text
-            ? [{ type: 'summary_text', text: m.reasoning_text }]
-            : [],
-          encrypted_content: m.reasoning_opaque,
-        } as ResponseInputReasoning);
-      }
-
-      // Text content → message with output_text
-      if (m.content != null) {
-        const content: ResponseInputContent[] = [];
-        if (typeof m.content === 'string') {
-          content.push({ type: 'output_text', text: m.content });
-        } else if (Array.isArray(m.content)) {
-          for (const part of m.content) {
-            if (part.type === 'text')
-              content.push({ type: 'output_text', text: part.text });
-            // Skip thinking blocks
-          }
-        }
-        if (content.length > 0)
-          items.push({ type: 'message', role: 'assistant', content } as ResponseInputMessage);
-      }
-
-      // Tool calls → function_call items
-      if (m.tool_calls) {
-        for (const tc of m.tool_calls) {
-          items.push({
-            type: 'function_call',
-            call_id: tc.id,
-            name: tc.function.name,
-            arguments: tc.function.arguments,
-            status: 'completed',
-          } as ResponseFunctionToolCallItem);
-        }
-      }
+      assistantToResponsesItems(m, items);
     } else if (m.role === 'tool') {
-      items.push({
-        type: 'function_call_output',
-        call_id: m.tool_call_id,
-        output: m.content,
-      } as ResponseFunctionCallOutputItem);
+      items.push({ type: 'function_call_output', call_id: m.tool_call_id, output: m.content } as ResponseFunctionCallOutputItem);
     }
-    // system/developer messages handled via instructions parameter, skip here
   }
 
   return items;
 };
+
+// ── xsai Tool → Responses API function tool ──
+export const xsaiToolToResponsesTool = (t: Tool): ResponseTool => ({
+  type: 'function',
+  name: t.function.name,
+  parameters: t.function.parameters as Record<string, unknown>,
+  strict: false,
+  ...(t.function.description ? { description: t.function.description } : {}),
+});

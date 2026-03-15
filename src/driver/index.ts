@@ -4,9 +4,8 @@ import type { Message } from 'xsai';
 
 import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, latestExternalEventMs, trimImages } from './context';
-import { messagesToResponsesInput } from './convert';
+import { messagesToResponsesInput, xsaiToolToResponsesTool } from './convert';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
-import type { ResponseOutputFunctionCall } from './responses-types';
 import { createRunner } from './runner';
 import { streamingChat } from './streaming';
 import { streamingResponses } from './streaming-responses';
@@ -189,94 +188,49 @@ export const createDriver = (config: DriverConfig, deps: {
                 });
                 injectLateBindingPrompt(probeMessages, probeLateBinding);
 
-                // Capture before probe call — events arriving during the call
-                // have receivedAtMs > probeRequestedAt and won't be swallowed.
                 const probeRequestedAt = Date.now();
-
                 const probeApiFormat: ProviderFormat = config.probe.model.apiFormat ?? 'openai-chat';
-                let hasToolCalls = false;
-                let probeData: Record<string, any>[] = [];
-                let probeInputTokens = 0;
-                let probeOutputTokens = 0;
 
-                if (probeApiFormat === 'responses') {
-                  const probeResult = await streamingResponses({
-                    baseURL: config.probe.model.apiBaseUrl,
-                    apiKey: config.probe.model.apiKey,
-                    model: config.probe.model.model,
-                    input: messagesToResponsesInput(probeMessages),
-                    instructions: system,
-                    tools: [sendMessageTool].map(t => ({
-                      type: 'function' as const,
-                      name: t.function.name,
-                      parameters: t.function.parameters as Record<string, unknown>,
-                      ...(t.function.description ? { description: t.function.description } : {}),
-                    })),
-                    log,
-                    label: `probe:${chatId}`,
+                // Unified probe call — extract { hasToolCalls, data, inputTokens, outputTokens }
+                const probe = probeApiFormat === 'responses'
+                  ? await streamingResponses({
+                    baseURL: config.probe.model.apiBaseUrl, apiKey: config.probe.model.apiKey,
+                    model: config.probe.model.model, input: messagesToResponsesInput(probeMessages),
+                    instructions: system, tools: [sendMessageTool].map(xsaiToolToResponsesTool),
+                    log, label: `probe:${chatId}`,
+                  }).then(r => ({
+                    hasToolCalls: r.output.some(item => item.type === 'function_call'),
+                    data: r.output as Record<string, any>[],
+                    inputTokens: r.usage.input_tokens, outputTokens: r.usage.output_tokens,
+                  }))
+                  : await streamingChat({
+                    baseURL: config.probe.model.apiBaseUrl, apiKey: config.probe.model.apiKey,
+                    model: config.probe.model.model, messages: probeMessages, system,
+                    tools: [sendMessageTool], log, label: `probe:${chatId}`,
+                  }).then(r => {
+                    const msg = r.choices[0]?.message;
+                    return {
+                      hasToolCalls: (msg?.tool_calls?.length ?? 0) > 0,
+                      data: msg ? [msg] as Record<string, any>[] : [],
+                      inputTokens: r.usage.prompt_tokens, outputTokens: r.usage.completion_tokens,
+                    };
                   });
 
-                  const functionCalls = probeResult.output.filter(
-                    (item): item is ResponseOutputFunctionCall => item.type === 'function_call',
-                  );
-                  hasToolCalls = functionCalls.length > 0;
-                  probeData = probeResult.output as Record<string, any>[];
-                  probeInputTokens = probeResult.usage.input_tokens;
-                  probeOutputTokens = probeResult.usage.output_tokens;
-
-                  log.withFields({
-                    chatId,
-                    hasToolCalls,
-                    toolCalls: functionCalls.map(fc => ({ name: fc.name, args: fc.arguments })),
-                    outputItems: probeResult.output.length,
-                    usage: probeResult.usage,
-                  }).log('Probe result');
-                } else {
-                  const probeResult = await streamingChat({
-                    baseURL: config.probe.model.apiBaseUrl,
-                    apiKey: config.probe.model.apiKey,
-                    model: config.probe.model.model,
-                    messages: probeMessages,
-                    system,
-                    tools: [sendMessageTool],
-                    log,
-                    label: `probe:${chatId}`,
-                  });
-
-                  const probeMsg = probeResult.choices[0]?.message;
-                  const toolCalls = (probeMsg?.tool_calls ?? []) as { function: { name: string; arguments: string } }[];
-                  hasToolCalls = toolCalls.length > 0;
-                  probeData = probeMsg ? [probeMsg] : [];
-                  probeInputTokens = probeResult.usage.prompt_tokens;
-                  probeOutputTokens = probeResult.usage.completion_tokens;
-
-                  log.withFields({
-                    chatId,
-                    hasToolCalls,
-                    toolCalls: toolCalls.map(tc => ({ name: tc.function.name, args: tc.function.arguments })),
-                    content: probeMsg?.content ?? null,
-                    usage: probeResult.usage,
-                  }).log('Probe result');
-                }
+                log.withFields({ chatId, hasToolCalls: probe.hasToolCalls }).log('Probe result');
 
                 deps.persistProbeResponse(chatId, {
-                  requestedAtMs: probeRequestedAt,
-                  provider: probeApiFormat,
-                  data: probeData,
-                  inputTokens: probeInputTokens,
-                  outputTokens: probeOutputTokens,
+                  requestedAtMs: probeRequestedAt, provider: probeApiFormat,
+                  data: probe.data, inputTokens: probe.inputTokens, outputTokens: probe.outputTokens,
                   reasoningSignatureCompat: config.probe.model.reasoningSignatureCompat ?? '',
-                  isActivated: hasToolCalls,
+                  isActivated: probe.hasToolCalls,
                 });
 
-                // Advance processed marker — probe has evaluated these events.
                 lastProcessedMs(probeRequestedAt);
 
-                if (!hasToolCalls) {
+                if (!probe.hasToolCalls) {
                   log.withFields({ chatId }).log('Probe: model chose silence');
                   return;
                 }
-
                 log.withFields({ chatId }).log('Probe: tool calls detected, activating primary model');
               }
             }

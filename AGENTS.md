@@ -12,7 +12,7 @@ Cahciua is a Telegram group chat bot built on the **Deterministic Context Pipeli
 2. **Projection**: `IC' = Reducers(IC, CanonicalIMEvent)` — pure-function state machine producing an Intermediate Context (IC).
 3. **Rendering**: `RC = Render(IC, RenderParams)` — serialization with viewport filtering and late-binding injection, producing Rendered Context (RC).
 
-The Driver layer sits after Rendering: it merges RC (chat context) with its own TRs (bot responses, tool results) by timestamp to assemble the final LLM API request. Driver owns tool call loops, reactive scheduling, and context compaction. Current implementation uses OpenAI Chat Completions compatible endpoints with SSE streaming.
+The Driver layer sits after Rendering: it merges RC (chat context) with its own TRs (bot responses, tool results) by timestamp to assemble the final LLM API request. Driver owns tool call loops, reactive scheduling, and context compaction. Supports two API formats: OpenAI Chat Completions (`openai-chat`, via xsai with SSE streaming) and OpenAI Responses API (`responses`, via direct fetch with SSE streaming). TRs are stored in raw provider format; conversion happens at API boundaries when composing context or sending requests.
 
 Key design goals: KV Cache friendly (append-only history, static system prompt, epoch-based compaction), group chat native (message batching, multi-user identity tracking, anti-injection via XML fencing), autonomous reply (bot decides whether to respond via Tool Call, not synchronous response).
 
@@ -25,14 +25,14 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 | DB / Persistence | Done | events, messages, turn_responses, compactions, probe_responses tables; 19 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
 | Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces |
-| Driver | Done | SSE streaming via xsai `chat()`, manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization, reactive orchestration (alien-signals), context compaction (LLM-based summarization with append-only history), probe/activate gate (small model decides silence vs activation). Planned: late-binding injection, multi-provider support |
+| Driver | Done | Dual-provider SSE streaming (OpenAI Chat Completions via xsai + Responses API via fetch), manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization (per-provider format), reactive orchestration (alien-signals), context compaction (LLM-based summarization with append-only history), probe/activate gate (small model decides silence vs activation), format conversion (openai-chat ↔ responses) at API boundaries |
 
 ## Tech Stack
 
 - **Runtime**: Node.js (>=22), TypeScript, tsx (dev), tsdown (build).
 - **Telegram Bot API**: grammY — primary message handling, sending replies, commands.
 - **Telegram User API**: gramjs (`telegram` on npm) — MTProto client for history fetching, reply-to context resolution, seeing other bots' messages.
-- **LLM**: xsAI — `chat()` with `stream: true` for SSE streaming + manual tool execution loop. `generateText()` not used (its internal tool loop swallows per-step data). SSE streaming helper in `src/driver/streaming.ts` parses chunks and logs deltas in real time.
+- **LLM**: Two API format paths — OpenAI Chat Completions (via xsAI `chat()` with `stream: true`) and OpenAI Responses API (via direct `fetch` with SSE streaming). Context composition always outputs openai-chat format as lingua franca; conversion to responses format happens at the runner layer. SSE streaming helpers in `src/driver/streaming.ts` (chat) and `src/driver/streaming-responses.ts` (responses) parse chunks and log deltas in real time.
 - **Database**: SQLite via better-sqlite3, Drizzle ORM.
 - **State management**: Immer — immutable IC updates in Projection reducers.
 - **Reactivity**: alien-signals — signal/computed/effect graph for Driver orchestration.
@@ -67,14 +67,18 @@ src/
 │   ├── index.ts            # render(), rcToXml(), XML serialization of ContentNode/attachments
 │   └── index.test.ts       # Rendering unit tests
 ├── driver/                 # Driver: RC + TRs → LLM API calls
-│   ├── types.ts            # TurnResponse, DriverConfig, CompactionSessionMeta, CompactionConfig
+│   ├── types.ts            # TurnResponse, DriverConfig, ProviderFormat, ContextChunk, CompactionSessionMeta
 │   ├── context.ts          # Pure functions: context composition, token trimming, reasoning sanitization, working window cursor
-│   ├── context.test.ts     # Context composition tests
-│   ├── merge.ts            # mergeContext(RC, TRs) → Message[] — timestamp-ordered interleave
+│   ├── context.test.ts     # Context composition tests (openai-chat + responses provider branches)
+│   ├── merge.ts            # mergeContext(RC, TRs) → ContextChunk[] — timestamp-ordered interleave
 │   ├── merge.test.ts       # Merge logic tests
-│   ├── runner.ts           # LLM step loop: SSE streaming + manual tool execution
+│   ├── convert.ts          # Format conversion: openai-chat ↔ responses (chatTRToResponsesInput, responsesOutputToMessages, messagesToResponsesInput, xsaiToolToResponsesTool)
+│   ├── convert.test.ts     # Conversion + round-trip fidelity tests
+│   ├── responses-types.ts  # OpenAI Responses API type definitions (request/response/stream events)
+│   ├── runner.ts           # LLM step loop: dual-provider SSE streaming + manual tool execution
 │   ├── streaming.ts        # SSE streaming chat: parses OpenAI-compat SSE into ChatCompletion result with per-chunk logging
-│   ├── compaction.ts       # Context compaction: LLM-based conversation summarization
+│   ├── streaming-responses.ts # SSE streaming responses: parses Responses API SSE into output items with per-chunk logging
+│   ├── compaction.ts       # Context compaction: LLM-based conversation summarization (dual-provider)
 │   ├── prompt.ts           # Prompt rendering — loads all velin templates from prompts/
 │   ├── system-prompt.test.ts # System prompt tests
 │   ├── tools.ts            # send_message tool definition (xsai Tool)
@@ -189,7 +193,7 @@ Each LLM API call = one TR (not the entire loop as one TR). When new external ch
 
 ### Reasoning Signature Sanitization
 
-Anthropic models return reasoning as thinking text + cryptographic signature. The signature is only valid within the same provider family. Each TR records its `reasoningSignatureCompat` group. On replay: same compat → keep reasoning (model can resume); different/empty → strip all reasoning fields (`reasoning_text`, `reasoning_opaque`, thinking blocks). The pair is always kept or stripped together.
+Anthropic models return reasoning as thinking text + cryptographic signature. The signature is only valid within the same provider family. Each TR records its `reasoningSignatureCompat` group. On replay: same compat → keep reasoning (model can resume); different/empty → strip all reasoning fields. In openai-chat format, reasoning appears as `reasoning_text` + `reasoning_opaque` fields on assistant entries. In responses format, reasoning appears as output items with `type: 'reasoning'`, carrying `encrypted_content` and `summary`. The pair is always kept or stripped together. Format conversion preserves reasoning through round-trips (`encrypted_content` ↔ `reasoning_opaque`, `summary` ↔ `reasoning_text`).
 
 ### Debug Dumps
 
@@ -207,15 +211,15 @@ Data flows strictly forward (no backflow). Events table stores only IM platform 
 
 ### TR Storage
 
-TRs are stored in a `turn_responses` DB table (raw provider format, not provider-agnostic). One row per TR:
+TRs are stored in a `turn_responses` DB table (raw provider format, not provider-agnostic). Each TR records its `provider` field (`'openai-chat'` or `'responses'`). One row per TR:
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | INTEGER PK | autoincrement |
 | chat_id | TEXT NOT NULL | Session ID (= Telegram chat ID) |
 | requested_at | INTEGER NOT NULL | millisecond timestamp, merge ordering key |
-| provider | TEXT NOT NULL | e.g. 'openai-chat', 'anthropic-messages' |
-| data | TEXT (JSON) NOT NULL | raw provider response entries (assistant message + tool results) |
+| provider | TEXT NOT NULL | `'openai-chat'` or `'responses'` |
+| data | TEXT (JSON) NOT NULL | raw provider response entries (`unknown[]` — openai-chat: `TRDataEntry[]`, responses: output items + function_call_outputs) |
 | session_meta | TEXT (JSON) | deprecated — compaction now uses dedicated `compactions` table |
 | input_tokens | INTEGER NOT NULL | for statistics / cost tracking |
 | output_tokens | INTEGER NOT NULL | for statistics / cost tracking |
@@ -309,7 +313,7 @@ In group chats, most messages don't require a bot response. To avoid wasting tok
    - `lastMentionedAtMs`: max `receivedAtMs` of RC segments with `mentionsMe` or `repliesToMe` set
    - `mentionsMe`: RC segment's source message content contains a `<mention>` node targeting bot's userId
    - `repliesToMe`: RC segment's source message replies to a bot message
-3. If probe needed: call `streamingChat` with probe model (same context, same tools, single call)
+3. If probe needed: call LLM with probe model (same context, same tools, single call — supports both `openai-chat` and `responses` API formats)
    - No tool calls → persist probe response (`is_activated=false`), return (bot stays silent)
    - Has tool calls → persist probe response (`is_activated=true`), fall through to primary step loop
 4. If probe not needed (bot was mentioned/replied to): skip probe, run primary step loop directly
@@ -321,7 +325,7 @@ In group chats, most messages don't require a bot response. To avoid wasting tok
 | id | INTEGER PK | autoincrement |
 | chat_id | TEXT NOT NULL | indexed |
 | requested_at | INTEGER NOT NULL | millisecond timestamp |
-| provider | TEXT NOT NULL | e.g. 'openai-chat' |
+| provider | TEXT NOT NULL | `'openai-chat'` or `'responses'` |
 | data | TEXT (JSON) NOT NULL | probe LLM output |
 | input_tokens | INTEGER NOT NULL | token stats |
 | output_tokens | INTEGER NOT NULL | token stats |

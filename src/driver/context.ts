@@ -192,16 +192,11 @@ export const findWorkingWindowCursor = (
 // Keep only the latest N, trim older ones before merge.
 const KEEP_NO_TOOL_CALL_TRS = 5;
 
-const trHasToolCalls = (tr: TurnResponse): boolean => {
-  if (tr.provider === 'responses') {
-    return (tr.data as AnyMsg[]).some(item => item.type === 'function_call');
-  }
-  // openai-chat
-  return tr.data.some(entry => {
-    const e = entry as TRDataEntry;
-    return e.role === 'assistant' && Array.isArray(e.tool_calls) && e.tool_calls.length > 0;
-  });
-};
+const trHasToolCalls = (tr: TurnResponse): boolean =>
+  (tr.data as AnyMsg[]).some(item =>
+    tr.provider === 'responses'
+      ? item.type === 'function_call'
+      : item.role === 'assistant' && Array.isArray(item.tool_calls) && item.tool_calls.length > 0);
 
 const trimStaleNoToolCallTRs = (trs: TurnResponse[]): TurnResponse[] => {
   // Partition: indices of TRs without tool calls
@@ -225,35 +220,21 @@ const trimStaleNoToolCallTRs = (trs: TurnResponse[]): TurnResponse[] => {
 const TOOL_RESULT_TRIM_THRESHOLD = 512; // chars — results shorter than this are kept
 const TOOL_RESULT_KEEP_RECENT = 2;      // keep last N TRs' tool results untrimmed
 
-const trimToolResults = (trs: TurnResponse[]): TurnResponse[] => {
-  if (trs.length <= TOOL_RESULT_KEEP_RECENT) return trs;
+const trimLongResult = (text: string): string =>
+  text.length <= TOOL_RESULT_TRIM_THRESHOLD ? text
+    : `${text.slice(0, 200)}\n... [trimmed ${text.length} chars] ...\n${text.slice(-200)}`;
 
-  return trs.map((tr, i) => {
-    if (i >= trs.length - TOOL_RESULT_KEEP_RECENT) return tr;
-
-    if (tr.provider === 'responses') {
-      // Trim function_call_output items
-      const data = (tr.data as AnyMsg[]).map((item): unknown => {
-        if (item.type !== 'function_call_output') return item;
-        if ((item.output as string).length <= TOOL_RESULT_TRIM_THRESHOLD) return item;
-        const head = (item.output as string).slice(0, 200);
-        const tail = (item.output as string).slice(-200);
-        return { ...item, output: `${head}\n... [trimmed ${(item.output as string).length} chars] ...\n${tail}` };
-      });
-      return { ...tr, data };
-    }
-
-    // openai-chat
-    const data = (tr.data as TRDataEntry[]).map((entry): TRDataEntry => {
-      if (entry.role !== 'tool') return entry;
-      if (entry.content.length <= TOOL_RESULT_TRIM_THRESHOLD) return entry;
-      const head = entry.content.slice(0, 200);
-      const tail = entry.content.slice(-200);
-      return { ...entry, content: `${head}\n... [trimmed ${entry.content.length} chars] ...\n${tail}` };
-    });
-    return { ...tr, data };
-  });
-};
+const trimToolResults = (trs: TurnResponse[]): TurnResponse[] =>
+  trs.length <= TOOL_RESULT_KEEP_RECENT ? trs
+    : trs.map((tr, i) =>
+        i >= trs.length - TOOL_RESULT_KEEP_RECENT ? tr
+          : {
+              ...tr,
+              data: (tr.data as AnyMsg[]).map(item =>
+                tr.provider === 'responses'
+                  ? (item.type === 'function_call_output' ? { ...item, output: trimLongResult(item.output as string) } : item)
+                  : (item.role === 'tool' ? { ...item, content: trimLongResult(item.content as string) } : item)),
+            });
 
 // --- Feature flag: trimSelfMessagesCoveredBySendToolCalls ---
 // Bot's own messages enter RC via userbot AND exist in TRs as tool call results.
@@ -300,43 +281,39 @@ const contentPieceToMessagePart = (piece: RenderedContentPiece) =>
 const chunksToMessages = (chunks: ContextChunk[]): Message[] => {
   const messages: Message[] = [];
   let pendingParts: ReturnType<typeof contentPieceToMessagePart>[] = [];
+  let responsesBuffer: unknown[] = [];
 
-  const flushRC = () => {
+  const flush = () => {
+    if (responsesBuffer.length > 0) {
+      messages.push(...responsesOutputToMessages(responsesBuffer as any[]));
+      responsesBuffer = [];
+    }
     if (pendingParts.length > 0) {
       messages.push({ role: 'user', content: pendingParts } as UserMessage);
       pendingParts = [];
     }
   };
 
-  // Collect consecutive TR chunks from same provider to batch-convert responses data
-  let responsesBuffer: unknown[] = [];
-
-  const flushResponsesBuffer = () => {
-    if (responsesBuffer.length > 0) {
-      const converted = responsesOutputToMessages(responsesBuffer as any[]);
-      messages.push(...converted);
-      responsesBuffer = [];
-    }
-  };
-
   for (const chunk of chunks) {
     if (chunk.type === 'rc') {
-      flushResponsesBuffer();
-      pendingParts.push(...chunk.content.map(contentPieceToMessagePart));
-    } else {
-      flushRC();
-      if (chunk.provider === 'responses') {
-        responsesBuffer.push(chunk.data);
-      } else {
-        flushResponsesBuffer();
-        messages.push(chunk.data as Message);
+      if (responsesBuffer.length > 0) {
+        messages.push(...responsesOutputToMessages(responsesBuffer as any[]));
+        responsesBuffer = [];
       }
+      pendingParts.push(...chunk.content.map(contentPieceToMessagePart));
+    } else if (chunk.provider === 'responses') {
+      if (pendingParts.length > 0) {
+        messages.push({ role: 'user', content: pendingParts } as UserMessage);
+        pendingParts = [];
+      }
+      responsesBuffer.push(chunk.data);
+    } else {
+      flush();
+      messages.push(chunk.data as Message);
     }
   }
 
-  flushRC();
-  flushResponsesBuffer();
-
+  flush();
   return messages;
 };
 
