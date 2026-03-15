@@ -295,11 +295,13 @@ export const createDriver = (config: DriverConfig, deps: {
           try {
             const cursor = cursorMs();
             const sum = summary();
+            const compactEndpoint = config.compaction.model ?? config.primaryModel;
+
             const trs = loadTRs(chatId, cursor);
             // Estimate tokens WITHOUT summary — summary should not count toward
             // the working window budget, otherwise it grows until it fills the
             // budget and compaction degrades into a sliding window.
-            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, config.primaryModel.reasoningSignatureCompat, config.featureFlags);
+            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, compactEndpoint.reasoningSignatureCompat, config.featureFlags);
             if (!ctx) return;
             // Trigger at maxContextEstTokens (high water mark), compact down to
             // workingWindowEstTokens (low water mark). This gives a wide gap
@@ -318,7 +320,6 @@ export const createDriver = (config: DriverConfig, deps: {
               dryRun: !!config.compaction.dryRun,
             }).log('Triggering compaction');
 
-            const compactEndpoint = config.compaction.model ?? config.primaryModel;
             const newMeta = await runCompaction({
               apiBaseUrl: compactEndpoint.apiBaseUrl,
               apiKey: compactEndpoint.apiKey,
@@ -329,7 +330,7 @@ export const createDriver = (config: DriverConfig, deps: {
               existingSummary: sum,
               oldCursorMs: cursor ?? 0,
               newCursorMs,
-              reasoningSignatureCompat: config.primaryModel.reasoningSignatureCompat,
+              reasoningSignatureCompat: compactEndpoint.reasoningSignatureCompat,
               featureFlags: config.featureFlags,
               log,
             });
