@@ -7,6 +7,7 @@ import type {
   CanonicalDeleteEvent,
   CanonicalEditEvent,
   CanonicalMessageEvent,
+  CanonicalServiceEvent,
   CanonicalUser,
   ContentNode,
 } from '../adaptation/types';
@@ -163,6 +164,7 @@ describe('reduce', () => {
       const sysEvent = ic.nodes[1]!;
       if (sysEvent.type !== 'system_event') throw new Error('expected system_event');
       expect(sysEvent.kind).toBe('user_renamed');
+      if (sysEvent.kind !== 'user_renamed') throw new Error('expected user_renamed');
       expect(sysEvent.oldUser).toEqual(alice);
       expect(sysEvent.newUser).toEqual(renamedAlice);
     });
@@ -247,5 +249,114 @@ describe('reduce', () => {
       expect(after.nodes).toHaveLength(1);
       expect(after.users.size).toBe(1);
     });
+  });
+
+  describe('service events', () => {
+    const service = (overrides: Partial<CanonicalServiceEvent>): CanonicalServiceEvent => ({
+      type: 'service',
+      chatId: 'chat1',
+      receivedAtMs: 5000,
+      timestampSec: 5,
+      utcOffsetMin: 480,
+      actor: alice,
+      ...overrides,
+      action: (overrides as any).action ?? { action: 'chat_photo_changed' },
+    });
+
+    it('pushes ICMembersJoinedEvent', () => {
+      const ic = reduce(createEmptyIC('chat1'), service({
+        action: { action: 'members_joined', members: [alice, bob] },
+      }));
+      expect(ic.nodes).toHaveLength(1);
+      const node = ic.nodes[0]!;
+      expect(node.type).toBe('system_event');
+      if (node.type === 'system_event') {
+        expect(node.kind).toBe('members_joined');
+        if (node.kind === 'members_joined') {
+          expect(node.members).toEqual([alice, bob]);
+          expect(node.actor).toEqual(alice);
+        }
+      }
+    });
+
+    it('pushes ICMemberLeftEvent', () => {
+      const ic = reduce(createEmptyIC('chat1'), service({
+        action: { action: 'member_left', member: bob },
+      }));
+      const node = ic.nodes[0]!;
+      if (node.type === 'system_event' && node.kind === 'member_left')
+        expect(node.member).toEqual(bob);
+    });
+
+    it('pushes ICChatRenamedEvent with oldTitle tracking', () => {
+      let ic = reduce(createEmptyIC('chat1'), service({
+        action: { action: 'chat_renamed', newTitle: 'First Name' },
+        receivedAtMs: 1000,
+      }));
+
+      // First rename: oldTitle should be null
+      const firstNode = ic.nodes[0]!;
+      if (firstNode.type === 'system_event' && firstNode.kind === 'chat_renamed') {
+        expect(firstNode.oldTitle).toBeNull();
+        expect(firstNode.newTitle).toBe('First Name');
+      }
+      expect(ic.chatTitle).toBe('First Name');
+
+      // Second rename: oldTitle should be "First Name"
+      ic = reduce(ic, service({
+        action: { action: 'chat_renamed', newTitle: 'Second Name' },
+        receivedAtMs: 2000,
+      }));
+      const secondNode = ic.nodes[1]!;
+      if (secondNode.type === 'system_event' && secondNode.kind === 'chat_renamed') {
+        expect(secondNode.oldTitle).toBe('First Name');
+        expect(secondNode.newTitle).toBe('Second Name');
+      }
+      expect(ic.chatTitle).toBe('Second Name');
+    });
+
+    it('pushes ICChatPhotoChangedEvent', () => {
+      const ic = reduce(createEmptyIC('chat1'), service({
+        action: { action: 'chat_photo_changed' },
+      }));
+      const node = ic.nodes[0]!;
+      expect(node.type).toBe('system_event');
+      if (node.type === 'system_event')
+        expect(node.kind).toBe('chat_photo_changed');
+    });
+
+    it('pushes ICChatPhotoDeletedEvent', () => {
+      const ic = reduce(createEmptyIC('chat1'), service({
+        action: { action: 'chat_photo_deleted' },
+      }));
+      const node = ic.nodes[0]!;
+      if (node.type === 'system_event')
+        expect(node.kind).toBe('chat_photo_deleted');
+    });
+
+    it('pushes ICMessagePinnedEvent with preview snapshot', () => {
+      let ic = reduce(createEmptyIC('chat1'), msg());
+      ic = reduce(ic, service({
+        action: { action: 'message_pinned', messageId: '1' },
+      }));
+
+      const node = ic.nodes[1]!;
+      if (node.type === 'system_event' && node.kind === 'message_pinned') {
+        expect(node.messageId).toBe('1');
+        expect(node.preview).toBe('hello');
+      }
+    });
+
+    it('pushes ICMessagePinnedEvent without preview when target not found', () => {
+      const ic = reduce(createEmptyIC('chat1'), service({
+        action: { action: 'message_pinned', messageId: '999' },
+      }));
+      const node = ic.nodes[0]!;
+      if (node.type === 'system_event' && node.kind === 'message_pinned') {
+        expect(node.messageId).toBe('999');
+        expect(node.preview).toBeUndefined();
+      }
+    });
+
   });
 });

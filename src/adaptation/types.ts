@@ -75,7 +75,35 @@ export interface CanonicalDeleteEvent {
   utcOffsetMin: number;
 }
 
+// --- Service events (group lifecycle) ---
+
+export interface ServiceActionMembersJoined { action: 'members_joined'; members: CanonicalUser[] }
+export interface ServiceActionMemberLeft { action: 'member_left'; member: CanonicalUser }
+export interface ServiceActionChatRenamed { action: 'chat_renamed'; newTitle: string }
+export interface ServiceActionChatPhotoChanged { action: 'chat_photo_changed' }
+export interface ServiceActionChatPhotoDeleted { action: 'chat_photo_deleted' }
+export interface ServiceActionMessagePinned { action: 'message_pinned'; messageId: string }
+
+export type ServiceAction =
+  | ServiceActionMembersJoined
+  | ServiceActionMemberLeft
+  | ServiceActionChatRenamed
+  | ServiceActionChatPhotoChanged
+  | ServiceActionChatPhotoDeleted
+  | ServiceActionMessagePinned;
+
+export interface CanonicalServiceEvent {
+  type: 'service';
+  chatId: string;
+  actor?: CanonicalUser;
+  receivedAtMs: number;
+  timestampSec: number;
+  utcOffsetMin: number;
+  action: ServiceAction;
+}
+
 export type CanonicalIMEvent =
   | CanonicalMessageEvent
   | CanonicalEditEvent
-  | CanonicalDeleteEvent;
+  | CanonicalDeleteEvent
+  | CanonicalServiceEvent;

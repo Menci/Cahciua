@@ -8,6 +8,7 @@ import type {
   CanonicalEditEvent,
   CanonicalIMEvent,
   CanonicalMessageEvent,
+  CanonicalServiceEvent,
 } from '../adaptation/types';
 import type { CompactionSessionMeta, ResponsesTRDataItem, TRDataEntry, TurnResponse } from '../driver/types';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
@@ -137,6 +138,13 @@ export const persistEvent = (db: DB, event: CanonicalIMEvent) => {
       ...base,
       messageIds: event.messageIds,
     }).run();
+  } else if (event.type === 'service') {
+    db.insert(events).values({
+      ...base,
+      sender: event.actor ?? null,
+      senderId: event.actor?.id ?? null,
+      serviceAction: event.action,
+    }).run();
   } else {
     const plainText = contentToPlainText(event.content);
     db.insert(events).values({
@@ -210,11 +218,25 @@ const reconstructDeleteEvent = (row: EventRow): CanonicalDeleteEvent => ({
   utcOffsetMin: row.utcOffsetMin,
 });
 
+const reconstructServiceEvent = (row: EventRow): CanonicalServiceEvent => {
+  const event: CanonicalServiceEvent = {
+    type: 'service',
+    chatId: row.chatId,
+    receivedAtMs: row.receivedAtMs,
+    timestampSec: row.timestampSec,
+    utcOffsetMin: row.utcOffsetMin,
+    action: row.serviceAction!,
+  };
+  if (row.sender) event.actor = row.sender;
+  return event;
+};
+
 const reconstructEvent = (row: EventRow): CanonicalIMEvent => {
   switch (row.type) {
   case 'message': return reconstructMessageEvent(row);
   case 'edit': return reconstructEditEvent(row);
   case 'delete': return reconstructDeleteEvent(row);
+  case 'service': return reconstructServiceEvent(row);
   default: throw new Error(`Unknown event type: ${row.type}`);
   }
 };

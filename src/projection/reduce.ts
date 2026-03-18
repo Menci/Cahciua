@@ -7,6 +7,7 @@ import type {
   CanonicalEditEvent,
   CanonicalIMEvent,
   CanonicalMessageEvent,
+  CanonicalServiceEvent,
   CanonicalUser,
 } from '../adaptation/types';
 
@@ -120,11 +121,56 @@ const reduceDelete = (draft: IntermediateContext, event: CanonicalDeleteEvent) =
   }
 };
 
+const reduceService = (draft: IntermediateContext, event: CanonicalServiceEvent) => {
+  const base = {
+    type: 'system_event' as const,
+    receivedAtMs: event.receivedAtMs,
+    timestampSec: event.timestampSec,
+    utcOffsetMin: event.utcOffsetMin,
+    actor: event.actor,
+  };
+
+  const { action } = event;
+
+  switch (action.action) {
+  case 'members_joined':
+    draft.nodes.push({ ...base, kind: 'members_joined', members: action.members });
+    break;
+  case 'member_left':
+    draft.nodes.push({ ...base, kind: 'member_left', member: action.member });
+    break;
+  case 'chat_renamed': {
+    const oldTitle = draft.chatTitle ?? null;
+    draft.nodes.push({ ...base, kind: 'chat_renamed', oldTitle, newTitle: action.newTitle });
+    draft.chatTitle = action.newTitle;
+    break;
+  }
+  case 'chat_photo_changed':
+    draft.nodes.push({ ...base, kind: 'chat_photo_changed' });
+    break;
+  case 'chat_photo_deleted':
+    draft.nodes.push({ ...base, kind: 'chat_photo_deleted' });
+    break;
+  case 'message_pinned': {
+    const targetIdx = findMessageIndex(draft.nodes, action.messageId);
+    let preview: string | undefined;
+    if (targetIdx !== -1) {
+      const target = draft.nodes[targetIdx] as ICMessage;
+      const plain = contentToPlainText(target.content);
+      if (plain) preview = truncate(plain, REPLY_PREVIEW_MAX);
+    }
+    draft.nodes.push({ ...base, kind: 'message_pinned', messageId: action.messageId, preview });
+    break;
+  }
+  }
+};
+
 export const reduce = (ic: IntermediateContext, event: CanonicalIMEvent): IntermediateContext =>
   produce(ic, draft => {
     switch (event.type) {
     case 'message': reduceMessage(draft, event); break;
     case 'edit': reduceEdit(draft, event); break;
     case 'delete': reduceDelete(draft, event); break;
+    case 'service': reduceService(draft, event); break;
     }
   });

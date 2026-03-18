@@ -13,8 +13,11 @@ const escapeXml = (text: string): string =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-const formatSender = (user: CanonicalUser): string =>
-  user.username ? `${user.displayName} (@${user.username})` : user.displayName;
+const formatSender = (user: CanonicalUser): string => {
+  const displayName = user.displayName !== '' ? user.displayName : (user.username ?? user.id);
+  if (user.username && user.username !== displayName) return `${displayName} (@${user.username})`;
+  return displayName;
+};
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
@@ -134,14 +137,44 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
 };
 
 const renderSystemEvent = (event: ICSystemEvent): string => {
+  const t = formatTimestamp(event.timestampSec, event.utcOffsetMin);
+  const actorAttr = 'actor' in event && event.actor ? ` actor="${escapeXml(formatSender(event.actor))}"` : '';
+
   switch (event.kind) {
   case 'user_renamed':
-    return `<event type="name_change" t="${formatTimestamp(event.timestampSec, event.utcOffsetMin)}" from_name="${escapeXml(formatSender(event.oldUser))}" to_name="${escapeXml(formatSender(event.newUser))}"/>`;
+    return `<event type="name_change" t="${t}" from_name="${escapeXml(formatSender(event.oldUser))}" to_name="${escapeXml(formatSender(event.newUser))}"/>`;
+
+  case 'members_joined': {
+    const members = event.members.map(m => formatSender(m)).join(', ');
+    return `<event type="members_joined" t="${t}"${actorAttr} members="${escapeXml(members)}"/>`;
   }
-  // Exhaustive: if a new kind is added to ICSystemEvent, TypeScript errors here.
-  // TODO: Add explicit rendering for future system events such as join/leave.
-  event.kind satisfies never;
-  return '';
+
+  case 'member_left':
+    return `<event type="member_left" t="${t}"${actorAttr} member="${escapeXml(formatSender(event.member))}"/>`;
+
+  case 'chat_renamed': {
+    const fromAttr = event.oldTitle != null ? ` from="${escapeXml(event.oldTitle)}"` : '';
+    return `<event type="chat_renamed" t="${t}"${actorAttr}${fromAttr} to="${escapeXml(event.newTitle)}"/>`;
+  }
+
+  case 'chat_photo_changed':
+    return `<event type="chat_photo_changed" t="${t}"${actorAttr}/>`;
+
+  case 'chat_photo_deleted':
+    return `<event type="chat_photo_deleted" t="${t}"${actorAttr}/>`;
+
+  case 'message_pinned': {
+    const preview = event.preview ? escapeXml(event.preview) : '';
+    if (preview)
+      return `<event type="message_pinned" t="${t}"${actorAttr} message_id="${escapeXml(event.messageId)}">${preview}</event>`;
+    return `<event type="message_pinned" t="${t}"${actorAttr} message_id="${escapeXml(event.messageId)}"/>`;
+  }
+
+  default: {
+    event satisfies never;
+    return '';
+  }
+  }
 };
 
 // --- Public API ---

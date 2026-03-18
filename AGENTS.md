@@ -103,6 +103,7 @@ src/
     └── message/
         ├── types.ts         # TelegramUser, TelegramMessage, Attachment, ForwardInfo, MessageEntity
         ├── gramjs.ts        # gramjs Api.Message → TelegramMessage conversion
+        ├── gramjs.test.ts   # GramJS message conversion + merge regression tests
         ├── grammy.ts        # grammY Message → TelegramMessage conversion
         ├── dedup.ts         # Set-based message dedup with LRU eviction (10k)
         └── index.ts         # Barrel exports

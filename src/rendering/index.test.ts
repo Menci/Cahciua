@@ -339,6 +339,134 @@ describe('render', () => {
       expect(result).toContain('t="2025-03-12T14:30:00+08:00"');
       expect(result).toContain('/>');
     });
+
+    it('renders members_joined event', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'members_joined',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+        actor: alice,
+        members: [alice, bob],
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('type="members_joined"');
+      expect(result).toContain('actor="Alice (@alice)"');
+      expect(result).toContain('members="Alice (@alice), Bob"');
+      expect(result).toContain('/>');
+    });
+
+    it('renders member_left event', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'member_left',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+        actor: bob,
+        member: bob,
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('type="member_left"');
+      expect(result).toContain('actor="Bob"');
+      expect(result).toContain('member="Bob"');
+    });
+
+    it('renders chat_renamed event with from and to', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'chat_renamed',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+        actor: alice,
+        oldTitle: 'Old Group',
+        newTitle: 'New Group',
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('type="chat_renamed"');
+      expect(result).toContain('from="Old Group"');
+      expect(result).toContain('to="New Group"');
+    });
+
+    it('renders chat_renamed event without from when oldTitle is null', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'chat_renamed',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+        actor: alice,
+        oldTitle: null,
+        newTitle: 'New Group',
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('type="chat_renamed"');
+      expect(result).not.toContain('from=');
+      expect(result).toContain('to="New Group"');
+    });
+
+    it('renders chat_photo_changed event', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'chat_photo_changed',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+        actor: alice,
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('type="chat_photo_changed"');
+      expect(result).toContain('actor="Alice (@alice)"');
+      expect(result).toContain('/>');
+    });
+
+    it('renders chat_photo_deleted event', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'chat_photo_deleted',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('type="chat_photo_deleted"');
+      expect(result).not.toContain('actor=');
+    });
+
+    it('renders message_pinned event with preview', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'message_pinned',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+        actor: alice,
+        messageId: '42',
+        preview: 'pinned content',
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('type="message_pinned"');
+      expect(result).toContain('message_id="42"');
+      expect(result).toContain('>pinned content</event>');
+    });
+
+    it('renders message_pinned event without preview as self-closing', () => {
+      const event: ICSystemEvent = {
+        type: 'system_event',
+        kind: 'message_pinned',
+        receivedAtMs: 1000,
+        timestampSec: 1741761000,
+        utcOffsetMin: 480,
+        actor: alice,
+        messageId: '42',
+      };
+      const result = xml(render(ic([event])));
+      expect(result).toContain('message_id="42"/>');
+      expect(result).not.toContain('</event>');
+    });
+
   });
 
   describe('viewport filtering', () => {

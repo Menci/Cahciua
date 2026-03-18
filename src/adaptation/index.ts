@@ -4,8 +4,10 @@ import type {
   CanonicalEditEvent,
   CanonicalForwardInfo,
   CanonicalMessageEvent,
+  CanonicalServiceEvent,
   CanonicalUser,
   ContentNode,
+  ServiceAction,
 } from './types';
 import type { Attachment, ForwardInfo, MessageEntity, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
 
@@ -16,16 +18,23 @@ export type {
   CanonicalIMEvent,
   CanonicalForwardInfo,
   CanonicalMessageEvent,
+  CanonicalServiceEvent,
   CanonicalUser,
   ContentNode,
+  ServiceAction,
 } from './types';
 
-const adaptUser = (user: TelegramUser): CanonicalUser => ({
-  id: user.id,
-  displayName: [user.firstName, user.lastName].filter(Boolean).join(' '),
-  username: user.username,
-  isBot: user.isBot,
-});
+const adaptUser = (user: TelegramUser): CanonicalUser => {
+  const name = [user.firstName, user.lastName].filter(Boolean).join(' ');
+  const displayName = name !== '' ? name : (user.username ?? user.id);
+
+  return {
+    id: user.id,
+    displayName,
+    username: user.username,
+    isBot: user.isBot,
+  };
+};
 
 const adaptAttachment = ({ type, mimeType, fileName, width, height, duration, thumbnailWebp }: Attachment): CanonicalAttachment => ({
   type,
@@ -217,4 +226,46 @@ export const adaptDelete = (del: TelegramMessageDelete): CanonicalDeleteEvent =>
     timestampSec: Math.floor(now / 1000),
     utcOffsetMin: captureUtcOffset(),
   };
+};
+
+// --- Service event adaptation ---
+
+export const isServiceMessage = (msg: TelegramMessage): boolean => {
+  if (msg.newChatMembers != null) return true;
+  if (msg.leftChatMember != null) return true;
+  if (msg.newChatTitle != null) return true;
+  if (msg.newChatPhoto === true) return true;
+  if (msg.deleteChatPhoto === true) return true;
+  return msg.pinnedMessage != null;
+};
+
+export const adaptServiceEvent = (msg: TelegramMessage): CanonicalServiceEvent | null => {
+  let action: ServiceAction | null = null;
+
+  if (msg.newChatMembers && msg.newChatMembers.length > 0) {
+    action = { action: 'members_joined', members: msg.newChatMembers.map(adaptUser) };
+  } else if (msg.leftChatMember) {
+    action = { action: 'member_left', member: adaptUser(msg.leftChatMember) };
+  } else if (msg.newChatTitle != null) {
+    action = { action: 'chat_renamed', newTitle: msg.newChatTitle };
+  } else if (msg.newChatPhoto) {
+    action = { action: 'chat_photo_changed' };
+  } else if (msg.deleteChatPhoto) {
+    action = { action: 'chat_photo_deleted' };
+  } else if (msg.pinnedMessage) {
+    action = { action: 'message_pinned', messageId: String(msg.pinnedMessage.messageId) };
+  }
+
+  if (!action) return null;
+
+  const event: CanonicalServiceEvent = {
+    type: 'service',
+    chatId: msg.chatId,
+    receivedAtMs: Date.now(),
+    timestampSec: msg.date,
+    utcOffsetMin: captureUtcOffset(),
+    action,
+  };
+  if (msg.sender) event.actor = adaptUser(msg.sender);
+  return event;
 };

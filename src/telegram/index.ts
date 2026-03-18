@@ -3,7 +3,7 @@ import type { Logger } from '@guiiai/logg';
 import type { BotClient, SendOptions, SentMessage } from './bot';
 import { createBotClient } from './bot';
 import { createEventBus } from './event-bus';
-import { createMessageDedup } from './message';
+import { createMessageDedup, mergeTelegramMessageData } from './message';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, Attachment } from './message';
 import { canGenerateThumbnail, generateThumbnail } from './thumbnail';
 import type { FetchOptions, UserbotClient } from './userbot';
@@ -53,22 +53,6 @@ export const createTelegramManager = (
   const editBus = createEventBus<TelegramMessageEdit>('telegram:edit', logger);
   const deleteBus = createEventBus<TelegramMessageDelete>('telegram:delete', logger);
 
-  // Merge fileIds from bot version into an existing userbot message.
-  // If thumbnail download hasn't started yet for that attachment,
-  // downloadAttachmentMedia will pick up the fileId and use Bot API.
-  // Either way the fileId is preserved for future high-res downloads.
-  const mergeFileIds = (target?: Attachment[], source?: Attachment[]) => {
-    if (!target || !source) return;
-    for (let i = 0; i < target.length && i < source.length; i++) {
-      const t = target[i]!;
-      const s = source[i]!;
-      if (!t.fileId && s.fileId) {
-        t.fileId = s.fileId;
-        t.fileUniqueId = s.fileUniqueId;
-      }
-    }
-  };
-
   // Unified download: fileId → Bot API, else → userbot by chatId+messageId
   const downloadAttachmentMedia = async (
     chatId: string,
@@ -103,10 +87,11 @@ export const createTelegramManager = (
     const key = `${msg.chatId}:${msg.messageId}`;
 
     if (!dedup.tryAdd(msg.chatId, msg.messageId)) {
-      // Second arrival — if bot version, merge fileIds into the in-flight message
+      // Second arrival — if bot version, merge richer Bot API metadata into
+      // the in-flight userbot message while preserving any userbot-only fields.
       if (msg.source === 'bot') {
         const existing = inflight.get(key);
-        if (existing) mergeFileIds(existing.attachments, msg.attachments);
+        if (existing) mergeTelegramMessageData(existing, msg);
       }
       return;
     }

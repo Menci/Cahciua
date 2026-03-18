@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { adaptDelete, adaptEdit, adaptMessage, contentToPlainText, parseContent } from './index';
+import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage, parseContent } from './index';
 import type { ContentNode } from './types';
 import type { MessageEntity, TelegramMessage, TelegramMessageEdit } from '../telegram/message/types';
 
@@ -283,6 +283,20 @@ describe('adaptMessage', () => {
     expect(event.sender?.displayName).toBe('Alice');
   });
 
+  it('falls back to username when sender name is empty', () => {
+    const event = adaptMessage(baseTelegramMessage({
+      sender: { id: '1', firstName: '', username: 'alice', isBot: false, isPremium: false },
+    }));
+    expect(event.sender?.displayName).toBe('alice');
+  });
+
+  it('falls back to id when sender name and username are empty', () => {
+    const event = adaptMessage(baseTelegramMessage({
+      sender: { id: '1', firstName: '', isBot: false, isPremium: false },
+    }));
+    expect(event.sender?.displayName).toBe('1');
+  });
+
   it('omits sender when not present', () => {
     const event = adaptMessage(baseTelegramMessage());
     expect(event.sender).toBeUndefined();
@@ -392,5 +406,106 @@ describe('adaptDelete', () => {
 
   it('throws when chatId is missing', () => {
     expect(() => adaptDelete({ messageIds: [1] })).toThrow('Cannot adapt delete event without chatId');
+  });
+});
+
+// --- isServiceMessage ---
+
+describe('isServiceMessage', () => {
+  it('returns false for regular messages', () => {
+    expect(isServiceMessage(baseTelegramMessage())).toBe(false);
+  });
+
+  it('returns true for newChatMembers', () => {
+    expect(isServiceMessage(baseTelegramMessage({
+      newChatMembers: [{ id: '1', firstName: 'Alice', isBot: false, isPremium: false }],
+    }))).toBe(true);
+  });
+
+  it('returns true for leftChatMember', () => {
+    expect(isServiceMessage(baseTelegramMessage({
+      leftChatMember: { id: '1', firstName: 'Alice', isBot: false, isPremium: false },
+    }))).toBe(true);
+  });
+
+  it('returns true for newChatTitle', () => {
+    expect(isServiceMessage(baseTelegramMessage({ newChatTitle: 'New Group' }))).toBe(true);
+  });
+
+  it('returns true for pinnedMessage', () => {
+    expect(isServiceMessage(baseTelegramMessage({ pinnedMessage: { messageId: 99 } }))).toBe(true);
+  });
+});
+
+// --- adaptServiceEvent ---
+
+describe('adaptServiceEvent', () => {
+  it('returns null for regular messages', () => {
+    expect(adaptServiceEvent(baseTelegramMessage())).toBeNull();
+  });
+
+  it('adapts members_joined', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({
+      sender: { id: '99', firstName: 'Admin', isBot: false, isPremium: false },
+      newChatMembers: [
+        { id: '1', firstName: 'Alice', lastName: 'Smith', isBot: false, isPremium: false },
+        { id: '2', firstName: 'Bob', isBot: false, isPremium: false },
+      ],
+    }));
+    expect(event).not.toBeNull();
+    expect(event!.type).toBe('service');
+    expect(event!.action.action).toBe('members_joined');
+    if (event!.action.action === 'members_joined') {
+      expect(event!.action.members).toHaveLength(2);
+      expect(event!.action.members[0]!.displayName).toBe('Alice Smith');
+      expect(event!.action.members[1]!.displayName).toBe('Bob');
+    }
+    expect(event!.actor?.displayName).toBe('Admin');
+  });
+
+  it('adapts member_left', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({
+      leftChatMember: { id: '1', firstName: 'Alice', isBot: false, isPremium: false },
+    }));
+    expect(event!.action.action).toBe('member_left');
+    if (event!.action.action === 'member_left')
+      expect(event!.action.member.displayName).toBe('Alice');
+  });
+
+  it('adapts chat_renamed', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({ newChatTitle: 'New Name' }));
+    expect(event!.action.action).toBe('chat_renamed');
+    if (event!.action.action === 'chat_renamed')
+      expect(event!.action.newTitle).toBe('New Name');
+  });
+
+  it('adapts chat_photo_changed', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({ newChatPhoto: true }));
+    expect(event!.action.action).toBe('chat_photo_changed');
+  });
+
+  it('adapts chat_photo_deleted', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({ deleteChatPhoto: true }));
+    expect(event!.action.action).toBe('chat_photo_deleted');
+  });
+
+  it('adapts message_pinned', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({ pinnedMessage: { messageId: 42 } }));
+    expect(event!.action.action).toBe('message_pinned');
+    if (event!.action.action === 'message_pinned')
+      expect(event!.action.messageId).toBe('42');
+  });
+
+  it('sets timestamps and chatId', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({ newChatPhoto: true }));
+    expect(event!.chatId).toBe('-100123');
+    expect(event!.timestampSec).toBe(1700000000);
+    expect(event!.receivedAtMs).toBeGreaterThan(0);
+    expect(event!.utcOffsetMin).toBeTypeOf('number');
+  });
+
+  it('omits actor when sender not present', () => {
+    const event = adaptServiceEvent(baseTelegramMessage({ newChatPhoto: true }));
+    expect(event!.actor).toBeUndefined();
   });
 });

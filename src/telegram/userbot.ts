@@ -8,7 +8,7 @@ import { StringSession } from 'telegram/sessions';
 import { createEventBus } from './event-bus';
 import { patchGramjsLogger } from './gramjs-logger';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
-import { fromGramjsDeletedMessage, fromGramjsEditedMessage, fromGramjsMessage, resolveGramjsSender } from './message';
+import { fromGramjsAnyMessage, fromGramjsDeletedMessage, fromGramjsEditedMessage, resolveGramjsSender } from './message';
 
 export interface UserbotOptions {
   apiId: number;
@@ -57,9 +57,8 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     client.addEventHandler(
       (event: NewMessageEvent) => {
         if (!event.message || event.message instanceof Api.MessageEmpty) return;
-        const msg = event.message;
-        const sender = resolveGramjsSender(msg);
-        messageBus.emit(fromGramjsMessage(msg, sender));
+        const msg = fromGramjsAnyMessage(event.message);
+        if (msg) messageBus.emit(msg);
       },
       new NewMessage({}),
     );
@@ -130,7 +129,10 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
 
     return messages
       .filter(m => !(m instanceof Api.MessageEmpty))
-      .map(m => fromGramjsMessage(m, resolveGramjsSender(m)));
+      .flatMap(m => {
+        const result = fromGramjsAnyMessage(m);
+        return result ? [result] : [];
+      });
   };
 
   const fetchSpecificMessages = async (chatId: string, messageIds: number[]): Promise<TelegramMessage[]> => {
@@ -140,7 +142,10 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
 
     return messages
       .filter(m => !(m instanceof Api.MessageEmpty))
-      .map(m => fromGramjsMessage(m, resolveGramjsSender(m)));
+      .flatMap(m => {
+        const result = fromGramjsAnyMessage(m);
+        return result ? [result] : [];
+      });
   };
 
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {

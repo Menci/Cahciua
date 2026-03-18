@@ -1,4 +1,4 @@
-import { adaptDelete, adaptEdit, adaptMessage, contentToPlainText } from './adaptation';
+import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage } from './adaptation';
 import { loadConfig, resolveModel } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { createDatabase, loadCompaction, loadEvents, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations } from './db';
@@ -117,6 +117,23 @@ const main = async () => {
   }
 
   telegram.onMessage(msg => {
+    // Service messages (join/leave/rename/pin/etc.) — route to service event path
+    if (isServiceMessage(msg)) {
+      const event = adaptServiceEvent(msg);
+      if (event) {
+        logger.withFields({
+          source: msg.source,
+          chatId: msg.chatId,
+          action: event.action.action,
+        }).log('Service event received');
+
+        persistEvent(db, event);
+        const rc = pipeline.pushEvent(event.chatId, event);
+        driver.handleEvent(event.chatId, rc);
+      }
+      return;
+    }
+
     logger.withFields({
       source: msg.source,
       chatId: msg.chatId,

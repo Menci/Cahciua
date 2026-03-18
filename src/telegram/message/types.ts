@@ -73,6 +73,14 @@ export interface TelegramMessage {
   viaBotId?: string;
   attachments?: Attachment[];
   source: 'bot' | 'userbot';
+
+  // Service message fields (mutually exclusive with regular text content)
+  newChatMembers?: TelegramUser[];
+  leftChatMember?: TelegramUser;
+  newChatTitle?: string;
+  newChatPhoto?: boolean;
+  deleteChatPhoto?: boolean;
+  pinnedMessage?: { messageId: number };
 }
 
 export interface TelegramMessageEdit {

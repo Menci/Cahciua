@@ -11,6 +11,9 @@ const resolveChatId = (peer: Api.TypePeer): string => {
   throw new Error(`Unknown peer type: ${String(peer)}`);
 };
 
+// Also export for use in userbot.ts
+export { resolveChatId as resolveGramjsChatId };
+
 // --- entity conversion ---
 
 const ENTITY_CLASS_TO_TYPE: Record<string, string> = {
@@ -170,44 +173,62 @@ const convertGramjsDocument = (doc: Api.Document, spoiler?: boolean): Attachment
 
 // --- public API ---
 
-export const resolveGramjsSender = (message: Api.Message): TelegramUser | undefined => {
-  const fromId = message.fromId;
-
-  if (fromId instanceof Api.PeerUser) {
-    const userId = fromId.userId.toJSNumber();
-    const sender = message.sender;
-    if (sender && sender instanceof Api.User) {
-      return {
-        id: String(userId),
-        firstName: sender.firstName ?? '',
-        lastName: sender.lastName,
-        username: sender.username,
-        isBot: sender.bot ?? false,
-        isPremium: sender.premium ?? false,
-      };
-    }
+const entityToTelegramUser = (entity?: unknown): TelegramUser | undefined => {
+  if (entity instanceof Api.User) {
     return {
-      id: String(userId),
+      id: String(entity.id.toJSNumber()),
+      firstName: entity.firstName ?? '',
+      lastName: entity.lastName,
+      username: entity.username,
+      isBot: entity.bot ?? false,
+      isPremium: entity.premium ?? false,
+    };
+  }
+
+  if (entity instanceof Api.Channel) {
+    return {
+      id: `-100${entity.id.toJSNumber()}`,
+      firstName: entity.title ?? '',
+      username: entity.username,
+      isBot: false,
+      isPremium: false,
+    };
+  }
+
+  if (entity instanceof Api.Chat) {
+    return {
+      id: `-${entity.id.toJSNumber()}`,
+      firstName: entity.title,
+      isBot: false,
+      isPremium: false,
+    };
+  }
+
+  return undefined;
+};
+
+const peerToTelegramUser = (peer?: Api.TypePeer): TelegramUser | undefined => {
+  if (peer instanceof Api.PeerUser) {
+    return {
+      id: String(peer.userId.toJSNumber()),
       firstName: '',
       isBot: false,
       isPremium: false,
     };
   }
 
-  if (fromId instanceof Api.PeerChannel) {
-    const channelId = fromId.channelId.toJSNumber();
-    const sender = message.sender;
-    if (sender && sender instanceof Api.Channel) {
-      return {
-        id: `-100${channelId}`,
-        firstName: sender.title ?? '',
-        username: sender.username,
-        isBot: false,
-        isPremium: false,
-      };
-    }
+  if (peer instanceof Api.PeerChannel) {
     return {
-      id: `-100${channelId}`,
+      id: `-100${peer.channelId.toJSNumber()}`,
+      firstName: '',
+      isBot: false,
+      isPremium: false,
+    };
+  }
+
+  if (peer instanceof Api.PeerChat) {
+    return {
+      id: `-${peer.chatId.toJSNumber()}`,
       firstName: '',
       isBot: false,
       isPremium: false,
@@ -215,6 +236,13 @@ export const resolveGramjsSender = (message: Api.Message): TelegramUser | undefi
   }
 
   return undefined;
+};
+
+const resolveTelegramUser = (peer?: Api.TypePeer, entity?: unknown): TelegramUser | undefined =>
+  entityToTelegramUser(entity) ?? peerToTelegramUser(peer);
+
+export const resolveGramjsSender = (message: Api.Message): TelegramUser | undefined => {
+  return resolveTelegramUser(message.fromId, message.sender);
 };
 
 const convertGramjsMessageBase = (message: Api.Message, senderInfo?: TelegramUser) => {
@@ -262,3 +290,73 @@ export const fromGramjsDeletedMessage = (
   }
   return { messageIds: deletedIds, chatId };
 };
+
+// --- Service message (MessageService) ---
+
+const resolveServiceSender = (msg: Api.MessageService): TelegramUser | undefined =>
+  resolveTelegramUser(msg.fromId, msg.sender);
+
+const resolveActionUser = (id: number, entity?: unknown): TelegramUser =>
+  entityToTelegramUser(entity) ?? {
+    id: String(id),
+    firstName: '',
+    isBot: false,
+    isPremium: false,
+  };
+
+export const fromGramjsServiceMessage = (msg: Api.MessageService): TelegramMessage | null => {
+  const action = msg.action;
+  const actionEntities = Array.isArray(msg.actionEntities) ? msg.actionEntities : [];
+  const base: Omit<TelegramMessage, 'source'> = {
+    messageId: msg.id,
+    chatId: resolveChatId(msg.peerId),
+    sender: resolveServiceSender(msg),
+    date: msg.date,
+    text: '',
+  };
+
+  if (action instanceof Api.MessageActionChatAddUser || action instanceof Api.MessageActionChatJoinedByLink || action instanceof Api.MessageActionChatJoinedByRequest) {
+    const members = action instanceof Api.MessageActionChatAddUser
+      ? action.users.map((userId, index) => resolveActionUser(userId.toJSNumber(), actionEntities[index]))
+      : base.sender ? [base.sender] : [];
+    if (members.length === 0) return null;
+    return {
+      ...base,
+      source: 'userbot',
+      newChatMembers: members,
+    };
+  }
+
+  if (action instanceof Api.MessageActionChatDeleteUser) {
+    return {
+      ...base,
+      source: 'userbot',
+      leftChatMember: resolveActionUser(action.userId.toJSNumber(), actionEntities[0]),
+    };
+  }
+
+  if (action instanceof Api.MessageActionChatEditTitle) {
+    return { ...base, source: 'userbot', newChatTitle: action.title };
+  }
+
+  if (action instanceof Api.MessageActionChatEditPhoto) {
+    return { ...base, source: 'userbot', newChatPhoto: true };
+  }
+
+  if (action instanceof Api.MessageActionChatDeletePhoto) {
+    return { ...base, source: 'userbot', deleteChatPhoto: true };
+  }
+
+  if (action instanceof Api.MessageActionPinMessage) {
+    const replyTo = msg.replyTo instanceof Api.MessageReplyHeader ? msg.replyTo : undefined;
+    if (!replyTo?.replyToMsgId) return null;
+    return { ...base, source: 'userbot', pinnedMessage: { messageId: replyTo.replyToMsgId } };
+  }
+
+  return null;
+};
+
+export const fromGramjsAnyMessage = (message: Api.Message | Api.MessageService): TelegramMessage | null =>
+  message instanceof Api.MessageService
+    ? fromGramjsServiceMessage(message)
+    : fromGramjsMessage(message, resolveGramjsSender(message));

@@ -1,6 +1,6 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentNode } from '../adaptation/types';
+import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentNode, ServiceAction } from '../adaptation/types';
 import type { Attachment, ForwardInfo, MessageEntity } from '../telegram/message/types';
 
 type AnyMsg = Record<string, any>;
@@ -56,7 +56,7 @@ export const events = sqliteTable('events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
 
   chatId: text('chat_id').notNull(),
-  type: text('type').notNull().$type<'message' | 'edit' | 'delete'>(),
+  type: text('type').notNull().$type<'message' | 'edit' | 'delete' | 'service'>(),
   receivedAtMs: integer('received_at').notNull(),
   timestampSec: integer('timestamp').notNull(),
   utcOffsetMin: integer('utc_offset_min').notNull().default(480),
@@ -81,6 +81,9 @@ export const events = sqliteTable('events', {
 
   // Bot's own sent messages — marked at creation time, not derived from sender ID
   isSelfSent: integer('is_self_sent', { mode: 'boolean' }),
+
+  // Service event action — JSON discriminated union
+  serviceAction: text('service_action', { mode: 'json' }).$type<ServiceAction>(),
 }, table => [
   index('events_chat_id_idx').on(table.chatId),
 ]);

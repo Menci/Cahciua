@@ -202,5 +202,30 @@ export const fromGrammyMessage = (message: GrammyMessage): TelegramMessage => {
     viaBotId: message.via_bot ? String(message.via_bot.id) : undefined,
     attachments: convertGrammyAttachments(message),
     source: 'bot',
+    // Service message fields
+    ...message.new_chat_members && message.new_chat_members.length > 0 && {
+      newChatMembers: message.new_chat_members.map(u => ({
+        id: String(u.id),
+        firstName: u.first_name,
+        lastName: u.last_name,
+        username: u.username,
+        isBot: u.is_bot,
+        isPremium: u.is_premium ?? false,
+      })),
+    },
+    ...message.left_chat_member && {
+      leftChatMember: {
+        id: String(message.left_chat_member.id),
+        firstName: message.left_chat_member.first_name,
+        lastName: message.left_chat_member.last_name,
+        username: message.left_chat_member.username,
+        isBot: message.left_chat_member.is_bot,
+        isPremium: message.left_chat_member.is_premium ?? false,
+      },
+    },
+    ...message.new_chat_title != null && { newChatTitle: message.new_chat_title },
+    ...message.new_chat_photo && message.new_chat_photo.length > 0 && { newChatPhoto: true },
+    ...message.delete_chat_photo && { deleteChatPhoto: true },
+    ...message.pinned_message && { pinnedMessage: { messageId: message.pinned_message.message_id } },
   };
 };
