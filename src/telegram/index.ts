@@ -113,13 +113,9 @@ export const createTelegramManager = (
     if (imageToText && (!imageToTextChatIds || imageToTextChatIds.has(chatId))) {
       await Promise.all(attachments.map(async att => {
         if (!att.thumbnailWebp) return;
-        try {
-          const thumbnailBuffer = Buffer.from(att.thumbnailWebp, 'base64');
-          const highResBuffer = originalBuffers.get(att);
-          await imageToText.resolve(thumbnailBuffer, text, highResBuffer);
-        } catch (err) {
-          log.withError(err).warn('Failed to resolve image-to-text');
-        }
+        const thumbnailBuffer = Buffer.from(att.thumbnailWebp, 'base64');
+        const highResBuffer = originalBuffers.get(att);
+        await imageToText.resolve(thumbnailBuffer, text, highResBuffer);
       }));
     }
   };
