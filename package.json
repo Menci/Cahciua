@@ -28,6 +28,7 @@
     "better-sqlite3": "^11.7.0",
     "diff": "^8.0.3",
     "drizzle-orm": "^0.38.0",
+    "es-toolkit": "^1.45.1",
     "grammy": "^1.35.0",
     "immer": "^10.1.1",
     "markdown-it": "^14.1.1",

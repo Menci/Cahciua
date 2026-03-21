@@ -59,15 +59,24 @@ export const createDriver = (config: DriverConfig, deps: {
   const log = logger.withContext('driver');
   const chatIds = new Set(config.chatIds);
 
-  const primaryApiFormat: ProviderFormat = config.primaryModel.apiFormat ?? 'openai-chat';
-
-  const runner = createRunner({
-    apiBaseUrl: config.primaryModel.apiBaseUrl,
-    apiKey: config.primaryModel.apiKey,
-    model: config.primaryModel.model,
-    apiFormat: primaryApiFormat,
-    timeoutSec: config.primaryModel.timeoutSec,
-  });
+  // Runner cache: keyed by "apiBaseUrl::model" to reuse runners across chats
+  // sharing the same endpoint.
+  const runners = new Map<string, ReturnType<typeof createRunner>>();
+  const getOrCreateRunner = (endpoint: { apiBaseUrl: string; apiKey: string; model: string; apiFormat?: ProviderFormat; timeoutSec?: number }) => {
+    const key = `${endpoint.apiBaseUrl}::${endpoint.model}`;
+    let runner = runners.get(key);
+    if (!runner) {
+      runner = createRunner({
+        apiBaseUrl: endpoint.apiBaseUrl,
+        apiKey: endpoint.apiKey,
+        model: endpoint.model,
+        apiFormat: endpoint.apiFormat ?? 'openai-chat',
+        timeoutSec: endpoint.timeoutSec,
+      });
+      runners.set(key, runner);
+    }
+    return runner;
+  };
 
   const loadTRs = (chatId: string, afterMs?: number): TurnResponse[] =>
     deps.loadTurnResponses(chatId, afterMs);
@@ -87,6 +96,9 @@ export const createDriver = (config: DriverConfig, deps: {
   const getOrCreateScope = (chatId: string) => {
     const existing = chatScopes.get(chatId);
     if (existing) return existing;
+
+    // Resolve per-chat config once per scope
+    const chatConfig = config.resolveChatConfig(chatId);
 
     const rc = signal<RenderedContext>([]);
     const lastProcessedMs = signal(getLastProcessedTime(chatId));
@@ -146,7 +158,7 @@ export const createDriver = (config: DriverConfig, deps: {
             const sum = summary();
 
             const trs = loadTRs(chatId, cursor);
-            const ctx = composeContext(rcAtStart, trs, config.compaction.maxContextEstTokens, config.primaryModel.reasoningSignatureCompat, config.featureFlags, sum);
+            const ctx = composeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, chatConfig.primaryModel.reasoningSignatureCompat, chatConfig.featureFlags, sum);
             if (!ctx) return;
 
             log.withFields({
@@ -167,7 +179,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
-              modelName: config.primaryModel.model,
+              modelName: chatConfig.primaryModel.model,
             });
 
             // --- Compute mention/reply state from RC ---
@@ -181,7 +193,7 @@ export const createDriver = (config: DriverConfig, deps: {
             // In group chats, if the bot was not recently @'d or replied to, use a
             // small/cheap probe model to decide whether to respond. If the probe
             // chooses silence (no tool calls), we skip the primary model entirely.
-            if (config.probe.enabled) {
+            if (chatConfig.probe.enabled) {
               const needsProbe = lastMentionedAtMs <= lastProcessedMs();
 
               if (needsProbe) {
@@ -192,8 +204,8 @@ export const createDriver = (config: DriverConfig, deps: {
                   const a = m as Record<string, any>;
                   return Array.isArray(a.content) ? { ...m, content: [...a.content] } : m;
                 });
-                if (config.probe.model.maxImagesAllowed != null)
-                  trimImages(probeMessages, config.probe.model.maxImagesAllowed);
+                if (chatConfig.probe.model.maxImagesAllowed != null)
+                  trimImages(probeMessages, chatConfig.probe.model.maxImagesAllowed);
 
                 const probeLateBinding = await renderLateBindingPrompt({
                   timeNow: localTimeNow(),
@@ -202,24 +214,24 @@ export const createDriver = (config: DriverConfig, deps: {
                 injectLateBindingPrompt(probeMessages, probeLateBinding);
 
                 const probeRequestedAt = Date.now();
-                const probeApiFormat: ProviderFormat = config.probe.model.apiFormat ?? 'openai-chat';
+                const probeApiFormat: ProviderFormat = chatConfig.probe.model.apiFormat ?? 'openai-chat';
 
                 // Unified probe call — extract { hasToolCalls, data, inputTokens, outputTokens }
                 const probe = probeApiFormat === 'responses'
                   ? await streamingResponses({
-                    baseURL: config.probe.model.apiBaseUrl, apiKey: config.probe.model.apiKey,
-                    model: config.probe.model.model, input: messagesToResponsesInput(probeMessages),
+                    baseURL: chatConfig.probe.model.apiBaseUrl, apiKey: chatConfig.probe.model.apiKey,
+                    model: chatConfig.probe.model.model, input: messagesToResponsesInput(probeMessages),
                     instructions: system, tools: [sendMessageTool].map(xsaiToolToResponsesTool),
-                    log, label: `probe:${chatId}`, timeoutSec: config.probe.model.timeoutSec,
+                    log, label: `probe:${chatId}`, timeoutSec: chatConfig.probe.model.timeoutSec,
                   }).then(r => ({
                     hasToolCalls: r.output.some(item => item.type === 'function_call'),
                     data: r.output as Record<string, any>[],
                     inputTokens: r.usage.input_tokens, outputTokens: r.usage.output_tokens,
                   }))
                   : await streamingChat({
-                    baseURL: config.probe.model.apiBaseUrl, apiKey: config.probe.model.apiKey,
-                    model: config.probe.model.model, messages: probeMessages, system,
-                    tools: [sendMessageTool], log, label: `probe:${chatId}`, timeoutSec: config.probe.model.timeoutSec,
+                    baseURL: chatConfig.probe.model.apiBaseUrl, apiKey: chatConfig.probe.model.apiKey,
+                    model: chatConfig.probe.model.model, messages: probeMessages, system,
+                    tools: [sendMessageTool], log, label: `probe:${chatId}`, timeoutSec: chatConfig.probe.model.timeoutSec,
                   }).then(r => {
                     const msg = r.choices[0]?.message;
                     return {
@@ -234,7 +246,7 @@ export const createDriver = (config: DriverConfig, deps: {
                 deps.persistProbeResponse(chatId, {
                   requestedAtMs: probeRequestedAt, provider: probeApiFormat,
                   data: probe.data, inputTokens: probe.inputTokens, outputTokens: probe.outputTokens,
-                  reasoningSignatureCompat: config.probe.model.reasoningSignatureCompat ?? '',
+                  reasoningSignatureCompat: chatConfig.probe.model.reasoningSignatureCompat ?? '',
                   isActivated: probe.hasToolCalls,
                 });
 
@@ -248,15 +260,16 @@ export const createDriver = (config: DriverConfig, deps: {
               }
             }
 
-            if (config.primaryModel.maxImagesAllowed != null)
-              trimImages(ctx.messages, config.primaryModel.maxImagesAllowed);
+            if (chatConfig.primaryModel.maxImagesAllowed != null)
+              trimImages(ctx.messages, chatConfig.primaryModel.maxImagesAllowed);
 
             const primaryLateBinding = await renderLateBindingPrompt({
               timeNow: localTimeNow(),
-              isProbeEnabled: config.probe.enabled, isProbing: false, isMentioned, isReplied,
+              isProbeEnabled: chatConfig.probe.enabled, isProbing: false, isMentioned, isReplied,
             });
             injectLateBindingPrompt(ctx.messages, primaryLateBinding);
 
+            const runner = getOrCreateRunner(chatConfig.primaryModel);
             await runner.runStepLoop({
               chatId,
               messages: ctx.messages,
@@ -264,14 +277,14 @@ export const createDriver = (config: DriverConfig, deps: {
               tools: [sendMessageTool],
               maxSteps: MAX_STEPS,
               onStepComplete: (stepData, usage, requestedAtMs) => {
-                if (primaryApiFormat === 'responses') {
+                if (chatConfig.primaryApiFormat === 'responses') {
                   deps.persistTurnResponse(chatId, {
                     requestedAtMs,
                     provider: 'responses',
                     data: stepData as ResponsesTRDataItem[],
                     inputTokens: usage.prompt_tokens,
                     outputTokens: usage.completion_tokens,
-                    reasoningSignatureCompat: config.primaryModel.reasoningSignatureCompat ?? '',
+                    reasoningSignatureCompat: chatConfig.primaryModel.reasoningSignatureCompat ?? '',
                   });
                 } else {
                   deps.persistTurnResponse(chatId, {
@@ -280,7 +293,7 @@ export const createDriver = (config: DriverConfig, deps: {
                     data: stepData as TRDataEntry[],
                     inputTokens: usage.prompt_tokens,
                     outputTokens: usage.completion_tokens,
-                    reasoningSignatureCompat: config.primaryModel.reasoningSignatureCompat ?? '',
+                    reasoningSignatureCompat: chatConfig.primaryModel.reasoningSignatureCompat ?? '',
                   });
                 }
                 lastProcessedMs(requestedAtMs);
@@ -309,7 +322,7 @@ export const createDriver = (config: DriverConfig, deps: {
     let lastCheckedRc: RenderedContext | null = null;
 
     const disposeCompactionEffect = effect(() => {
-      if (!config.compaction.enabled) return;
+      if (!chatConfig.compaction.enabled) return;
       const rcVal = rc();
       if (rcVal.length === 0) return;
 
@@ -325,29 +338,29 @@ export const createDriver = (config: DriverConfig, deps: {
           try {
             const cursor = cursorMs();
             const sum = summary();
-            const compactEndpoint = config.compaction.model ?? config.primaryModel;
+            const compactEndpoint = chatConfig.compaction.model ?? chatConfig.primaryModel;
 
             const trs = loadTRs(chatId, cursor);
             // Estimate tokens WITHOUT summary — summary should not count toward
             // the working window budget, otherwise it grows until it fills the
             // budget and compaction degrades into a sliding window.
-            const ctx = composeContext(rc(), trs, config.compaction.maxContextEstTokens, compactEndpoint.reasoningSignatureCompat, config.featureFlags);
+            const ctx = composeContext(rc(), trs, chatConfig.compaction.maxContextEstTokens, compactEndpoint.reasoningSignatureCompat, chatConfig.featureFlags);
             if (!ctx) return;
             // Trigger at maxContextEstTokens (high water mark), compact down to
             // workingWindowEstTokens (low water mark). This gives a wide gap
             // before the next compaction fires.
-            if (ctx.rawEstimatedTokens <= config.compaction.maxContextEstTokens) return;
+            if (ctx.rawEstimatedTokens <= chatConfig.compaction.maxContextEstTokens) return;
 
-            const newCursorMs = findWorkingWindowCursor(rc(), trs, config.compaction.workingWindowEstTokens);
+            const newCursorMs = findWorkingWindowCursor(rc(), trs, chatConfig.compaction.workingWindowEstTokens);
 
             log.withFields({
               chatId,
               oldCursorMs: cursor ?? 0,
               newCursorMs,
               rawEstimatedTokens: ctx.rawEstimatedTokens,
-              triggerAt: config.compaction.maxContextEstTokens,
-              retainBudget: config.compaction.workingWindowEstTokens,
-              dryRun: !!config.compaction.dryRun,
+              triggerAt: chatConfig.compaction.maxContextEstTokens,
+              retainBudget: chatConfig.compaction.workingWindowEstTokens,
+              dryRun: !!chatConfig.compaction.dryRun,
             }).log('Triggering compaction');
 
             const newMeta = await runCompaction({
@@ -363,11 +376,11 @@ export const createDriver = (config: DriverConfig, deps: {
               oldCursorMs: cursor ?? 0,
               newCursorMs,
               reasoningSignatureCompat: compactEndpoint.reasoningSignatureCompat,
-              featureFlags: config.featureFlags,
+              featureFlags: chatConfig.featureFlags,
               log,
             });
 
-            if (config.compaction.dryRun) {
+            if (chatConfig.compaction.dryRun) {
               log.withFields({
                 chatId,
                 newCursorMs,

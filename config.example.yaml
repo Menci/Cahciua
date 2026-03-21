@@ -21,36 +21,37 @@ telegram:
   apiHash: ""
   session: ""
 
-llm:
-  model: "primary"            # references a key in models
-
-driver:
-  chatIds: []
-
 database:
   path: "./data/cahciua.db"
 
-compaction:
-  enabled: true
-  maxContextEstTokens: 512000    # high water mark: trigger compaction when estimated context exceeds this
-  workingWindowEstTokens: 8000   # low water mark: how many estimated tokens of raw content to retain after compaction
-  # model: "primary"           # optional: override model for compaction calls (defaults to llm.model)
-  dryRun: false               # true = call LLM and log summary, but don't persist or apply
+# Per-chat configuration. Keys (except "default") serve as the chat ID whitelist.
+# Each per-chat entry is deep-merged with "default" — only specify overrides.
+chats:
+  default:
+    model: "primary"            # references a key in models
+    compaction:
+      enabled: true
+      maxContextEstTokens: 512000    # high water mark: trigger compaction when estimated context exceeds this
+      workingWindowEstTokens: 8000   # low water mark: how many estimated tokens of raw content to retain after compaction
+      # model: "primary"           # optional: override model for compaction calls (defaults to chat model)
+      dryRun: false               # true = call LLM and log summary, but don't persist or apply
+    # Probe: use a small/cheap model to decide whether to respond in group chats.
+    # When the bot is not @'d or replied to, the probe model runs first. If it
+    # chooses silence (no tool calls), the primary model is skipped entirely.
+    # If it produces tool calls, the primary model is activated for the real response.
+    probe:
+      enabled: false
+      model: "probe"              # references a key in models
+    imageToText:
+      enabled: false
+      model: "primary"            # references a key in models
+    # Feature flags should be enabled in local dev config when first introduced.
+    features:
+      trimStaleNoToolCallTurnResponses: false
+      trimSelfMessagesCoveredBySendToolCalls: false
+      trimToolResults: false
 
-# Probe: use a small/cheap model to decide whether to respond in group chats.
-# When the bot is not @'d or replied to, the probe model runs first. If it
-# chooses silence (no tool calls), the primary model is skipped entirely.
-# If it produces tool calls, the primary model is activated for the real response.
-probe:
-  enabled: false
-  model: "probe"              # references a key in models
-
-imageToText:
-  enabled: false
-  model: "primary"            # references a key in models
-
-# Feature flags should be enabled in local dev config when first introduced.
-features:
-  trimStaleNoToolCallTurnResponses: false
-  trimSelfMessagesCoveredBySendToolCalls: false
-  trimToolResults: false
+  # Per-chat overrides — uncomment and customize:
+  # "751414718":                   # per-chat partial override (deep-merged with default)
+  #   model: "secondary"
+  # "-1002173016093": {}           # whitelisted with all defaults

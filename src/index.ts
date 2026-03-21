@@ -1,6 +1,6 @@
 import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage } from './adaptation';
 import type { CanonicalIMEvent } from './adaptation/types';
-import { loadConfig, resolveModel } from './config/config';
+import { getChatIds, loadConfig, resolveChatConfig, resolveModel } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { createDatabase, loadCompaction, loadEvents, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations } from './db';
 import { createDriver } from './driver';
@@ -17,16 +17,25 @@ const logger = useLogger('cahciua');
 const main = async () => {
   const config = loadConfig();
 
-  if (config.imageToText.enabled && !config.imageToText.model)
-    throw new Error('imageToText.model is required when imageToText.enabled=true');
+  const chatIds = getChatIds(config);
+
+  // Compute per-chat image-to-text enablement
+  const imageToTextChatIds = new Set(
+    chatIds.filter(id => resolveChatConfig(config, id).imageToText.enabled),
+  );
+
+  // Use default chat config's imageToText model for the shared resolver
+  const defaultChatConfig = resolveChatConfig(config, 'default');
+  if (imageToTextChatIds.size > 0 && !defaultChatConfig.imageToText.model)
+    throw new Error('imageToText.model is required when imageToText.enabled=true (in chats.default or per-chat override)');
 
   const db = createDatabase(config.database.path, logger);
   runMigrations(db, logger);
 
   // Image-to-text resolver — shared between cold-start replay and live ingress.
   const imageToTextResolver = createImageToTextResolver({
-    enabled: config.imageToText.enabled,
-    model: config.imageToText.model ? resolveModel(config, config.imageToText.model) : undefined,
+    enabled: imageToTextChatIds.size > 0,
+    model: defaultChatConfig.imageToText.model ? resolveModel(config, defaultChatConfig.imageToText.model) : undefined,
     logger,
     lookupByHash: imageHash => loadImageAltTextByHash(db, imageHash),
     persist: record => persistImageAltText(db, record),
@@ -36,7 +45,7 @@ const main = async () => {
   // attachments from the image_alt_texts table so rendering can use it.
   // This is a sync DB lookup (better-sqlite3) — never stored back into events.
   const hydrateAltTextFromCache = (event: CanonicalIMEvent) => {
-    if (!config.imageToText.enabled) return;
+    if (imageToTextChatIds.size === 0) return;
     if (event.type !== 'message' && event.type !== 'edit') return;
     for (const att of event.attachments) {
       if (att.altText || !att.thumbnailWebp) continue;
@@ -61,7 +70,7 @@ const main = async () => {
     if (compaction)
       pipeline.setCompactCursor(chatId, compaction.newCursorMs);
     const events = loadEvents(db, chatId);
-    if (config.imageToText.enabled && config.driver.chatIds.includes(chatId)) {
+    if (imageToTextChatIds.has(chatId)) {
       const tasks: Promise<void>[] = [];
       for (const event of events) {
         if ((event.type === 'message' || event.type === 'edit') && event.attachments.length > 0) {
@@ -85,24 +94,13 @@ const main = async () => {
     session: loadSession(config.telegram.session),
     initialChatIds: loadKnownChatIds(db),
     resolveChatId: messageIds => lookupChatId(db, messageIds),
-    imageToText: config.imageToText.enabled ? imageToTextResolver : undefined,
-    imageToTextChatIds: new Set(config.driver.chatIds),
+    imageToText: imageToTextChatIds.size > 0 ? imageToTextResolver : undefined,
+    imageToTextChatIds,
   }, logger);
 
-  const primaryModel = resolveModel(config, config.llm.model);
-
   const driver = createDriver({
-    primaryModel,
-    chatIds: config.driver.chatIds,
-    featureFlags: config.features,
-    compaction: {
-      ...config.compaction,
-      model: config.compaction.model ? resolveModel(config, config.compaction.model) : undefined,
-    },
-    probe: {
-      enabled: config.probe.enabled,
-      model: config.probe.model ? resolveModel(config, config.probe.model) : primaryModel,
-    },
+    chatIds,
+    resolveChatConfig: id => resolveChatConfig(config, id),
   }, {
     loadTurnResponses: (chatId, afterMs) => loadTurnResponses(db, chatId, afterMs),
     persistTurnResponse: (chatId, tr) => persistTurnResponse(db, chatId, tr),
@@ -152,7 +150,7 @@ const main = async () => {
     logger,
   });
 
-  logger.withFields({ chatIds: config.driver.chatIds }).log('Driver initialized');
+  logger.withFields({ chatIds }).log('Driver initialized');
 
   // Feed replayed sessions into Driver so it can respond to un-answered messages
   // and trigger compaction check if context exceeds budget (compaction effect fires

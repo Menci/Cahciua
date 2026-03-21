@@ -1,5 +1,5 @@
 import type { ResponseFunctionCallOutputItem, ResponseOutputItem } from './responses-types';
-import type { FeatureFlags } from '../config/config';
+import type { ResolvedChatConfig } from '../config/config';
 import type { RenderedContentPiece } from '../rendering/types';
 
 export type ProviderFormat = 'openai-chat' | 'responses';
@@ -87,11 +87,8 @@ export type ContextChunk =
   | { type: 'tr'; provider: 'responses'; time: number; step: number; data: ResponsesTRDataItem };
 
 export interface DriverConfig {
-  primaryModel: LlmEndpoint;
   chatIds: string[];
-  featureFlags: FeatureFlags;
-  compaction: CompactionConfig;
-  probe: { enabled: boolean; model: LlmEndpoint };
+  resolveChatConfig: (chatId: string) => ResolvedChatConfig;
 }
 
 export interface CompactionConfig {
@@ -110,4 +107,4 @@ export interface CompactionSessionMeta {
   outputTokens: number;
 }
 
-export type { FeatureFlags } from '../config/config';
+export type { FeatureFlags, ResolvedChatConfig } from '../config/config';
