@@ -14,7 +14,11 @@ const main = async () => {
   const log = useGlobalLogger('login');
 
   const config = loadConfig();
-  const existingSession = loadSession(config.telegram.session);
+
+  if (config.telegram.apiId == null || config.telegram.apiHash == null)
+    throw new Error('telegram.apiId and telegram.apiHash are required for login');
+
+  const existingSession = loadSession(config.telegram.session ?? '');
 
   const session = new StringSession(existingSession);
   const client = new TelegramClient(session, config.telegram.apiId, config.telegram.apiHash, {

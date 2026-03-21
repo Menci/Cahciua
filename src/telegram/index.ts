@@ -13,9 +13,9 @@ import { createUserbotClient } from './userbot';
 
 export interface TelegramManagerOptions {
   botToken: string;
-  apiId: number;
-  apiHash: string;
-  session: string;
+  apiId?: number;
+  apiHash?: string;
+  session?: string;
   initialChatIds?: string[];
   // Resolve chatId for delete events that lack it (MTProto private chat/basic group deletes).
   // The message IDs in this space are globally unique, so a lookup by messageId suffices.
@@ -45,7 +45,7 @@ export interface TelegramManager {
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
   botUserId: string;
   bot: BotClient;
-  userbot: UserbotClient;
+  userbot?: UserbotClient;
 }
 
 export const createTelegramManager = (
@@ -54,11 +54,13 @@ export const createTelegramManager = (
 ): TelegramManager => {
   const log = logger.withContext('telegram:manager');
   const bot = createBotClient({ token: options.botToken }, logger);
-  const userbot = createUserbotClient({
-    apiId: options.apiId,
-    apiHash: options.apiHash,
-    session: options.session,
-  }, logger);
+  const userbot = (options.apiId != null && options.apiHash != null)
+    ? createUserbotClient({
+      apiId: options.apiId,
+      apiHash: options.apiHash,
+      session: options.session ?? '',
+    }, logger)
+    : undefined;
 
   const dedup = createMessageDedup();
   const botChats = new Set<string>(options.initialChatIds);
@@ -76,7 +78,7 @@ export const createTelegramManager = (
     if (att.fileId) {
       return await bot.downloadFile(att.fileId);
     }
-    return await userbot.downloadMessageMedia(chatId, messageId);
+    return await userbot?.downloadMessageMedia(chatId, messageId);
   };
 
   const imageToText = options.imageToText;
@@ -173,41 +175,43 @@ export const createTelegramManager = (
     dispatchMessage(msg);
   });
 
-  userbot.onMessage(msg => {
-    if (!botChats.has(msg.chatId)) return;
-    dispatchMessage(msg);
-  });
-
-  userbot.onMessageEdit(edit => {
-    if (!botChats.has(edit.chatId)) return;
-    ingressQueue.enqueue({
-      kind: 'edit',
-      chatId: edit.chatId,
-      edit: { ...edit, ...captureIngressMeta() },
+  if (userbot) {
+    userbot.onMessage(msg => {
+      if (!botChats.has(msg.chatId)) return;
+      dispatchMessage(msg);
     });
-  });
 
-  userbot.onMessageDelete(del => {
-    const chatId = del.chatId ?? options.resolveChatId?.(del.messageIds);
-    if (!chatId || !botChats.has(chatId)) return;
-    ingressQueue.enqueue({
-      kind: 'delete',
-      chatId,
-      del: { ...del, chatId, ...captureIngressMeta() },
+    userbot.onMessageEdit(edit => {
+      if (!botChats.has(edit.chatId)) return;
+      ingressQueue.enqueue({
+        kind: 'edit',
+        chatId: edit.chatId,
+        edit: { ...edit, ...captureIngressMeta() },
+      });
     });
-  });
+
+    userbot.onMessageDelete(del => {
+      const chatId = del.chatId ?? options.resolveChatId?.(del.messageIds);
+      if (!chatId || !botChats.has(chatId)) return;
+      ingressQueue.enqueue({
+        kind: 'delete',
+        chatId,
+        del: { ...del, chatId, ...captureIngressMeta() },
+      });
+    });
+  }
 
   const start = async () => {
     await Promise.all([
       bot.start(),
-      userbot.start(),
+      userbot?.start(),
     ]);
   };
 
   const stop = async () => {
     await Promise.all([
       bot.stop(),
-      userbot.stop(),
+      userbot?.stop(),
     ]);
   };
 
@@ -218,8 +222,8 @@ export const createTelegramManager = (
     onMessageEdit: editBus.on,
     onMessageDelete: deleteBus.on,
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
-    fetchMessages: (chatId, opts) => userbot.fetchMessages(chatId, opts),
-    fetchSpecificMessages: (chatId, ids) => userbot.fetchSpecificMessages(chatId, ids),
+    fetchMessages: (chatId, opts) => userbot?.fetchMessages(chatId, opts) ?? Promise.resolve([]),
+    fetchSpecificMessages: (chatId, ids) => userbot?.fetchSpecificMessages(chatId, ids) ?? Promise.resolve([]),
     botUserId: bot.botUserId(),
     bot,
     userbot,

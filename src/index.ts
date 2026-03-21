@@ -85,11 +85,15 @@ const main = async () => {
   }
   logger.withFields({ sessions: pipeline.getChatIds().length }).log('Cold start complete');
 
+  const hasUserbot = config.telegram.apiId != null && config.telegram.apiHash != null;
+
   const telegram = createTelegramManager({
     botToken: config.telegram.botToken,
-    apiId: config.telegram.apiId,
-    apiHash: config.telegram.apiHash,
-    session: loadSession(config.telegram.session),
+    ...(hasUserbot ? {
+      apiId: config.telegram.apiId,
+      apiHash: config.telegram.apiHash,
+      session: loadSession(config.telegram.session ?? ''),
+    } : {}),
     initialChatIds: loadKnownChatIds(db),
     resolveChatId: messageIds => lookupChatId(db, messageIds),
     imageToText: imageToTextChatIds.size > 0 ? imageToTextResolver : undefined,
