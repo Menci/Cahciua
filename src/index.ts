@@ -61,15 +61,13 @@ const main = async () => {
   const pipeline = createPipeline(renderParams);
 
   // Cold-start: replay events per chat to rebuild IC + RC.
-  // If a compaction cursor exists, set it before replay so rendering
-  // skips nodes before the cursor. IC still replays all events (user map, etc.).
-  // Hydrate alt text for old events that have thumbnails but no altText — uses
-  // the same resolver as live ingress so behavior is identical.
+  // If a compaction cursor exists, only load events from that point onward —
+  // older events are summarised and no longer needed for IC or rendering.
   for (const chatId of loadKnownChatIds(db)) {
     const compaction = loadCompaction(db, chatId);
     if (compaction)
       pipeline.setCompactCursor(chatId, compaction.newCursorMs);
-    const events = loadEvents(db, chatId);
+    const events = loadEvents(db, chatId, compaction?.newCursorMs);
     if (imageToTextChatIds.has(chatId)) {
       const tasks: Promise<void>[] = [];
       for (const event of events) {

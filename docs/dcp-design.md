@@ -106,9 +106,7 @@ This document does not prescribe specific strategies. It describes the mechanism
 ### IC: Theoretically Complete, Practically a Working Set
 IC is conceptually the complete history of all chat events. In practice, it's the working set after the compact cursor — nodes with `receivedAtMs < T` are GC'd since they'll never be rendered again (replaced by compaction summary). The events table retains complete history for research/audit purposes (but completeness is not a business requirement).
 
-**TODO — IC GC is not yet implemented.** Currently, Projection replays ALL events on cold start and IC retains all nodes in memory. The compact cursor only affects Rendering (viewport filtering). Implementing IC GC requires `loadEvents(db, chatId, afterMs)` filtering and careful handling of MetaReducer state (user map must still be built from events before the cursor).
-
-Cold start: load compact cursor T from compactions table → load TRs with `requestedAtMs >= T` → replay events through Projection → rebuild IC. **Current implementation**: replays ALL events regardless of cursor (see TODO above). Target: replay only events with `receivedAtMs >= T`, O(events since last compaction).
+Cold start: load compact cursor T from compactions table → `loadEvents(db, chatId, T)` loads only events with `receivedAtMs >= T` → replay through Projection → rebuild IC. Cost is O(events since last compaction). Reply targets pointing to pre-cursor messages will have no preview/sender snapshot (acceptable — those messages are compacted into the summary). User rename detection begins from the cursor; user map is built from post-cursor events only.
 
 ### Rendering Parameters
 In the theoretical model, `render(IC) → RC` with no extra parameters. In practice, Rendering needs:
@@ -357,17 +355,11 @@ Not yet implemented. The compaction summary is currently unstructured text.
 - How many message IDs should the topic index carry? Too many defeats the purpose.
 - Should compaction be proactive (triggered by token budget — current) or lazy (triggered when the LLM hits the window boundary)?
 
-### Cold Start Working-Set Optimization (TODO)
+### Cold Start Working-Set Optimization (Done)
 
-**Current state**: `loadEvents(db, chatId)` loads ALL events. `reduce()` replays all of them to rebuild IC. The compact cursor only affects Rendering (viewport filtering). Cold start cost is O(all events), not O(events since last compaction).
+`loadEvents(db, chatId, afterMs)` filters events by `received_at >= afterMs`. On cold start, the compaction cursor is passed so only post-cursor events are replayed. IC nodes and user map are built from the working set only. Reply targets to pre-cursor messages have no preview (those messages are in the compaction summary). IC GC is implicit — pre-cursor nodes are never loaded into memory.
 
-**Target state**:
-1. `loadEvents(db, chatId, afterMs)` — filter events by `received_at >= afterMs`
-2. Projection replays only post-cursor events to build the working set IC
-3. MetaReducer state (user map) needs special handling — either: (a) persist user map snapshot at compaction time, or (b) always replay user-relevant data from all events (cheap — only sender fields)
-4. IC GC: nodes with `receivedAtMs < cursor` are dropped from memory after compaction
-
-This is required for production scalability but not yet blocking (current chat histories are small enough for full replay).
+Remaining possible enhancement: persist a user map snapshot at compaction time so display names from before the cursor are available for rename detection on the first post-cursor message. Currently, the first appearance of each user after the cursor is treated as "new" (no rename event emitted for the gap).
 
 ### Token Estimation Calibration
 

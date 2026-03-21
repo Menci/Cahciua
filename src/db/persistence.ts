@@ -242,9 +242,12 @@ const reconstructEvent = (row: EventRow): CanonicalIMEvent => {
   }
 };
 
-export const loadEvents = (db: DB, chatId: string): CanonicalIMEvent[] => {
+export const loadEvents = (db: DB, chatId: string, afterMs?: number): CanonicalIMEvent[] => {
+  const cond = afterMs != null
+    ? and(eq(events.chatId, chatId), gte(events.receivedAtMs, afterMs))
+    : eq(events.chatId, chatId);
   const rows = db.select().from(events)
-    .where(eq(events.chatId, chatId))
+    .where(cond)
     .orderBy(events.receivedAtMs, events.id)
     .all();
   return rows.map(reconstructEvent);
