@@ -13,7 +13,7 @@ import { Api, TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 
 import { loadConfig } from '../src/config/config';
-import { patchGramjsLogger } from '../src/telegram/gramjs-logger';
+import { createGramjsLogger } from '../src/telegram/gramjs-logger';
 import { loadSession } from '../src/telegram/session';
 
 const DELAY_MS = 2000;
@@ -53,8 +53,8 @@ const main = async () => {
   const session = new StringSession(loadSession(config.telegram.session ?? ''));
   const client = new TelegramClient(session, config.telegram.apiId, config.telegram.apiHash, {
     connectionRetries: 3,
+    baseLogger: createGramjsLogger(log),
   });
-  patchGramjsLogger(client, log);
 
   await client.connect();
   if (!(await client.isUserAuthorized()))

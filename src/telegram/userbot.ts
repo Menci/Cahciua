@@ -6,7 +6,7 @@ import { EditedMessage, type EditedMessageEvent } from 'telegram/events/EditedMe
 import { StringSession } from 'telegram/sessions';
 
 import { createEventBus } from './event-bus';
-import { patchGramjsLogger } from './gramjs-logger';
+import { createGramjsLogger } from './gramjs-logger';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
 import { fromGramjsAnyMessage, fromGramjsDeletedMessage, fromGramjsEditedMessage, resolveGramjsSender } from './message';
 
@@ -41,9 +41,8 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
   const session = new StringSession(options.session);
   const client = new TelegramClient(session, options.apiId, options.apiHash, {
     connectionRetries: 3,
+    baseLogger: createGramjsLogger(log),
   });
-
-  patchGramjsLogger(client, log);
 
   const messageBus = createEventBus<TelegramMessage>('userbot:message', log);
   const editBus = createEventBus<TelegramMessageEdit>('userbot:edit', log);

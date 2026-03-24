@@ -5,7 +5,7 @@ import { Format, initLogger, LogLevel, useGlobalLogger } from '@guiiai/logg';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 
-import { patchGramjsLogger } from './gramjs-logger';
+import { createGramjsLogger } from './gramjs-logger';
 import { loadSession, saveSession } from './session';
 import { loadConfig } from '../config/config';
 
@@ -23,9 +23,8 @@ const main = async () => {
   const session = new StringSession(existingSession);
   const client = new TelegramClient(session, config.telegram.apiId, config.telegram.apiHash, {
     connectionRetries: 3,
+    baseLogger: createGramjsLogger(log),
   });
-
-  patchGramjsLogger(client, log);
 
   log.log('Connecting to Telegram...');
   await client.connect();

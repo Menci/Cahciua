@@ -1,7 +1,7 @@
-import type { Logger } from '@guiiai/logg';
-import type { TelegramClient } from 'telegram';
+import type { Logger as LoggLogger } from '@guiiai/logg';
+import { Logger } from 'telegram/extensions';
 
-export const patchGramjsLogger = (client: TelegramClient, logger: Logger) => {
+export const createGramjsLogger = (logger: LoggLogger): Logger => {
   const log = logger.withContext('gramjs');
   const levelMap: Record<string, (msg: string) => void> = {
     error: msg => log.error(msg),
@@ -9,7 +9,9 @@ export const patchGramjsLogger = (client: TelegramClient, logger: Logger) => {
     info: msg => log.verbose(msg),
     debug: msg => log.debug(msg),
   };
-  (client as unknown as { _log: { log: (level: string, message: string) => void } })._log.log = (level, message) => {
+  const gramLogger = new Logger();
+  gramLogger.log = (level, message) => {
     (levelMap[level] ?? log.debug.bind(log))(message);
   };
+  return gramLogger;
 };
