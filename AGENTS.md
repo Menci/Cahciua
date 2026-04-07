@@ -20,11 +20,11 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 
 | Layer | Status | Notes |
 |-------|--------|-------|
-| Telegram integration | Done | Bot + userbot, dedup, fileId merge, credential redaction, per-session ingress queue, blocking image-to-text |
+| Telegram integration | Done | Bot + userbot, dedup, fileId merge, credential redaction, per-session ingress queue, blocking image-to-text, blocking animation-to-text |
 | Adaptation | Done | Types, conversion, dual timestamps, rich text parsing, string IDs, phantom edit filtering |
 | DB / Persistence | Done | events, messages, turn_responses, compactions, probe_responses, image_alt_texts tables; 21 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
-| Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces, inline `<image>` alt text rendering |
+| Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces, inline `<image>` / `<animation>` alt text rendering |
 | Driver | Done | Dual-provider SSE streaming (OpenAI Chat Completions via xsai + Responses API via fetch), manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization (per-provider format), reactive orchestration (alien-signals), context compaction (LLM-based summarization with append-only history), probe/activate gate (small model decides silence vs activation), format conversion (openai-chat ↔ responses) at API boundaries |
 
 ## Tech Stack
@@ -33,6 +33,8 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 - **Telegram Bot API**: grammY — primary message handling, sending replies, commands.
 - **Telegram User API**: gramjs (`telegram` on npm) — MTProto client for history fetching, reply-to context resolution, seeing other bots' messages.
 - **LLM**: Two API format paths — OpenAI Chat Completions (via xsAI `chat()` with `stream: true`) and OpenAI Responses API (via direct `fetch` with SSE streaming). Context composition always outputs openai-chat format as lingua franca; conversion to responses format happens at the runner layer. SSE streaming helpers in `src/driver/streaming.ts` (chat) and `src/driver/streaming-responses.ts` (responses) parse chunks and log deltas in real time.
+- **Image processing**: sharp — thumbnails, GIF frame extraction, image resizing.
+- **Animation processing**: ffmpeg-static + ffprobe-static (bundled binaries via npm) — MP4/WEBM frame extraction; lottie-frame (native rlottie + libpng addon) — TGS/Lottie frame rendering. System deps: `libpng-dev`, `librlottie-dev`.
 - **Database**: SQLite via better-sqlite3, Drizzle ORM.
 - **State management**: Immer — immutable IC updates in Projection reducers.
 - **Reactivity**: alien-signals — signal/computed/effect graph for Driver orchestration.
@@ -97,6 +99,10 @@ src/
     ├── event-bus.ts         # Simple typed pub/sub
     ├── image-to-text.ts     # Blocking image→alt text workflow + cache lookup/persist + model calls
     ├── image-to-text-prompt.ts # Velin prompt renderer for image description workflow
+    ├── animation-to-text.ts   # Blocking animation→alt text workflow (GIF, animated/video stickers)
+    ├── animation-to-text-prompt.ts # Velin prompt renderer for animation description workflow
+    ├── frame-extractor.ts     # Frame extraction from animations (MP4/WEBM via ffmpeg, GIF via sharp, TGS via lottie-frame)
+    ├── llm-description.ts     # Shared utilities for image/animation description LLM calls (semaphore, streaming helpers)
     ├── session-ingress-queue.ts # Per-chat ordered commit queue with speculative async transforms
     ├── thumbnail.ts         # sharp-based thumbnail generation (pixel-budget ≤75k pixels ≈ 100 Claude tokens)
     ├── gramjs-logger.ts     # Patches gramjs internal logger to @guiiai/logg
@@ -119,6 +125,8 @@ Top-level directories:
   - `compaction-system.velin.md` — compaction LLM system prompt
   - `compaction-late-binding.velin.md` — compaction LLM user instruction (output format)
   - `image-to-text-system.velin.md` — blocking image description prompt used before events enter the pipeline
+  - `animation-to-text-system.velin.md` — blocking GIF/animation description prompt (multi-frame)
+  - `sticker-animation-to-text-system.velin.md` — blocking animated sticker description prompt (multi-frame)
 - `docs/` — architecture and design documents (not prompts)
   - `dcp-design.md` — architecture rationale and Driver/TR design
 - `dcp-updates.md` — implementation deltas from the original RFC
@@ -387,6 +395,44 @@ Optional blocking ingress transform that resolves image attachments into cached 
 **Config** (`imageToText` section in `config.yaml`):
 - `enabled` (boolean, default `false`): whether to block ingress on image-to-text
 - `model`: model for the image-to-text workflow (references a key in the `models` registry)
+
+### Animation To Text
+
+Optional blocking ingress transform that resolves GIF animations and animated stickers into cached alt text, parallel to Image To Text.
+
+**Supported formats**:
+- **GIF / Animation** (`type: 'animation'`): Telegram delivers as MP4. Frames extracted via `ffmpeg` (bundled via `ffmpeg-static` npm package).
+- **Video sticker** (`type: 'sticker'`, `isVideoSticker: true`): WEBM format. Frames extracted via `ffmpeg`.
+- **Animated sticker** (`type: 'sticker'`, `isAnimatedSticker: true`): TGS format (gzipped Lottie JSON). Decompressed with `gunzipSync`, frames rendered via `lottie-frame` native addon (rlottie + libpng).
+- **Custom emoji**: not processed (excluded by `canExtractFrames`).
+
+**Frame extraction** (`src/telegram/frame-extractor.ts`):
+- Frame selection is **count-based**, not time-based: total frame count is determined first, then ≤maxFrames → keep all, >maxFrames → pick maxFrames equidistant frames (including first and last).
+- Frame count sources: GIF → `sharp.metadata().pages`; MP4/WEBM → `ffprobe -show_entries stream=nb_frames`; TGS → Lottie JSON `op - ip`.
+- TGS format auto-detected by gzip magic bytes (`0x1f 0x8b`) — does not rely on attachment metadata flags, which may be absent during backfill from `CanonicalAttachment`.
+- Each frame is resized to max 512px per edge (same as image-to-text) and encoded as PNG.
+- Files >20MB are skipped.
+
+**Processing model**:
+- Cache key is `sha256(fileBuffer)` — content-addressable, same animation from different users shares a single cache entry.
+- The `animationHash` field is set on the Telegram-layer `Attachment` during live ingress, propagated through adaptation to `CanonicalAttachment`, and persisted in the `events` table attachments JSON. This enables cold-start cache lookup without re-downloading.
+- LLM receives all extracted frames as multiple image content parts in a single request. Two separate prompts: `animation-to-text-system.velin.md` for GIFs, `sticker-animation-to-text-system.velin.md` for animated stickers.
+- Alt text is stored in the same `image_alt_texts` table (reused from Image To Text — the schema is generic hash → alt text).
+- If alt text is present on an animated attachment, Rendering emits `<animation type="...">alt text</animation>` (distinct from static `<image>` tag). Static stickers/photos continue to use `<image>`.
+
+**Cold-start hydration**:
+- Events with existing `animationHash`: sync lookup from `image_alt_texts` cache (same as image-to-text).
+- Events missing `animationHash` (historical data before feature enablement): backfilled asynchronously after `telegram.start()` — files are re-downloaded via userbot (with Bot API fileId fallback from messages table), frames extracted, hash computed, and the events table is updated.
+
+**System dependencies**:
+- `ffmpeg-static` (npm, bundled binary) — provides `ffmpeg` for MP4/WEBM processing.
+- `ffprobe-static` (npm, bundled binary) — provides `ffprobe` for video frame count detection.
+- `lottie-frame` (npm, native C++ addon) — renders Lottie JSON frames to PNG. Requires system packages: `libpng-dev` and `librlottie-dev` (`apt-get install -y libpng-dev librlottie-dev`).
+
+**Config** (`animationToText` section in `config.yaml`):
+- `enabled` (boolean, default `false`): whether to block ingress on animation-to-text
+- `model`: model for the animation-to-text workflow (references a key in the `models` registry)
+- `maxFrames` (number, default `5`): maximum equidistant frames to extract from each animation
 
 ## Coding Conventions
 

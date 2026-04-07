@@ -74,9 +74,9 @@ export const createBashTool = (shell: string[]): CahciuaTool => ({
       required: ['command'],
     },
   },
-  execute: async (input) => {
+  execute: async input => {
     const { command } = input as { command: string };
-    return new Promise<ToolExecuteResult>((resolve) => {
+    return await new Promise<ToolExecuteResult>(resolve => {
       const child = execFile(
         shell[0]!,
         [...shell.slice(1), command],
@@ -117,7 +117,7 @@ export const createWebSearchTool = (tavilyKey: string): CahciuaTool => ({
       required: ['query'],
     },
   },
-  execute: async (input) => {
+  execute: async input => {
     const { query } = input as { query: string };
     const resp = await fetch('https://api.tavily.com/search', {
       method: 'POST',

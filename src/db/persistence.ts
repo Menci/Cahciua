@@ -4,6 +4,7 @@ import type { DB } from './client';
 import { compactions, events, imageAltTexts, messages, probeResponses, turnResponses, users } from './schema';
 import { contentToPlainText } from '../adaptation';
 import type {
+  CanonicalAttachment,
   CanonicalDeleteEvent,
   CanonicalEditEvent,
   CanonicalIMEvent,
@@ -420,4 +421,38 @@ export const persistImageAltText = (db: DB, record: ImageAltTextRecord) => {
       },
     })
     .run();
+};
+
+/** Update attachments JSON on an existing event row (for backfilling animationHash). */
+export const updateEventAttachments = (db: DB, eventId: number, attachments: CanonicalAttachment[]) => {
+  db.update(events)
+    .set({ attachments })
+    .where(eq(events.id, eventId))
+    .run();
+};
+
+export interface EventWithId {
+  id: number;
+  event: CanonicalIMEvent;
+}
+
+export const loadEventsWithId = (db: DB, chatId: string, afterMs?: number): EventWithId[] => {
+  const cond = afterMs != null
+    ? and(eq(events.chatId, chatId), gte(events.receivedAtMs, afterMs))
+    : eq(events.chatId, chatId);
+  const rows = db.select().from(events)
+    .where(cond)
+    .orderBy(events.receivedAtMs, events.id)
+    .all();
+  return rows.map(row => ({ id: row.id, event: reconstructEvent(row) }));
+};
+
+/** Look up a file ID from the messages table for backfill download. */
+export const loadMessageFileId = (db: DB, chatId: string, messageId: number): string | undefined => {
+  const row = db.select({ attachments: messages.attachments })
+    .from(messages)
+    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+    .limit(1)
+    .get();
+  return row?.attachments?.[0]?.fileId;
 };

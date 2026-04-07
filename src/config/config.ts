@@ -35,6 +35,11 @@ const ChatConfigSchema = v.object({
     enabled: v.optional(v.boolean(), false),
     model: v.optional(v.string(), ''),
   }), {}),
+  animationToText: v.optional(v.object({
+    enabled: v.optional(v.boolean(), false),
+    model: v.optional(v.string(), ''),
+    maxFrames: v.optional(v.number(), 5),
+  }), {}),
   features: v.optional(v.object({
     trimStaleNoToolCallTurnResponses: v.optional(v.boolean(), false),
     trimSelfMessagesCoveredBySendToolCalls: v.optional(v.boolean(), false),
@@ -69,6 +74,11 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   imageToText: v.partial(v.object({
     enabled: v.boolean(),
     model: v.string(),
+  })),
+  animationToText: v.partial(v.object({
+    enabled: v.boolean(),
+    model: v.string(),
+    maxFrames: v.number(),
   })),
   features: v.partial(v.object({
     trimStaleNoToolCallTurnResponses: v.boolean(),
@@ -111,6 +121,7 @@ export interface ResolvedChatConfig {
   compaction: CompactionConfig;
   probe: { enabled: boolean; model: LlmEndpoint };
   imageToText: { enabled: boolean; model?: string };
+  animationToText: { enabled: boolean; model?: string; maxFrames: number };
   featureFlags: FeatureFlags;
   tools: {
     bash: { enabled: boolean; shell: string[] };
@@ -158,6 +169,11 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     imageToText: {
       enabled: merged.imageToText.enabled,
       model: merged.imageToText.model || undefined,
+    },
+    animationToText: {
+      enabled: merged.animationToText.enabled,
+      model: merged.animationToText.model || undefined,
+      maxFrames: merged.animationToText.maxFrames,
     },
     featureFlags: merged.features,
     tools: {

@@ -45,6 +45,10 @@ chats:
     imageToText:
       enabled: false
       model: "primary"            # references a key in models
+    animationToText:
+      enabled: false
+      model: "primary"            # references a key in models
+      # maxFrames: 5              # max equidistant frames to extract (default 5)
     # Feature flags should be enabled in local dev config when first introduced.
     features:
       trimStaleNoToolCallTurnResponses: false

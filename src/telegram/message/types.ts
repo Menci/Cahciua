@@ -47,6 +47,9 @@ export interface Attachment {
 
   // Spoiler
   hasSpoiler?: boolean;
+
+  // Set by hydrateAttachments for animation-to-text cache key (not from Telegram API)
+  animationHash?: string;
 }
 
 // --- Telegram message types ---

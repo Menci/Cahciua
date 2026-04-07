@@ -47,7 +47,7 @@ const convertGrammyForwardInfo = (
     info.fromChatId = String(origin.sender_chat.id);
     info.sender = {
       id: String(origin.sender_chat.id),
-      firstName: origin.sender_chat.title,
+      firstName: origin.sender_chat.title ?? '',
       username: 'username' in origin.sender_chat ? origin.sender_chat.username : undefined,
       isBot: false,
       isPremium: false,

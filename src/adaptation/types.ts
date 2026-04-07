@@ -13,6 +13,7 @@ export interface CanonicalAttachment {
   height?: number;
   duration?: number;
   thumbnailWebp?: string;
+  animationHash?: string;
   altText?: string;
 }
 

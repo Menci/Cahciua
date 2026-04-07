@@ -3,12 +3,15 @@ import type { CanonicalIMEvent } from './adaptation/types';
 import { getChatIds, loadConfig, resolveChatConfig, resolveModel } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
-import { createDatabase, loadCompaction, loadEvents, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageFileId, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { RenderParams } from './rendering';
 import { createTelegramManager } from './telegram';
+import { createAnimationToTextResolver } from './telegram/animation-to-text';
+import { canExtractFrames, extractFrames } from './telegram/frame-extractor';
 import { computeThumbnailHash, createImageToTextResolver } from './telegram/image-to-text';
+import type { Attachment } from './telegram/message/types';
 import { loadSession } from './telegram/session';
 
 setupLogger();
@@ -30,6 +33,13 @@ const main = async () => {
   if (imageToTextChatIds.size > 0 && !defaultChatConfig.imageToText.model)
     throw new Error('imageToText.model is required when imageToText.enabled=true (in chats.default or per-chat override)');
 
+  // Compute per-chat animation-to-text enablement
+  const animationToTextChatIds = new Set(
+    chatIds.filter(id => resolveChatConfig(config, id).animationToText.enabled),
+  );
+  if (animationToTextChatIds.size > 0 && !defaultChatConfig.animationToText.model)
+    throw new Error('animationToText.model is required when animationToText.enabled=true (in chats.default or per-chat override)');
+
   const db = createDatabase(config.database.path, logger);
   runMigrations(db, logger);
 
@@ -42,16 +52,30 @@ const main = async () => {
     persist: record => persistImageAltText(db, record),
   });
 
+  // Animation-to-text resolver — same pattern, for GIF/animated sticker descriptions.
+  const animationToTextResolver = createAnimationToTextResolver({
+    enabled: animationToTextChatIds.size > 0,
+    model: defaultChatConfig.animationToText.model ? resolveModel(config, defaultChatConfig.animationToText.model) : undefined,
+    logger,
+    lookupByHash: hash => loadImageAltTextByHash(db, hash),
+    persist: record => persistImageAltText(db, record),
+  });
+
   // Sync hydration: after persistEvent, set altText transiently on canonical
   // attachments from the image_alt_texts table so rendering can use it.
   // This is a sync DB lookup (better-sqlite3) — never stored back into events.
   const hydrateAltTextFromCache = (event: CanonicalIMEvent) => {
-    if (imageToTextChatIds.size === 0) return;
     if (event.type !== 'message' && event.type !== 'edit') return;
     for (const att of event.attachments) {
-      if (att.altText || !att.thumbnailWebp) continue;
-      const cached = loadImageAltTextByHash(db, computeThumbnailHash(att.thumbnailWebp));
-      if (cached) att.altText = cached.altText;
+      if (att.altText) continue;
+      if (att.thumbnailWebp && imageToTextChatIds.size > 0) {
+        const cached = loadImageAltTextByHash(db, computeThumbnailHash(att.thumbnailWebp));
+        if (cached) { att.altText = cached.altText; continue; }
+      }
+      if (att.animationHash && animationToTextChatIds.size > 0) {
+        const cached = loadImageAltTextByHash(db, att.animationHash);
+        if (cached) att.altText = cached.altText;
+      }
     }
   };
 
@@ -79,10 +103,9 @@ const main = async () => {
         }
       }
       if (tasks.length > 0) await Promise.all(tasks);
-      // After async hydration resolves, all cache entries exist.
-      // Sync-hydrate every event so altText is set transiently for rendering.
-      for (const event of events) hydrateAltTextFromCache(event);
     }
+    // Sync-hydrate: set altText transiently from cache (covers both image and animation)
+    for (const event of events) hydrateAltTextFromCache(event);
     pipeline.replayChat(chatId, events);
   }
   logger.withFields({ sessions: pipeline.getChatIds().length }).log('Cold start complete');
@@ -100,6 +123,9 @@ const main = async () => {
     resolveChatId: messageIds => lookupChatId(db, messageIds),
     imageToText: imageToTextChatIds.size > 0 ? imageToTextResolver : undefined,
     imageToTextChatIds,
+    animationToText: animationToTextChatIds.size > 0 ? animationToTextResolver : undefined,
+    animationToTextChatIds,
+    animationMaxFrames: defaultChatConfig.animationToText.maxFrames,
   }, logger);
 
   const driver = createDriver({
@@ -264,6 +290,75 @@ const main = async () => {
 
   await telegram.start();
   logger.log('Cahciua is running');
+
+  // Post-startup: backfill animationHash for historical events that lack it.
+  // Runs after telegram.start() so download functions are available.
+  if (animationToTextChatIds.size > 0) {
+    const backfillLog = logger.withContext('animation-backfill');
+    for (const chatId of animationToTextChatIds) {
+      const compaction = loadCompaction(db, chatId);
+      const eventsWithId = loadEventsWithId(db, chatId, compaction?.newCursorMs);
+      const tasks: Promise<void>[] = [];
+      for (const { id: eventId, event } of eventsWithId) {
+        if (event.type !== 'message' && event.type !== 'edit') continue;
+        for (const att of event.attachments) {
+          if (att.animationHash || att.type === 'photo') continue;
+          // CanonicalAttachment lacks isAnimatedSticker/isVideoSticker fields.
+          // Heuristic: animation → always eligible; sticker without thumbnailWebp → animated/video sticker.
+          const isAnimation = att.type === 'animation';
+          const isLikelyAnimatedSticker = att.type === 'sticker' && !att.thumbnailWebp;
+          if (!isAnimation && !isLikelyAnimatedSticker) continue;
+
+          const caption = contentToPlainText(event.content);
+          tasks.push((async () => {
+            try {
+              const messageId = parseInt(event.messageId, 10);
+              if (isNaN(messageId)) return;
+
+              // Try userbot first (works for all media), then Bot API via fileId from messages table
+              let buffer = await telegram.userbot?.downloadMessageMedia(chatId, messageId);
+              if (!buffer) {
+                const fileId = loadMessageFileId(db, chatId, messageId);
+                if (fileId) buffer = await telegram.bot.downloadFile(fileId);
+              }
+              if (!buffer) {
+                backfillLog.withFields({ chatId, messageId }).warn('Backfill skipped: download failed');
+                return;
+              }
+
+              // Reconstruct minimal Attachment for canExtractFrames/extractFrames.
+              // Animated/video distinction is lost in canonical form; treat sticker
+              // without thumbnail as video sticker (ffmpeg handles both WEBM and TGS-converted).
+              const syntheticAtt: Attachment = {
+                type: att.type as 'animation' | 'sticker',
+                isVideoSticker: isLikelyAnimatedSticker,
+                mimeType: att.mimeType,
+              };
+              if (!canExtractFrames(syntheticAtt)) return;
+
+              const { frames, cacheKey } = await extractFrames(buffer, syntheticAtt, defaultChatConfig.animationToText.maxFrames);
+              att.animationHash = cacheKey;
+              updateEventAttachments(db, eventId, event.attachments);
+
+              await animationToTextResolver.resolve({
+                cacheKey,
+                frames,
+                caption,
+                isSticker: att.type === 'sticker',
+                duration: att.duration,
+              });
+            } catch (err) {
+              backfillLog.withError(err).warn('Failed to backfill animation');
+            }
+          })());
+        }
+      }
+      if (tasks.length > 0) {
+        backfillLog.withFields({ chatId, tasks: tasks.length }).log('Backfilling animation hashes');
+        await Promise.all(tasks);
+      }
+    }
+  }
 };
 
 main().catch(err => {

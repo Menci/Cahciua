@@ -1,8 +1,10 @@
 import type { Logger } from '@guiiai/logg';
 
+import type { AnimationToTextResolver } from './animation-to-text';
 import type { BotClient, SendOptions, SentMessage } from './bot';
 import { createBotClient } from './bot';
 import { createEventBus } from './event-bus';
+import { canExtractFrames, extractFrames } from './frame-extractor';
 import type { ImageToTextResolver } from './image-to-text';
 import { createMessageDedup, mergeTelegramMessageData } from './message';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, Attachment } from './message';
@@ -17,11 +19,12 @@ export interface TelegramManagerOptions {
   apiHash?: string;
   session?: string;
   initialChatIds?: string[];
-  // Resolve chatId for delete events that lack it (MTProto private chat/basic group deletes).
-  // The message IDs in this space are globally unique, so a lookup by messageId suffices.
   resolveChatId?: (messageIds: number[]) => string | undefined;
   imageToText?: ImageToTextResolver;
   imageToTextChatIds?: Set<string>;
+  animationToText?: AnimationToTextResolver;
+  animationToTextChatIds?: Set<string>;
+  animationMaxFrames?: number;
 }
 
 type IngressEvent =
@@ -56,10 +59,10 @@ export const createTelegramManager = (
   const bot = createBotClient({ token: options.botToken }, logger);
   const userbot = (options.apiId != null && options.apiHash != null)
     ? createUserbotClient({
-      apiId: options.apiId,
-      apiHash: options.apiHash,
-      session: options.session ?? '',
-    }, logger)
+        apiId: options.apiId,
+        apiHash: options.apiHash,
+        session: options.session ?? '',
+      }, logger)
     : undefined;
 
   const dedup = createMessageDedup();
@@ -83,6 +86,9 @@ export const createTelegramManager = (
 
   const imageToText = options.imageToText;
   const imageToTextChatIds = options.imageToTextChatIds;
+  const animationToText = options.animationToText;
+  const animationToTextChatIds = options.animationToTextChatIds;
+  const animationMaxFrames = options.animationMaxFrames;
 
   const hydrateAttachments = async (
     chatId: string,
@@ -109,15 +115,36 @@ export const createTelegramManager = (
     }));
 
     // Phase 2: Call image-to-text resolver for each attachment with a thumbnail.
-    // Alt text is NOT set on the Attachment — it goes into the image_alt_texts table
-    // and is hydrated transiently on CanonicalAttachment at query time.
-    // Only resolve for whitelisted chats to avoid wasting LLM calls.
     if (imageToText && (!imageToTextChatIds || imageToTextChatIds.has(chatId))) {
       await Promise.all(attachments.map(async att => {
         if (!att.thumbnailWebp) return;
         const thumbnailBuffer = Buffer.from(att.thumbnailWebp, 'base64');
         const highResBuffer = originalBuffers.get(att);
         await imageToText.resolve(thumbnailBuffer, text, highResBuffer);
+      }));
+    }
+
+    // Phase 3: Download animation media, extract frames, call animation-to-text resolver.
+    // Sets animationHash on the Attachment so it propagates through adaptation and persists in events.
+    if (animationToText && (!animationToTextChatIds || animationToTextChatIds.has(chatId))) {
+      await Promise.all(attachments.map(async att => {
+        if (!canExtractFrames(att)) return;
+        try {
+          const buffer = await downloadAttachmentMedia(chatId, messageId, att);
+          if (!buffer) return;
+          const { frames, cacheKey } = await extractFrames(buffer, att, animationMaxFrames);
+          att.animationHash = cacheKey;
+          await animationToText.resolve({
+            cacheKey,
+            frames,
+            caption: text,
+            isSticker: att.type === 'sticker',
+            emoji: att.emoji,
+            duration: att.duration,
+          });
+        } catch (err) {
+          log.withError(err).warn('Failed to process animation-to-text');
+        }
       }));
     }
   };

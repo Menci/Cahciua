@@ -69,7 +69,10 @@ const renderAttachment = (att: CanonicalAttachment): string => {
   if (att.fileName) attrs.push(`name="${escapeXml(att.fileName)}"`);
   if (att.width != null && att.height != null) attrs.push(`size="${att.width}x${att.height}"`);
   if (att.duration != null) attrs.push(`duration="${att.duration}"`);
-  if (att.altText) return `<image ${attrs.join(' ')}>${escapeXml(att.altText)}</image>`;
+  if (att.altText) {
+    const tag = att.animationHash ? 'animation' : 'image';
+    return `<${tag} ${attrs.join(' ')}>${escapeXml(att.altText)}</${tag}>`;
+  }
   return `<attachment ${attrs.join(' ')}/>`;
 };
 
