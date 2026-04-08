@@ -59,12 +59,28 @@ const renderContentNode = (node: ContentNode): string => {
       const packAttr = node.stickerSetName ? ` pack="${escapeXml(node.stickerSetName)}"` : '';
       return `<custom-emoji${packAttr}>${escapeXml(node.altText)}</custom-emoji>`;
     }
+    if (node.altTextError)
+      return `<custom-emoji error="${escapeXml(node.altTextError)}"/>`;
     return renderContent(node.children);
   }
 };
 
 const renderContent = (nodes: ContentNode[]): string =>
   nodes.map(renderContentNode).join('');
+
+const REPLY_PREVIEW_MAX_CHARS = 100;
+
+/** Truncate rendered XML without breaking tags. */
+const truncateXml = (xml: string, maxLen: number): string => {
+  if (xml.length <= maxLen) return xml;
+  let cutAt = maxLen;
+  const lastClose = xml.lastIndexOf('>', cutAt);
+  const lastOpen = xml.lastIndexOf('<', cutAt);
+  // If we're inside a tag, truncate before the opening '<'
+  if (lastOpen > lastClose) cutAt = lastOpen;
+  if (cutAt <= 0) return '';
+  return xml.slice(0, cutAt) + '…';
+};
 
 // --- Attachment → XML ---
 
@@ -128,7 +144,9 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
   if (msg.replyToMessageId) {
     const replyAttrs = [`id="${escapeXml(msg.replyToMessageId)}"`];
     if (msg.replyToSender) replyAttrs.push(`sender="${escapeXml(formatSender(msg.replyToSender, params.contactNames))}"`);
-    const preview = msg.replyToPreview ? escapeXml(msg.replyToPreview) : '';
+    const preview = msg.replyToContent
+      ? truncateXml(renderContent(msg.replyToContent), REPLY_PREVIEW_MAX_CHARS)
+      : (msg.replyToPreview ? escapeXml(msg.replyToPreview) : '');
     parts.push(`<in-reply-to ${replyAttrs.join(' ')}>${preview}</in-reply-to>`);
   }
 

@@ -125,6 +125,9 @@ const main = async () => {
         if (cached) {
           node.altText = cached.altText;
           if (cached.stickerSetName) node.stickerSetName = cached.stickerSetName;
+        } else {
+          const error = customEmojiToTextResolver.getError(node.customEmojiId);
+          if (error) node.altTextError = error;
         }
       });
     }

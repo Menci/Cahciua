@@ -13,6 +13,8 @@ const EMOJI_MAX_EDGE = 512;
 export interface CustomEmojiToTextResolver {
   /** Resolve descriptions for a batch of custom emoji IDs. */
   resolve(emojiIds: Map<string, string>): Promise<void>;
+  /** Get error message for a failed custom emoji ID, if any. */
+  getError(customEmojiId: string): string | undefined;
 }
 
 const emojiCacheKey = (customEmojiId: string): string => `emoji:${customEmojiId}`;
@@ -49,6 +51,7 @@ export const createCustomEmojiToTextResolver = (params: {
   const log = params.logger.withContext('telegram:custom-emoji-to-text');
   const semaphore = createSemaphore(params.maxConcurrency ?? 3);
   const inflightByKey = new Map<string, Promise<void>>();
+  const errors = new Map<string, string>();
 
   const resolveOne = (
     customEmojiId: string,
@@ -172,16 +175,22 @@ export const createCustomEmojiToTextResolver = (params: {
         const sticker = stickerMap.get(id);
         if (!sticker) {
           log.withFields({ customEmojiId: id }).warn('Sticker not found for custom emoji');
+          errors.set(id, 'sticker not found');
           continue;
         }
         tasks.push(
           resolveOne(id, fallback, sticker).catch(err => {
             log.withError(err).withFields({ customEmojiId: id }).warn('Failed to resolve custom emoji');
+            errors.set(id, err instanceof Error ? err.message : String(err));
           }),
         );
       }
 
       await Promise.all(tasks);
+    },
+
+    getError(customEmojiId) {
+      return errors.get(customEmojiId);
     },
   };
 };

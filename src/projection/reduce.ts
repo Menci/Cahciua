@@ -77,6 +77,7 @@ const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent)
       message.replyToSender = target.sender;
       const plain = contentToPlainText(target.content);
       if (plain) message.replyToPreview = truncate(plain, REPLY_PREVIEW_MAX);
+      if (target.content.length > 0) message.replyToContent = target.content;
     }
   }
   if (event.forwardInfo) message.forwardInfo = event.forwardInfo;
