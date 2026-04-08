@@ -41,8 +41,10 @@ export const createCustomEmojiToTextResolver = (params: {
     is_animated: boolean;
     is_video: boolean;
     custom_emoji_id?: string;
+    set_name?: string;
   }>>;
   downloadFile: (fileId: string) => Promise<Buffer>;
+  resolvePackTitle: (setName: string) => Promise<string>;
 }): CustomEmojiToTextResolver => {
   const log = params.logger.withContext('telegram:custom-emoji-to-text');
   const semaphore = createSemaphore(params.maxConcurrency ?? 3);
@@ -51,7 +53,7 @@ export const createCustomEmojiToTextResolver = (params: {
   const resolveOne = (
     customEmojiId: string,
     fallbackEmoji: string,
-    sticker: { file_id: string; is_animated: boolean; is_video: boolean },
+    sticker: { file_id: string; is_animated: boolean; is_video: boolean; set_name?: string },
   ): Promise<void> => {
     const cacheKey = emojiCacheKey(customEmojiId);
 
@@ -73,6 +75,9 @@ export const createCustomEmojiToTextResolver = (params: {
         const buffer = await params.downloadFile(sticker.file_id);
         const isAnimated = sticker.is_animated || sticker.is_video;
 
+        // Resolve pack display title from set_name
+        const packTitle = sticker.set_name ? await params.resolvePackTitle(sticker.set_name) : undefined;
+
         let images: Array<{ url: string }>;
         let frameCount: number | undefined;
 
@@ -92,6 +97,7 @@ export const createCustomEmojiToTextResolver = (params: {
 
         const system = await renderCustomEmojiToTextSystemPrompt({
           fallbackEmoji,
+          stickerSetName: packTitle,
           isAnimated,
           frameCount,
         });
@@ -111,6 +117,7 @@ export const createCustomEmojiToTextResolver = (params: {
           imageHash: cacheKey,
           altText,
           altTextTokens: result.outputTokens,
+          ...packTitle && { stickerSetName: packTitle },
         });
       } finally {
         semaphore.release();
@@ -143,6 +150,7 @@ export const createCustomEmojiToTextResolver = (params: {
         is_animated: boolean;
         is_video: boolean;
         custom_emoji_id?: string;
+        set_name?: string;
       }>;
       try {
         stickers = await params.getCustomEmojiStickers(ids);

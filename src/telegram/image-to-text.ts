@@ -14,6 +14,7 @@ export interface ImageAltTextRecord {
   imageHash: string;
   altText: string;
   altTextTokens: number;
+  stickerSetName?: string;
 }
 
 export interface ImageToTextResolver {

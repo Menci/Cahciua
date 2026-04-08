@@ -395,6 +395,7 @@ const reconstructImageAltTextRecord = (row: typeof imageAltTexts.$inferSelect): 
   imageHash: row.imageHash,
   altText: row.altText,
   altTextTokens: row.altTextTokens,
+  ...row.stickerSetName && { stickerSetName: row.stickerSetName },
 });
 
 export const loadImageAltTextByHash = (db: DB, imageHash: string): ImageAltTextRecord | null => {
@@ -411,6 +412,7 @@ export const persistImageAltText = (db: DB, record: ImageAltTextRecord) => {
       imageHash: record.imageHash,
       altText: record.altText,
       altTextTokens: record.altTextTokens,
+      stickerSetName: record.stickerSetName ?? null,
       createdAt: Date.now(),
     })
     .onConflictDoUpdate({
@@ -418,6 +420,7 @@ export const persistImageAltText = (db: DB, record: ImageAltTextRecord) => {
       set: {
         altText: record.altText,
         altTextTokens: record.altTextTokens,
+        stickerSetName: record.stickerSetName ?? null,
       },
     })
     .run();

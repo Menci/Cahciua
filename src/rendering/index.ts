@@ -55,8 +55,10 @@ const renderContentNode = (node: ContentNode): string => {
     ? `<mention uid="${escapeXml(node.userId)}">${renderContent(node.children)}</mention>`
     : `<mention>${renderContent(node.children)}</mention>`;
   case 'custom_emoji':
-    if (node.altText)
-      return `<custom-emoji>${escapeXml(node.altText)}</custom-emoji>`;
+    if (node.altText) {
+      const packAttr = node.stickerSetName ? ` pack="${escapeXml(node.stickerSetName)}"` : '';
+      return `<custom-emoji${packAttr}>${escapeXml(node.altText)}</custom-emoji>`;
+    }
     return renderContent(node.children);
   }
 };
@@ -73,6 +75,10 @@ const renderAttachment = (att: CanonicalAttachment): string => {
   if (att.width != null && att.height != null) attrs.push(`size="${att.width}x${att.height}"`);
   if (att.duration != null) attrs.push(`duration="${att.duration}"`);
   if (att.altText) {
+    if (att.type === 'sticker') {
+      const packAttr = att.stickerSetName ? ` pack="${escapeXml(att.stickerSetName)}"` : '';
+      return `<sticker${packAttr}>${escapeXml(att.altText)}</sticker>`;
+    }
     const tag = att.animationHash ? 'animation' : 'image';
     return `<${tag} ${attrs.join(' ')}>${escapeXml(att.altText)}</${tag}>`;
   }

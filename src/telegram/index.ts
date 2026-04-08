@@ -49,6 +49,7 @@ export interface TelegramManager {
   sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage>;
   fetchMessages(chatId: string, options: FetchOptions): Promise<TelegramMessage[]>;
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
+  resolvePackTitle(setName: string): Promise<string>;
   botUserId: string;
   bot: BotClient;
   userbot?: UserbotClient;
@@ -95,6 +96,21 @@ export const createTelegramManager = (
   const customEmojiToText = options.customEmojiToText;
   const customEmojiToTextChatIds = options.customEmojiToTextChatIds;
 
+  // Pack title cache: set_name → display title (in-process, never changes)
+  const packTitleCache = new Map<string, string>();
+  const resolvePackTitle = async (setName: string): Promise<string> => {
+    const cached = packTitleCache.get(setName);
+    if (cached) return cached;
+    try {
+      const stickerSet = await bot.raw().api.getStickerSet(setName);
+      packTitleCache.set(setName, stickerSet.title);
+      return stickerSet.title;
+    } catch (err) {
+      log.withError(err).withFields({ setName }).warn('Failed to resolve pack title');
+      return setName;
+    }
+  };
+
   const hydrateAttachments = async (
     chatId: string,
     messageId: number,
@@ -139,12 +155,14 @@ export const createTelegramManager = (
             if (!buffer) return;
             const { frames, cacheKey } = await extractFrames(buffer, att, animationMaxFrames);
             att.animationHash = cacheKey;
+            const packTitle = att.stickerSetName ? await resolvePackTitle(att.stickerSetName) : undefined;
             await animationToText.resolve({
               cacheKey,
               frames,
               caption: text,
               isSticker: att.type === 'sticker',
               emoji: att.emoji,
+              stickerSetName: packTitle,
               duration: att.duration,
             });
           } catch (err) {
@@ -272,6 +290,7 @@ export const createTelegramManager = (
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
     fetchMessages: (chatId, opts) => userbot?.fetchMessages(chatId, opts) ?? Promise.resolve([]),
     fetchSpecificMessages: (chatId, ids) => userbot?.fetchSpecificMessages(chatId, ids) ?? Promise.resolve([]),
+    resolvePackTitle,
     botUserId: bot.botUserId(),
     bot,
     userbot,

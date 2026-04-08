@@ -13,13 +13,14 @@ export const renderAnimationToTextSystemPrompt = async (params: {
   caption: string;
   isSticker: boolean;
   emoji?: string;
+  stickerSetName?: string;
   duration?: number;
   frameCount: number;
 }) => {
   const template = params.isSticker ? stickerPrompt : animationPrompt;
   // Only pass props declared by each template to avoid Vue extraneous-props warnings
   const templateParams = params.isSticker
-    ? { caption: params.caption, emoji: params.emoji, duration: params.duration, frameCount: params.frameCount }
+    ? { caption: params.caption, emoji: params.emoji, stickerSetName: params.stickerSetName, duration: params.duration, frameCount: params.frameCount }
     : { caption: params.caption, duration: params.duration, frameCount: params.frameCount };
   const { rendered } = await renderMarkdownString(template, templateParams, basePath);
   return rendered;

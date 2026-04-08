@@ -10,11 +10,13 @@ const promptTemplate = readFileSync(resolve(__dirname, '../../prompts/custom-emo
 
 export const renderCustomEmojiToTextSystemPrompt = async (params: {
   fallbackEmoji: string;
+  stickerSetName?: string;
   isAnimated: boolean;
   frameCount?: number;
 }) => {
   const { rendered } = await renderMarkdownString(promptTemplate, {
     fallbackEmoji: params.fallbackEmoji,
+    stickerSetName: params.stickerSetName,
     isAnimated: params.isAnimated,
     frameCount: params.frameCount,
   }, basePath);

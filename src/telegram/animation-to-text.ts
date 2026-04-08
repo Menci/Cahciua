@@ -12,6 +12,7 @@ export interface AnimationToTextResolver {
     caption: string;
     isSticker: boolean;
     emoji?: string;
+    stickerSetName?: string;
     duration?: number;
   }): Promise<ImageAltTextRecord>;
 }
@@ -34,6 +35,7 @@ export const createAnimationToTextResolver = (params: {
     caption: string,
     isSticker: boolean,
     emoji?: string,
+    stickerSetName?: string,
     duration?: number,
   ): Promise<ImageAltTextRecord> => {
     const existing = inflightByHash.get(cacheKey);
@@ -58,6 +60,7 @@ export const createAnimationToTextResolver = (params: {
           caption,
           isSticker,
           emoji,
+          stickerSetName,
           duration,
           frameCount: frames.length,
         });
@@ -77,6 +80,7 @@ export const createAnimationToTextResolver = (params: {
           imageHash: cacheKey,
           altText,
           altTextTokens: result.outputTokens,
+          ...stickerSetName && { stickerSetName },
         };
         params.persist(record);
         return record;
@@ -91,8 +95,8 @@ export const createAnimationToTextResolver = (params: {
   };
 
   return {
-    resolve({ cacheKey, frames, caption, isSticker, emoji, duration }) {
-      return resolveByHash(cacheKey, frames, caption, isSticker, emoji, duration);
+    resolve({ cacheKey, frames, caption, isSticker, emoji, stickerSetName, duration }) {
+      return resolveByHash(cacheKey, frames, caption, isSticker, emoji, stickerSetName, duration);
     },
   };
 };

@@ -86,6 +86,9 @@ const main = async () => {
     downloadFile: async fileId => {
       return await ref.telegram!.bot.downloadFile(fileId);
     },
+    resolvePackTitle: async setName => {
+      return await ref.telegram!.resolvePackTitle(setName);
+    },
   });
 
   // Sync hydration: after persistEvent, set altText transiently on canonical
@@ -108,16 +111,20 @@ const main = async () => {
       }
       if (att.animationHash && animationToTextChatIds.size > 0) {
         const cached = loadImageAltTextByHash(db, att.animationHash);
-        if (cached) att.altText = cached.altText;
+        if (cached) {
+          att.altText = cached.altText;
+          if (cached.stickerSetName) att.stickerSetName = cached.stickerSetName;
+        }
       }
     }
-    // Hydrate custom_emoji altText from cache
+    // Hydrate custom_emoji altText + stickerSetName from cache
     if (customEmojiToTextChatIds.size > 0) {
       walkCustomEmoji(event.content, node => {
         if (node.altText) return;
         const cached = loadImageAltTextByHash(db, emojiCacheKey(node.customEmojiId));
         if (cached) {
           node.altText = cached.altText;
+          if (cached.stickerSetName) node.stickerSetName = cached.stickerSetName;
         }
       });
     }

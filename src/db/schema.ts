@@ -135,6 +135,7 @@ export const imageAltTexts = sqliteTable('image_alt_texts', {
   imageHash: text('image_hash').notNull(),
   altText: text('alt_text').notNull(),
   altTextTokens: integer('alt_text_tokens').notNull(),
+  stickerSetName: text('sticker_set_name'),
   createdAt: integer('created_at').notNull(),
 }, table => [
   uniqueIndex('image_alt_texts_hash_idx').on(table.imageHash),

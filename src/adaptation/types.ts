@@ -14,6 +14,7 @@ export interface CanonicalAttachment {
   duration?: number;
   thumbnailWebp?: string;
   animationHash?: string;
+  stickerSetName?: string;
   altText?: string;
 }
 
@@ -32,7 +33,7 @@ export type ContentNode =
   | { type: 'blockquote'; children: ContentNode[] }
   | { type: 'link'; url: string; children: ContentNode[] }
   | { type: 'mention'; userId?: string; children: ContentNode[] }
-  | { type: 'custom_emoji'; customEmojiId: string; children: ContentNode[]; altText?: string };
+  | { type: 'custom_emoji'; customEmojiId: string; children: ContentNode[]; altText?: string; stickerSetName?: string };
 
 export interface CanonicalForwardInfo {
   fromUserId?: string;
