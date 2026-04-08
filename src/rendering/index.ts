@@ -90,12 +90,9 @@ const renderAttachment = (att: CanonicalAttachment): string => {
   if (att.fileName) attrs.push(`name="${escapeXml(att.fileName)}"`);
   if (att.width != null && att.height != null) attrs.push(`size="${att.width}x${att.height}"`);
   if (att.duration != null) attrs.push(`duration="${att.duration}"`);
+  if (att.stickerSetName) attrs.push(`pack="${escapeXml(att.stickerSetName)}"`);
   if (att.altText) {
-    if (att.type === 'sticker') {
-      const packAttr = att.stickerSetName ? ` pack="${escapeXml(att.stickerSetName)}"` : '';
-      return `<sticker${packAttr}>${escapeXml(att.altText)}</sticker>`;
-    }
-    const tag = att.animationHash ? 'animation' : 'image';
+    const tag = att.type === 'sticker' ? 'sticker' : (att.animationHash ? 'animation' : 'image');
     return `<${tag} ${attrs.join(' ')}>${escapeXml(att.altText)}</${tag}>`;
   }
   return `<attachment ${attrs.join(' ')}/>`;
