@@ -12,6 +12,7 @@ const stickerPrompt = readFileSync(resolve(__dirname, '../../prompts/sticker-ani
 export const renderAnimationToTextSystemPrompt = async (params: {
   caption: string;
   isSticker: boolean;
+  isStatic?: boolean;
   emoji?: string;
   stickerSetName?: string;
   duration?: number;
@@ -20,7 +21,7 @@ export const renderAnimationToTextSystemPrompt = async (params: {
   const template = params.isSticker ? stickerPrompt : animationPrompt;
   // Only pass props declared by each template to avoid Vue extraneous-props warnings
   const templateParams = params.isSticker
-    ? { caption: params.caption, emoji: params.emoji, stickerSetName: params.stickerSetName, duration: params.duration, frameCount: params.frameCount }
+    ? { caption: params.caption, emoji: params.emoji, stickerSetName: params.stickerSetName, duration: params.duration, frameCount: params.frameCount, isStatic: params.isStatic }
     : { caption: params.caption, duration: params.duration, frameCount: params.frameCount };
   const { rendered } = await renderMarkdownString(template, templateParams, basePath);
   return rendered;

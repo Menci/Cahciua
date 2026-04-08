@@ -1,6 +1,7 @@
 import type { Logger } from '@guiiai/logg';
 
 import { renderAnimationToTextSystemPrompt } from './animation-to-text-prompt';
+import { deduplicateFrames } from './frame-extractor';
 import type { ImageAltTextRecord } from './image-to-text';
 import { callDescriptionLlm, createSemaphore } from './llm-description';
 import type { LlmEndpoint } from '../driver/types';
@@ -53,16 +54,19 @@ export const createAnimationToTextResolver = (params: {
         const model = params.model;
         if (!model) throw new Error('animationToText.model is required when animationToText.enabled=true');
 
-        const images = frames.map(buf => ({
+        const uniqueFrames = isSticker ? deduplicateFrames(frames) : frames;
+
+        const images = uniqueFrames.map(buf => ({
           url: `data:image/png;base64,${buf.toString('base64')}`,
         }));
         const system = await renderAnimationToTextSystemPrompt({
           caption,
           isSticker,
+          isStatic: isSticker && uniqueFrames.length <= 1,
           emoji,
           stickerSetName,
           duration,
-          frameCount: frames.length,
+          frameCount: uniqueFrames.length,
         });
 
         const result = await callDescriptionLlm({

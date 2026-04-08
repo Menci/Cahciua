@@ -28,6 +28,20 @@ const getFfprobePath = async (): Promise<string> =>
 const hashBuffer = (buffer: Buffer): string =>
   createHash('sha256').update(buffer).digest('hex');
 
+/** Deduplicate frames by content hash, preserving order. */
+export const deduplicateFrames = (frames: Buffer[]): Buffer[] => {
+  const seen = new Set<string>();
+  const unique: Buffer[] = [];
+  for (const frame of frames) {
+    const hash = hashBuffer(frame);
+    if (!seen.has(hash)) {
+      seen.add(hash);
+      unique.push(frame);
+    }
+  }
+  return unique;
+};
+
 export interface FrameExtractionResult {
   frames: Buffer[];
   cacheKey: string;
