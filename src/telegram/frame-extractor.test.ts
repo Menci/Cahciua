@@ -18,7 +18,7 @@ describe('canExtractFrames', () => {
     ['animation', { type: 'animation' }, true],
     ['video sticker', { type: 'sticker', isVideoSticker: true }, true],
     ['animated sticker (TGS)', { type: 'sticker', isAnimatedSticker: true }, true],
-    ['animated custom emoji', { type: 'sticker', isAnimatedSticker: true, customEmojiId: '123' }, false],
+    ['animated custom emoji', { type: 'sticker', isAnimatedSticker: true, customEmojiId: '123' }, true],
     ['static sticker', { type: 'sticker' }, false],
     ['photo', { type: 'photo' }, false],
     ['video', { type: 'video' }, false],

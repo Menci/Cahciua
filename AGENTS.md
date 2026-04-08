@@ -20,11 +20,11 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 
 | Layer | Status | Notes |
 |-------|--------|-------|
-| Telegram integration | Done | Bot + userbot, dedup, fileId merge, credential redaction, per-session ingress queue, blocking image-to-text, blocking animation-to-text |
+| Telegram integration | Done | Bot + userbot, dedup, fileId merge, credential redaction, per-session ingress queue, blocking image-to-text, blocking animation-to-text, blocking custom-emoji-to-text |
 | Adaptation | Done | Types, conversion, dual timestamps, rich text parsing, string IDs, phantom edit filtering |
-| DB / Persistence | Done | events, messages, turn_responses, compactions, probe_responses, image_alt_texts tables; 21 migrations |
+| DB / Persistence | Done | events, messages, turn_responses, compactions, probe_responses, image_alt_texts tables; 22 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
-| Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces, inline `<image>` / `<animation>` alt text rendering |
+| Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces, inline `<image>` / `<animation>` / `<sticker>` / `<custom-emoji>` alt text rendering |
 | Driver | Done | Dual-provider SSE streaming (OpenAI Chat Completions via xsai + Responses API via fetch), manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization (per-provider format), reactive orchestration (alien-signals), context compaction (LLM-based summarization with append-only history), probe/activate gate (small model decides silence vs activation), format conversion (openai-chat ↔ responses) at API boundaries |
 
 ## Tech Stack
@@ -101,6 +101,8 @@ src/
     ├── image-to-text-prompt.ts # Velin prompt renderer for image description workflow
     ├── animation-to-text.ts   # Blocking animation→alt text workflow (GIF, animated/video stickers)
     ├── animation-to-text-prompt.ts # Velin prompt renderer for animation description workflow
+    ├── custom-emoji-to-text.ts  # Blocking custom emoji→alt text workflow (static + animated)
+    ├── custom-emoji-to-text-prompt.ts # Velin prompt renderer for custom emoji description workflow
     ├── frame-extractor.ts     # Frame extraction from animations (MP4/WEBM via ffmpeg, GIF via sharp, TGS via lottie-frame)
     ├── llm-description.ts     # Shared utilities for image/animation description LLM calls (semaphore, streaming helpers)
     ├── session-ingress-queue.ts # Per-chat ordered commit queue with speculative async transforms
@@ -127,6 +129,8 @@ Top-level directories:
   - `image-to-text-system.velin.md` — blocking image description prompt used before events enter the pipeline
   - `animation-to-text-system.velin.md` — blocking GIF/animation description prompt (multi-frame)
   - `sticker-animation-to-text-system.velin.md` — blocking animated sticker description prompt (multi-frame)
+  - `custom-emoji-to-text-system.velin.md` — blocking static custom emoji description prompt
+  - `custom-emoji-animated-to-text-system.velin.md` — blocking animated custom emoji description prompt (multi-frame)
 - `docs/` — architecture and design documents (not prompts)
   - `dcp-design.md` — architecture rationale and Driver/TR design
 - `dcp-updates.md` — implementation deltas from the original RFC
@@ -390,6 +394,7 @@ Optional blocking ingress transform that resolves image attachments into cached 
 | image_hash | TEXT NOT NULL UNIQUE | sha256 of thumbnail WebP bytes |
 | alt_text | TEXT NOT NULL | resolved image description |
 | alt_text_tokens | INTEGER NOT NULL | model output token count for the stored alt text |
+| sticker_set_name | TEXT | sticker pack name (nullable, for stickers and custom emoji) |
 | created_at | INTEGER NOT NULL | millisecond timestamp |
 
 **Config** (`imageToText` section in `config.yaml`):
@@ -418,7 +423,7 @@ Optional blocking ingress transform that resolves GIF animations and animated st
 - The `animationHash` field is set on the Telegram-layer `Attachment` during live ingress, propagated through adaptation to `CanonicalAttachment`, and persisted in the `events` table attachments JSON. This enables cold-start cache lookup without re-downloading.
 - LLM receives all extracted frames as multiple image content parts in a single request. Two separate prompts: `animation-to-text-system.velin.md` for GIFs, `sticker-animation-to-text-system.velin.md` for animated stickers.
 - Alt text is stored in the same `image_alt_texts` table (reused from Image To Text — the schema is generic hash → alt text).
-- If alt text is present on an animated attachment, Rendering emits `<animation type="...">alt text</animation>` (distinct from static `<image>` tag). Static stickers/photos continue to use `<image>`.
+- If alt text is present on an animated attachment, Rendering emits `<animation type="...">alt text</animation>` (distinct from static `<image>` tag). Stickers use a dedicated `<sticker pack="...">alt text</sticker>` tag with the sticker pack name. Static stickers/photos continue to use `<image>`.
 
 **Cold-start hydration**:
 - Events with existing `animationHash`: sync lookup from `image_alt_texts` cache (same as image-to-text).
@@ -433,6 +438,31 @@ Optional blocking ingress transform that resolves GIF animations and animated st
 - `enabled` (boolean, default `false`): whether to block ingress on animation-to-text
 - `model`: model for the animation-to-text workflow (references a key in the `models` registry)
 - `maxFrames` (number, default `5`): maximum equidistant frames to extract from each animation
+
+### Custom Emoji To Text
+
+Optional blocking ingress transform that resolves custom emoji (inline `MessageEntityCustomEmoji`) into cached text descriptions before they enter DCP.
+
+**Processing model**:
+- Custom emoji appear in message entities as `{type: 'custom_emoji', customEmojiId}` with a fallback emoji character in the message text.
+- During ingress (Phase 4 of `hydrateAttachments`), entities are scanned for `custom_emoji` type. All unique `customEmojiId` values are collected with their fallback emoji text.
+- `bot.api.getCustomEmojiStickers(ids)` fetches sticker metadata (file_id, is_animated, is_video) for the batch.
+- Each sticker is downloaded via Bot API and processed:
+  - **Static**: resized with sharp → LLM description via `custom-emoji-to-text-system.velin.md` prompt.
+  - **Animated/Video**: frame extraction via `extractFrames` (same as animation-to-text) → LLM description via `custom-emoji-animated-to-text-system.velin.md` prompt.
+- Cache key is `emoji:${customEmojiId}` — stored in the same `image_alt_texts` table. The `customEmojiId` is a document ID, globally unique and stable.
+- Alt text is set transiently on `ContentNode.altText` (type `custom_emoji`) during sync hydration, never stored in the events table.
+
+**Rendering**: When `altText` is present on a `custom_emoji` ContentNode, Rendering emits `<custom-emoji pack="PackName">description</custom-emoji>` (with `pack` attribute when `stickerSetName` is available). Without alt text, the fallback emoji character is rendered directly.
+
+**Cold-start hydration**:
+- During initial replay, `hydrateAltTextFromCache` walks ContentNode trees and sets `altText` from cache.
+- After `telegram.start()`, uncached custom emoji IDs are batch-resolved via Bot API, then the affected chats are re-replayed with hydrated events.
+
+**Config** (`customEmojiToText` section in `config.yaml`):
+- `enabled` (boolean, default `false`): whether to resolve custom emoji descriptions
+- `model`: model for the description workflow (references a key in the `models` registry)
+- `maxFrames` (number, default `5`): maximum equidistant frames for animated custom emoji
 
 ## Coding Conventions
 

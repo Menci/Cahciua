@@ -54,7 +54,10 @@ const renderContentNode = (node: ContentNode): string => {
   case 'mention': return node.userId
     ? `<mention uid="${escapeXml(node.userId)}">${renderContent(node.children)}</mention>`
     : `<mention>${renderContent(node.children)}</mention>`;
-  case 'custom_emoji': return renderContent(node.children);
+  case 'custom_emoji':
+    if (node.altText)
+      return `<custom-emoji>${escapeXml(node.altText)}</custom-emoji>`;
+    return renderContent(node.children);
   }
 };
 

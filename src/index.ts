@@ -1,5 +1,5 @@
 import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage } from './adaptation';
-import type { CanonicalIMEvent } from './adaptation/types';
+import type { CanonicalIMEvent, ContentNode } from './adaptation/types';
 import { getChatIds, loadConfig, resolveChatConfig, resolveModel } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
@@ -9,6 +9,7 @@ import { createPipeline } from './pipeline';
 import type { RenderParams } from './rendering';
 import { createTelegramManager } from './telegram';
 import { createAnimationToTextResolver } from './telegram/animation-to-text';
+import { createCustomEmojiToTextResolver, emojiCacheKey } from './telegram/custom-emoji-to-text';
 import { canExtractFrames, extractFrames } from './telegram/frame-extractor';
 import { computeThumbnailHash, createImageToTextResolver } from './telegram/image-to-text';
 import type { Attachment } from './telegram/message/types';
@@ -40,6 +41,13 @@ const main = async () => {
   if (animationToTextChatIds.size > 0 && !defaultChatConfig.animationToText.model)
     throw new Error('animationToText.model is required when animationToText.enabled=true (in chats.default or per-chat override)');
 
+  // Compute per-chat custom-emoji-to-text enablement
+  const customEmojiToTextChatIds = new Set(
+    chatIds.filter(id => resolveChatConfig(config, id).customEmojiToText.enabled),
+  );
+  if (customEmojiToTextChatIds.size > 0 && !defaultChatConfig.customEmojiToText.model)
+    throw new Error('customEmojiToText.model is required when customEmojiToText.enabled=true (in chats.default or per-chat override)');
+
   const db = createDatabase(config.database.path, logger);
   runMigrations(db, logger);
 
@@ -61,9 +69,35 @@ const main = async () => {
     persist: record => persistImageAltText(db, record),
   });
 
+  // Custom-emoji-to-text resolver — resolves custom emoji sticker images/animations to descriptions.
+  // Bot API functions are bound lazily via closure over `ref` (telegram manager is created after resolver).
+  const ref: { telegram?: ReturnType<typeof createTelegramManager> } = {};
+  const customEmojiToTextResolver = createCustomEmojiToTextResolver({
+    enabled: customEmojiToTextChatIds.size > 0,
+    model: defaultChatConfig.customEmojiToText.model ? resolveModel(config, defaultChatConfig.customEmojiToText.model) : undefined,
+    maxFrames: defaultChatConfig.customEmojiToText.maxFrames,
+    logger,
+    lookupByHash: hash => loadImageAltTextByHash(db, hash),
+    persist: record => persistImageAltText(db, record),
+    getCustomEmojiStickers: async ids => {
+      const bot = ref.telegram!.bot.raw();
+      return await bot.api.getCustomEmojiStickers(ids);
+    },
+    downloadFile: async fileId => {
+      return await ref.telegram!.bot.downloadFile(fileId);
+    },
+  });
+
   // Sync hydration: after persistEvent, set altText transiently on canonical
-  // attachments from the image_alt_texts table so rendering can use it.
+  // attachments and custom_emoji content nodes from the image_alt_texts table.
   // This is a sync DB lookup (better-sqlite3) — never stored back into events.
+  const walkCustomEmoji = (nodes: ContentNode[], fn: (node: Extract<ContentNode, { type: 'custom_emoji' }>) => void) => {
+    for (const n of nodes) {
+      if (n.type === 'custom_emoji') fn(n);
+      if ('children' in n) walkCustomEmoji(n.children, fn);
+    }
+  };
+
   const hydrateAltTextFromCache = (event: CanonicalIMEvent) => {
     if (event.type !== 'message' && event.type !== 'edit') return;
     for (const att of event.attachments) {
@@ -76,6 +110,16 @@ const main = async () => {
         const cached = loadImageAltTextByHash(db, att.animationHash);
         if (cached) att.altText = cached.altText;
       }
+    }
+    // Hydrate custom_emoji altText from cache
+    if (customEmojiToTextChatIds.size > 0) {
+      walkCustomEmoji(event.content, node => {
+        if (node.altText) return;
+        const cached = loadImageAltTextByHash(db, emojiCacheKey(node.customEmojiId));
+        if (cached) {
+          node.altText = cached.altText;
+        }
+      });
     }
   };
 
@@ -126,7 +170,10 @@ const main = async () => {
     animationToText: animationToTextChatIds.size > 0 ? animationToTextResolver : undefined,
     animationToTextChatIds,
     animationMaxFrames: defaultChatConfig.animationToText.maxFrames,
+    customEmojiToText: customEmojiToTextChatIds.size > 0 ? customEmojiToTextResolver : undefined,
+    customEmojiToTextChatIds,
   }, logger);
+  ref.telegram = telegram;
 
   const driver = createDriver({
     chatIds,
@@ -356,6 +403,32 @@ const main = async () => {
       if (tasks.length > 0) {
         backfillLog.withFields({ chatId, tasks: tasks.length }).log('Backfilling animation hashes');
         await Promise.all(tasks);
+      }
+    }
+  }
+  // Post-startup: resolve custom emoji descriptions for historical events.
+  // Runs after telegram.start() so Bot API (getCustomEmojiStickers) is available.
+  if (customEmojiToTextChatIds.size > 0) {
+    for (const chatId of customEmojiToTextChatIds) {
+      const compaction = loadCompaction(db, chatId);
+      const events = loadEvents(db, chatId, compaction?.newCursorMs);
+      const emojiIds = new Map<string, string>();
+      for (const event of events) {
+        if (event.type !== 'message' && event.type !== 'edit') continue;
+        walkCustomEmoji(event.content, node => {
+          if (!emojiIds.has(node.customEmojiId)) {
+            const fallback = contentToPlainText(node.children);
+            emojiIds.set(node.customEmojiId, fallback);
+          }
+        });
+      }
+      if (emojiIds.size > 0) {
+        logger.withFields({ chatId, count: emojiIds.size }).log('Cold-start: resolving custom emoji descriptions');
+        await customEmojiToTextResolver.resolve(emojiIds);
+        // Re-hydrate + re-replay to get fresh altText into IC → RC
+        // (IC nodes from initial replay are Immer-frozen, so we must re-build)
+        for (const event of events) hydrateAltTextFromCache(event);
+        pipeline.replayChat(chatId, events);
       }
     }
   }

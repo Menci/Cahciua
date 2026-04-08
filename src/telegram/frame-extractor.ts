@@ -37,7 +37,7 @@ export interface FrameExtractionResult {
 export const canExtractFrames = (att: Attachment): boolean => {
   if (att.type === 'animation') return true;
   if (att.type === 'sticker' && (att.isVideoSticker || att.isAnimatedSticker))
-    return !att.customEmojiId; // exclude custom emoji
+    return true;
   return false;
 };
 

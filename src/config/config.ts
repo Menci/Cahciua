@@ -40,6 +40,11 @@ const ChatConfigSchema = v.object({
     model: v.optional(v.string(), ''),
     maxFrames: v.optional(v.number(), 5),
   }), {}),
+  customEmojiToText: v.optional(v.object({
+    enabled: v.optional(v.boolean(), false),
+    model: v.optional(v.string(), ''),
+    maxFrames: v.optional(v.number(), 5),
+  }), {}),
   features: v.optional(v.object({
     trimStaleNoToolCallTurnResponses: v.optional(v.boolean(), false),
     trimSelfMessagesCoveredBySendToolCalls: v.optional(v.boolean(), false),
@@ -76,6 +81,11 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
     model: v.string(),
   })),
   animationToText: v.partial(v.object({
+    enabled: v.boolean(),
+    model: v.string(),
+    maxFrames: v.number(),
+  })),
+  customEmojiToText: v.partial(v.object({
     enabled: v.boolean(),
     model: v.string(),
     maxFrames: v.number(),
@@ -122,6 +132,7 @@ export interface ResolvedChatConfig {
   probe: { enabled: boolean; model: LlmEndpoint };
   imageToText: { enabled: boolean; model?: string };
   animationToText: { enabled: boolean; model?: string; maxFrames: number };
+  customEmojiToText: { enabled: boolean; model?: string; maxFrames: number };
   featureFlags: FeatureFlags;
   tools: {
     bash: { enabled: boolean; shell: string[] };
@@ -174,6 +185,11 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
       enabled: merged.animationToText.enabled,
       model: merged.animationToText.model || undefined,
       maxFrames: merged.animationToText.maxFrames,
+    },
+    customEmojiToText: {
+      enabled: merged.customEmojiToText.enabled,
+      model: merged.customEmojiToText.model || undefined,
+      maxFrames: merged.customEmojiToText.maxFrames,
     },
     featureFlags: merged.features,
     tools: {

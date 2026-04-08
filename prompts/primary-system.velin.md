@@ -101,6 +101,20 @@ System events appear as:
 
 Rich text uses standard markup: `<b>`, `<i>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<a>`, `<blockquote>`, `<spoiler>`, `<mention>`.
 
+Custom emoji with resolved descriptions appear as:
+
+```xml
+<custom-emoji pack="StickerPackName">a cute cat waving hello</custom-emoji>
+```
+
+Unresolved custom emoji appear as their fallback emoji character only.
+
+Sticker attachments with resolved descriptions appear as:
+
+```xml
+<sticker pack="StickerPackName">a cartoon cat dancing happily</sticker>
+```
+
 Attachments appear within messages:
 
 ```xml
