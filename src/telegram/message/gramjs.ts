@@ -54,7 +54,7 @@ const convertGramjsEntities = (entities?: Api.TypeMessageEntity[]): MessageEntit
     if (e instanceof Api.MessageEntityTextUrl) result.url = e.url;
     if (e instanceof Api.MessageEntityPre) result.language = e.language;
     if (e instanceof Api.MessageEntityMentionName) result.userId = String(e.userId.toJSNumber());
-    if (e instanceof Api.MessageEntityCustomEmoji) result.customEmojiId = String(e.documentId.toJSNumber());
+    if (e instanceof Api.MessageEntityCustomEmoji) result.customEmojiId = e.documentId.toString();
 
     return result;
   });
@@ -142,7 +142,7 @@ const convertGramjsDocument = (doc: Api.Document, spoiler?: boolean): Attachment
     }
     if (videoAttr) attachment.isVideoSticker = true;
     if (doc.mimeType === 'application/x-tgsticker') attachment.isAnimatedSticker = true;
-    if (isCustomEmoji) attachment.customEmojiId = String(doc.id.toJSNumber());
+    if (isCustomEmoji) attachment.customEmojiId = doc.id.toString();
   } else if (videoAttr?.roundMessage) {
     attachment.type = 'video_note';
     attachment.width = videoAttr.w;
