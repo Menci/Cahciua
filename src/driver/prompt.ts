@@ -20,6 +20,8 @@ export const renderSystemPrompt = async (params: {
   systemFiles?: { filename: string; content: string }[];
   hasBashTool?: boolean;
   hasWebSearchTool?: boolean;
+  hasDownloadFileTool?: boolean;
+  hasAttachmentSupport?: boolean;
 }) => {
   const { rendered } = await renderMarkdownString(systemPromptTemplate, params, basePath);
   return rendered;

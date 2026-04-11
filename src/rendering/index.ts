@@ -84,13 +84,14 @@ const truncateXml = (xml: string, maxLen: number): string => {
 
 // --- Attachment → XML ---
 
-const renderAttachment = (att: CanonicalAttachment): string => {
+const renderAttachment = (att: CanonicalAttachment, messageId: string, index: number): string => {
   const attrs: string[] = [`type="${att.type}"`];
   if (att.mimeType) attrs.push(`mime="${escapeXml(att.mimeType)}"`);
   if (att.fileName) attrs.push(`name="${escapeXml(att.fileName)}"`);
   if (att.width != null && att.height != null) attrs.push(`size="${att.width}x${att.height}"`);
   if (att.duration != null) attrs.push(`duration="${att.duration}"`);
   if (att.stickerSetName) attrs.push(`pack="${escapeXml(att.stickerSetName)}"`);
+  attrs.push(`file-id="${escapeXml(messageId)}:${index}"`);
   if (att.altText) {
     const tag = att.type === 'sticker' ? 'sticker' : (att.animationHash ? 'animation' : 'image');
     return `<${tag} ${attrs.join(' ')}>${escapeXml(att.altText)}</${tag}>`;
@@ -150,8 +151,8 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
   const body = renderContent(msg.content);
   if (body) parts.push(body);
 
-  for (const att of msg.attachments)
-    parts.push(renderAttachment(att));
+  for (let i = 0; i < msg.attachments.length; i++)
+    parts.push(renderAttachment(msg.attachments[i]!, msg.messageId, i));
 
   const pieces: RenderedContentPiece[] = [
     { type: 'text', text: `<message ${attrs.join(' ')}>\n${parts.join('\n')}\n</message>` },

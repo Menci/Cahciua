@@ -1,9 +1,11 @@
+import { execFile } from 'node:child_process';
+
 import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage } from './adaptation';
 import type { CanonicalIMEvent, ContentNode } from './adaptation/types';
-import { getChatIds, loadConfig, resolveChatConfig, resolveModel } from './config/config';
+import { getChatIds, loadConfig, resolveChatConfig, resolveModel, resolveRuntime } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
-import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageFileId, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadMessageFileId, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { RenderParams } from './rendering';
@@ -13,6 +15,7 @@ import { createCustomEmojiToTextResolver, emojiCacheKey } from './telegram/custo
 import { canExtractFrames, extractFrames } from './telegram/frame-extractor';
 import { computeThumbnailHash, createImageToTextResolver } from './telegram/image-to-text';
 import type { Attachment } from './telegram/message/types';
+import { renderMarkdownToTelegramHTML } from './telegram/markdown';
 import { loadSession } from './telegram/session';
 
 setupLogger();
@@ -21,8 +24,20 @@ const logger = useLogger('cahciua');
 
 const main = async () => {
   const config = loadConfig();
+  const runtimeConfig = resolveRuntime(config);
 
   const chatIds = getChatIds(config);
+
+  // Validate runtime config against tool enablement
+  for (const chatId of chatIds) {
+    const chatConfig = resolveChatConfig(config, chatId);
+    if (chatConfig.tools.bash.enabled && runtimeConfig.shell.length === 0)
+      throw new Error(`Chat ${chatId} has bash.enabled=true but runtime.shell is not configured`);
+    if (chatConfig.tools.downloadFile.enabled && !runtimeConfig.writeFile)
+      throw new Error(`Chat ${chatId} has downloadFile.enabled=true but runtime.writeFile is not configured`);
+    if (chatConfig.tools.sendMessage.enableAttachments && !runtimeConfig.readFile)
+      throw new Error(`Chat ${chatId} has sendMessage.enableAttachments=true but runtime.readFile is not configured`);
+  }
 
   // Compute per-chat image-to-text enablement
   const imageToTextChatIds = new Set(
@@ -185,6 +200,84 @@ const main = async () => {
   }, logger);
   ref.telegram = telegram;
 
+  // Helper: read a file from the workspace via the configured readFile command.
+  const readWorkspaceFile = (path: string): Promise<Buffer> =>
+    new Promise<Buffer>((resolve, reject) => {
+      const cmd = runtimeConfig.readFile!;
+      const child = execFile(
+        cmd[0]!,
+        [...cmd.slice(1), path],
+        { timeout: 60_000, maxBuffer: runtimeConfig.readFileSizeLimit + 1024, encoding: 'buffer' as BufferEncoding },
+        (error, stdout) => {
+          if (error) return reject(new Error(`readFile failed: ${error.message}`));
+          const buf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+          if (buf.length > runtimeConfig.readFileSizeLimit)
+            return reject(new Error(`File too large: ${buf.length} bytes exceeds limit of ${runtimeConfig.readFileSizeLimit} bytes`));
+          resolve(buf);
+        },
+      );
+      // Ensure stdin is closed so the child process can exit
+      child.stdin?.end();
+    });
+
+  // Helper: send a media attachment via the appropriate Bot API method.
+  const sendSingleMedia = async (
+    chatId: string,
+    type: string,
+    buffer: Buffer,
+    caption?: string,
+    replyToMessageId?: number,
+    fileName?: string,
+  ) => {
+    const opts = {
+      caption,
+      captionParseMode: caption ? 'HTML' as const : undefined,
+      replyToMessageId,
+      fileName,
+    };
+    switch (type) {
+    case 'photo': return await telegram.sendPhoto(chatId, buffer, opts);
+    case 'video': return await telegram.sendVideo(chatId, buffer, opts);
+    case 'audio': return await telegram.sendAudio(chatId, buffer, opts);
+    case 'voice': return await telegram.sendVoice(chatId, buffer, opts);
+    case 'animation': return await telegram.sendAnimation(chatId, buffer, opts);
+    case 'video_note': return await telegram.sendVideoNote(chatId, buffer, opts);
+    case 'document':
+    default: return await telegram.sendDocument(chatId, buffer, { ...opts, fileName });
+    }
+  };
+
+  // Helper: create a synthetic event for a bot-sent message and inject into pipeline.
+  const injectSyntheticEvent = (chatId: string, sent: { messageId: number; date: number; text: string; entities?: import('./telegram/message/types').MessageEntity[] }, replyToMessageId?: number) => {
+    const botInfo = telegram.bot.botInfo();
+    const syntheticMsg = {
+      messageId: sent.messageId,
+      chatId,
+      sender: {
+        id: botUserId,
+        firstName: botInfo?.firstName ?? 'Bot',
+        username: botInfo?.username,
+        isBot: true,
+        isPremium: false,
+      },
+      date: sent.date,
+      text: sent.text,
+      entities: sent.entities,
+      replyToMessageId,
+      source: 'bot' as const,
+    };
+    const event = adaptMessage(syntheticMsg);
+    event.isSelfSent = true;
+
+    const ic = pipeline.getIC(chatId);
+    if (ic?.nodes.some(n => n.type === 'message' && n.messageId === event.messageId))
+      logger.withFields({ chatId, messageId: event.messageId }).warn('Synthetic bypass: userbot arrived first (isSelfSent merged via dedup)');
+
+    persistEvent(db, event);
+    hydrateAltTextFromCache(event);
+    pipeline.pushEvent(chatId, event);
+  };
+
   const driver = createDriver({
     chatIds,
     resolveChatConfig: id => resolveChatConfig(config, id),
@@ -192,48 +285,62 @@ const main = async () => {
     loadTurnResponses: (chatId, afterMs) => loadTurnResponses(db, chatId, afterMs),
     persistTurnResponse: (chatId, tr) => persistTurnResponse(db, chatId, tr),
     persistProbeResponse: (chatId, probe) => persistProbeResponse(db, chatId, probe),
-    sendMessage: async (chatId, text, replyToMessageId) => {
-      const sent = await telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined);
+    // TODO: introduce async background tasks for large file transfers
+    sendMessage: async (chatId, text, replyToMessageId, attachments) => {
+      // --- Text-only message ---
+      if (!attachments || attachments.length === 0) {
+        const sent = await telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined);
+        injectSyntheticEvent(chatId, sent, replyToMessageId);
+        return sent;
+      }
 
-      // Bypass: inject bot's own sent message as a synthetic event so it
-      // enters the pipeline immediately, without relying on userbot reception.
-      const botInfo = telegram.bot.botInfo();
-      const syntheticMsg = {
-        messageId: sent.messageId,
-        chatId,
-        sender: {
-          id: botUserId,
-          firstName: botInfo?.firstName ?? 'Bot',
-          username: botInfo?.username,
-          isBot: true,
-          isPremium: false,
-        },
-        date: sent.date,
-        text: sent.text,
-        entities: sent.entities,
-        replyToMessageId,
-        source: 'bot' as const,
-      };
-      const event = adaptMessage(syntheticMsg);
-      event.isSelfSent = true;
+      // --- Message with attachments ---
+      // Read all files from workspace
+      const buffers = await Promise.all(
+        attachments.map(att => readWorkspaceFile(att.path)),
+      );
 
-      // Detect userbot winning the race — message already in IC before synthetic bypass
-      const ic = pipeline.getIC(chatId);
-      if (ic?.nodes.some(n => n.type === 'message' && n.messageId === event.messageId))
-        logger.withFields({ chatId, messageId: event.messageId }).warn('Synthetic bypass: userbot arrived first (isSelfSent merged via dedup)');
+      const htmlCaption = text ? renderMarkdownToTelegramHTML(text) : undefined;
 
-      persistEvent(db, event);
-      hydrateAltTextFromCache(event);
-      pipeline.pushEvent(chatId, event);
-      // Don't call driver.handleEvent — we're inside the Driver's LLM call;
-      // the self-loop check will prevent re-triggering on bot-only messages.
+      if (attachments.length === 1) {
+        // Single attachment — use type-specific send method
+        const att = attachments[0]!;
+        const sent = await sendSingleMedia(chatId, att.type, buffers[0]!, htmlCaption, replyToMessageId, att.file_name);
+        injectSyntheticEvent(chatId, sent, replyToMessageId);
+        return sent;
+      }
 
-      return sent;
+      // Multiple attachments — use sendMediaGroup
+      // Map to MediaGroupItem (only photo, video, audio, document allowed in media groups)
+      const mediaGroupTypes = new Set(['photo', 'video', 'audio', 'document']);
+      const media = attachments.map((att, i) => ({
+        type: (mediaGroupTypes.has(att.type) ? att.type : 'document') as 'photo' | 'video' | 'audio' | 'document',
+        buffer: buffers[i]!,
+        fileName: att.file_name,
+        caption: i === 0 ? htmlCaption : undefined,
+        captionParseMode: i === 0 && htmlCaption ? 'HTML' as const : undefined,
+      }));
+
+      const sentMessages = await telegram.sendMediaGroup(chatId, media, replyToMessageId ? { replyToMessageId } : undefined);
+
+      // Inject synthetic events for each sent message in the group
+      for (const sent of sentMessages) {
+        injectSyntheticEvent(chatId, sent, replyToMessageId);
+      }
+
+      // Return the first message's info
+      return sentMessages[0]!;
     },
     loadCompaction: chatId => loadCompaction(db, chatId),
     loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
     persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
     setCompactCursor: (chatId, cursorMs) => pipeline.setCompactCursor(chatId, cursorMs),
+    runtimeConfig,
+    loadMessageAttachments: (chatId, messageId) => loadMessageAttachments(db, chatId, messageId),
+    downloadFile: fileId => telegram.bot.downloadFile(fileId),
+    downloadMessageMedia: telegram.userbot
+      ? (chatId, messageId) => telegram.userbot!.downloadMessageMedia(chatId, messageId)
+      : undefined,
     logger,
   });
 

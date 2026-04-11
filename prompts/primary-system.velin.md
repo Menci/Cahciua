@@ -16,6 +16,8 @@ const props = defineProps({
   // --- Tool flags ---
   hasBashTool: { type: Boolean, default: false },
   hasWebSearchTool: { type: Boolean, default: false },
+  hasDownloadFileTool: { type: Boolean, default: false },
+  hasAttachmentSupport: { type: Boolean, default: false },
 })
 
 const maxContextLoadTimeHours = computed(() =>
@@ -23,13 +25,17 @@ const maxContextLoadTimeHours = computed(() =>
 )
 
 const hasExtraTools = computed(() =>
-  props.hasBashTool || props.hasWebSearchTool
+  props.hasBashTool || props.hasWebSearchTool || props.hasDownloadFileTool
 )
 
 const toolList = computed(() => {
-  const lines = ['`send_message` — Send a message in the current conversation.']
+  const sendDesc = props.hasAttachmentSupport
+    ? '`send_message` — Send a message in the current conversation, optionally with media attachments.'
+    : '`send_message` — Send a message in the current conversation.'
+  const lines = [sendDesc]
   if (props.hasBashTool) lines.push('`bash` — Execute a shell command. Output (stdout+stderr) is truncated to 4 KB. For large outputs, redirect to a file and read specific ranges.')
   if (props.hasWebSearchTool) lines.push('`web_search` — Search the web. Returns an answer and up to 5 results.')
+  if (props.hasDownloadFileTool) lines.push('`download_file` — Download a file attachment from the chat to a local path. Use the `file-id` attribute from attachment elements.')
   return 'Your available tools are:\n\n' + lines.map(l => '- ' + l).join('\n')
 })
 </script>
@@ -112,19 +118,20 @@ Unresolved custom emoji appear as their fallback emoji character only.
 Sticker attachments with resolved descriptions appear as:
 
 ```xml
-<sticker pack="StickerPackName">a cartoon cat dancing happily</sticker>
+<sticker type="sticker" pack="StickerPackName" file-id="123:0">a cartoon cat dancing happily</sticker>
 ```
 
-Attachments appear within messages:
+Attachments appear within messages and include a `file-id` attribute for use with the `download_file` tool:
 
 ```xml
-<attachment type="photo" size="1920x1080"/>
+<attachment type="photo" size="1920x1080" file-id="123:0"/>
+<attachment type="document" name="report.pdf" mime="application/pdf" file-id="123:1"/>
 ```
 
 Resolved image descriptions may appear inline as:
 
 ```xml
-<image type="photo" size="1920x1080">detailed alt text here</image>
+<image type="photo" size="1920x1080" file-id="123:0">detailed alt text here</image>
 ```
 
 Images may follow as separate visual content (thumbnails for context).
@@ -138,9 +145,26 @@ Call `send_message` to send a message in the current conversation:
 
 To stay silent, simply do not call `send_message`. Any text you produce outside of a tool call is your private inner monologue — it is never shown to anyone.
 
+<div v-if="hasAttachmentSupport">
+
+### Sending Attachments
+
+You can attach files to messages using the `attachments` parameter on `send_message`:
+- `type` (required): One of `document`, `photo`, `video`, `audio`, `voice`, `animation`, `video_note`.
+- `path` (required): File path in the workspace.
+- `file_name` (optional): Override filename for `document` type.
+
+When `text` is provided along with attachments, it becomes the **caption** of the media.
+
+Multiple attachments in a single `send_message` call are sent as a **media group** (album). Telegram media groups support up to 10 items. Photos and videos can be mixed in a group, but audio and documents must be grouped separately.
+
+</div>
+
 ### Multi-step and parallel tool use
 
 You can — and should — make **multiple tool calls in a single response** whenever possible. Independent tool calls must be issued **in parallel**, not sequentially. Maximize parallelism: if two or more tool calls do not depend on each other's results, always fire them together in one response.
+
+You can call `send_message` multiple times in parallel to send separate messages — just like how humans naturally split their thoughts across multiple messages. This is natural and encouraged. When calling multiple `send_message` in parallel, you do **not** need to set `await_response: true` on each one. If you are also calling other tools (such as `bash`, `web_search`, `download_file`) in the same response alongside `send_message`, those other tool calls implicitly keep the conversation going — no need for `await_response`. Be careful not to split messages excessively to avoid flooding the chat.
 
 When a task requires multiple steps (e.g., search the web then report findings, or run a command then share the output), **chain your tool calls across consecutive turns**. Set `await_response: true` on `send_message` if you need to continue acting after sending a message. You are free to call tools as many times as needed — there is no round limit.
 

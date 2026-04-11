@@ -9,10 +9,12 @@ import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { streamingChat } from './streaming';
 import { streamingResponses } from './streaming-responses';
-import { createBashTool, createSendMessageTool, createWebSearchTool } from './tools';
-import type { CahciuaTool } from './tools';
+import { createBashTool, createDownloadFileTool, createSendMessageTool, createWebSearchTool } from './tools';
+import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, ProviderFormat, ResponsesTRDataItem, TRDataEntry, TurnResponse } from './types';
+import type { RuntimeConfig } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
+import type { Attachment } from '../telegram/message/types';
 
 /** Format current time in local timezone as ISO 8601 with offset (e.g. 2025-03-13T22:30:00+08:00). */
 const localTimeNow = (): string => {
@@ -49,11 +51,15 @@ export const createDriver = (config: DriverConfig, deps: {
     reasoningSignatureCompat: string;
     isActivated: boolean;
   }) => void;
-  sendMessage: (chatId: string, text: string, replyToMessageId?: number) => Promise<{ messageId: number; date: number }>;
+  sendMessage: (chatId: string, text: string, replyToMessageId?: number, attachments?: SendMessageAttachment[]) => Promise<{ messageId: number; date: number }>;
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
   loadLastProbeTime: (chatId: string) => number;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
   setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
+  runtimeConfig: RuntimeConfig;
+  loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
+  downloadFile: (fileId: string) => Promise<Buffer>;
+  downloadMessageMedia?: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
   logger: Logger;
 }) => {
   const { logger } = deps;
@@ -168,28 +174,40 @@ export const createDriver = (config: DriverConfig, deps: {
               estimatedTokens: ctx.estimatedTokens,
             }).log('Triggering LLM call');
 
-            const sendMessageTool = createSendMessageTool(async (text, replyTo) => {
+            const sendMessageTool = createSendMessageTool(async (text, replyTo, attachments) => {
               log.withFields({
                 chatId,
                 text: text.length > 100 ? `${text.slice(0, 100)}...` : text,
                 replyTo,
+                attachments: attachments?.length ?? 0,
               }).log('send_message tool called');
-              const sent = await deps.sendMessage(chatId, text, replyTo ? Number(replyTo) : undefined);
+              const sent = await deps.sendMessage(chatId, text, replyTo ? Number(replyTo) : undefined, attachments);
               return { messageId: String(sent.messageId) };
-            });
+            }, chatConfig.tools.sendMessage.enableAttachments);
 
             const hasBashTool = chatConfig.tools.bash.enabled;
             const hasWebSearchTool = chatConfig.tools.webSearch.enabled && !!chatConfig.tools.webSearch.tavilyKey;
+            const hasDownloadFileTool = chatConfig.tools.downloadFile.enabled && !!deps.runtimeConfig.writeFile;
+            const hasAttachmentSupport = chatConfig.tools.sendMessage.enableAttachments;
 
             const tools: CahciuaTool[] = [sendMessageTool];
-            if (hasBashTool) tools.push(createBashTool(chatConfig.tools.bash.shell));
+            if (hasBashTool) tools.push(createBashTool(deps.runtimeConfig));
             if (hasWebSearchTool) tools.push(createWebSearchTool(chatConfig.tools.webSearch.tavilyKey));
+            if (hasDownloadFileTool) tools.push(createDownloadFileTool({
+              chatId,
+              runtime: deps.runtimeConfig,
+              loadMessageAttachments: deps.loadMessageAttachments,
+              downloadFile: deps.downloadFile,
+              downloadMessageMedia: deps.downloadMessageMedia,
+            }));
 
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
               modelName: chatConfig.primaryModel.model,
               hasBashTool,
               hasWebSearchTool,
+              hasDownloadFileTool,
+              hasAttachmentSupport,
             });
 
             // --- Compute mention/reply state from RC ---

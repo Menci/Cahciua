@@ -274,7 +274,7 @@ describe('render', () => {
       const result = xml(render(ic([message({
         attachments: [{ type: 'photo', width: 800, height: 600 }],
       })])));
-      expect(result).toContain('<attachment type="photo" size="800x600"/>');
+      expect(result).toContain('<attachment type="photo" size="800x600" file-id="42:0"/>');
     });
 
     it('renders attachment with mime and name', () => {
@@ -317,7 +317,7 @@ describe('render', () => {
       expect(rc[0]!.content).toHaveLength(1);
       expect(rc[0]!.content[0]).toEqual({
         type: 'text',
-        text: '<message id="42" sender="Alice (@alice)" t="2025-03-12T14:30:00+08:00">\nhello\n<image type="photo" size="800x600">a cat sleeping on a windowsill</image>\n</message>',
+        text: '<message id="42" sender="Alice (@alice)" t="2025-03-12T14:30:00+08:00">\nhello\n<image type="photo" size="800x600" file-id="42:0">a cat sleeping on a windowsill</image>\n</message>',
       });
     });
 

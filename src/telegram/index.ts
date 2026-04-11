@@ -1,7 +1,7 @@
 import type { Logger } from '@guiiai/logg';
 
 import type { AnimationToTextResolver } from './animation-to-text';
-import type { BotClient, SendOptions, SentMessage } from './bot';
+import type { BotClient, MediaGroupItem, MediaSendOptions, SendOptions, SentMessage } from './bot';
 import { createBotClient } from './bot';
 import type { CustomEmojiToTextResolver } from './custom-emoji-to-text';
 import { createEventBus } from './event-bus';
@@ -47,6 +47,14 @@ export interface TelegramManager {
   onMessageEdit: (handler: (edit: TelegramMessageEdit) => void) => void;
   onMessageDelete: (handler: (del: TelegramMessageDelete) => void) => void;
   sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage>;
+  sendPhoto(chatId: string | number, photo: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
+  sendDocument(chatId: string | number, document: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
+  sendVideo(chatId: string | number, video: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
+  sendAudio(chatId: string | number, audio: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
+  sendVoice(chatId: string | number, voice: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
+  sendAnimation(chatId: string | number, animation: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
+  sendVideoNote(chatId: string | number, videoNote: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
+  sendMediaGroup(chatId: string | number, media: MediaGroupItem[], options?: SendOptions): Promise<SentMessage[]>;
   fetchMessages(chatId: string, options: FetchOptions): Promise<TelegramMessage[]>;
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
   resolvePackTitle(setName: string): Promise<string>;
@@ -289,6 +297,14 @@ export const createTelegramManager = (
     onMessageEdit: editBus.on,
     onMessageDelete: deleteBus.on,
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
+    sendPhoto: (chatId, photo, opts) => bot.sendPhoto(chatId, photo, opts),
+    sendDocument: (chatId, doc, opts) => bot.sendDocument(chatId, doc, opts),
+    sendVideo: (chatId, video, opts) => bot.sendVideo(chatId, video, opts),
+    sendAudio: (chatId, audio, opts) => bot.sendAudio(chatId, audio, opts),
+    sendVoice: (chatId, voice, opts) => bot.sendVoice(chatId, voice, opts),
+    sendAnimation: (chatId, anim, opts) => bot.sendAnimation(chatId, anim, opts),
+    sendVideoNote: (chatId, note, opts) => bot.sendVideoNote(chatId, note, opts),
+    sendMediaGroup: (chatId, media, opts) => bot.sendMediaGroup(chatId, media, opts),
     fetchMessages: (chatId, opts) => userbot?.fetchMessages(chatId, opts) ?? Promise.resolve([]),
     fetchSpecificMessages: (chatId, ids) => userbot?.fetchSpecificMessages(chatId, ids) ?? Promise.resolve([]),
     resolvePackTitle,

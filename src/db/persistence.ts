@@ -14,6 +14,7 @@ import type {
 import type { CompactionSessionMeta, ResponsesTRDataItem, TRDataEntry, TurnResponse } from '../driver/types';
 import type { ImageAltTextRecord } from '../telegram/image-to-text';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
+import type { Attachment } from '../telegram/message/types';
 
 export const upsertUser = (db: DB, user: TelegramUser) => {
   db.insert(users)
@@ -458,4 +459,14 @@ export const loadMessageFileId = (db: DB, chatId: string, messageId: number): st
     .limit(1)
     .get();
   return row?.attachments?.[0]?.fileId;
+};
+
+/** Load all attachments for a message (used by download_file tool). */
+export const loadMessageAttachments = (db: DB, chatId: string, messageId: number): Attachment[] | undefined => {
+  const row = db.select({ attachments: messages.attachments })
+    .from(messages)
+    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+    .limit(1)
+    .get();
+  return row?.attachments ?? undefined;
 };

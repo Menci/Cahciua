@@ -16,6 +16,18 @@ const llmEndpointEntries = {
   timeoutSec: v.optional(v.number()),
 };
 
+// --- Runtime config schema (top-level, global) ---
+
+const DEFAULT_FILE_SIZE_LIMIT = 20 * 1024 * 1024; // 20 MB
+
+const RuntimeSchema = v.optional(v.object({
+  shell: v.optional(v.array(v.string()), ['/bin/bash', '-c']),
+  writeFile: v.optional(v.array(v.string())),
+  readFile: v.optional(v.array(v.string())),
+  writeFileSizeLimit: v.optional(v.number(), DEFAULT_FILE_SIZE_LIMIT),
+  readFileSizeLimit: v.optional(v.number(), DEFAULT_FILE_SIZE_LIMIT),
+}), {});
+
 // --- Chat-level config schemas ---
 
 const ChatConfigSchema = v.object({
@@ -53,7 +65,12 @@ const ChatConfigSchema = v.object({
   tools: v.optional(v.object({
     bash: v.optional(v.object({
       enabled: v.optional(v.boolean(), false),
-      shell: v.optional(v.array(v.string()), ['/bin/bash', '-c']),
+    }), {}),
+    downloadFile: v.optional(v.object({
+      enabled: v.optional(v.boolean(), false),
+    }), {}),
+    sendMessage: v.optional(v.object({
+      enableAttachments: v.optional(v.boolean(), false),
     }), {}),
     webSearch: v.optional(v.object({
       enabled: v.optional(v.boolean(), false),
@@ -98,7 +115,12 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   tools: v.partial(v.object({
     bash: v.partial(v.object({
       enabled: v.boolean(),
-      shell: v.array(v.string()),
+    })),
+    downloadFile: v.partial(v.object({
+      enabled: v.boolean(),
+    })),
+    sendMessage: v.partial(v.object({
+      enableAttachments: v.boolean(),
     })),
     webSearch: v.partial(v.object({
       enabled: v.boolean(),
@@ -118,12 +140,21 @@ const ConfigSchema = v.object({
   database: v.optional(v.object({
     path: v.optional(v.string(), './data/cahciua.db'),
   }), {}),
+  runtime: RuntimeSchema,
   chats: v.objectWithRest({ default: ChatConfigSchema }, ChatOverrideSchema),
 });
 
 export type Config = v.InferOutput<typeof ConfigSchema>;
 export type ChatConfig = v.InferOutput<typeof ChatConfigSchema>;
 export type FeatureFlags = ChatConfig['features'];
+
+export interface RuntimeConfig {
+  shell: string[];
+  writeFile?: string[];
+  readFile?: string[];
+  writeFileSizeLimit: number;
+  readFileSizeLimit: number;
+}
 
 export interface ResolvedChatConfig {
   primaryModel: LlmEndpoint;
@@ -135,7 +166,9 @@ export interface ResolvedChatConfig {
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number };
   featureFlags: FeatureFlags;
   tools: {
-    bash: { enabled: boolean; shell: string[] };
+    bash: { enabled: boolean };
+    downloadFile: { enabled: boolean };
+    sendMessage: { enableAttachments: boolean };
     webSearch: { enabled: boolean; tavilyKey: string };
   };
 }
@@ -147,6 +180,14 @@ export const loadConfig = (): Config => {
   const parsed = parseYaml(raw);
   return v.parse(ConfigSchema, parsed);
 };
+
+export const resolveRuntime = (config: Config): RuntimeConfig => ({
+  shell: config.runtime.shell,
+  writeFile: config.runtime.writeFile,
+  readFile: config.runtime.readFile,
+  writeFileSizeLimit: config.runtime.writeFileSizeLimit,
+  readFileSizeLimit: config.runtime.readFileSizeLimit,
+});
 
 export const resolveModel = (config: Config, name: string): LlmEndpoint => {
   const entry = config.models[name];
@@ -193,7 +234,9 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     },
     featureFlags: merged.features,
     tools: {
-      bash: { enabled: merged.tools.bash.enabled, shell: merged.tools.bash.shell },
+      bash: { enabled: merged.tools.bash.enabled },
+      downloadFile: { enabled: merged.tools.downloadFile.enabled },
+      sendMessage: { enableAttachments: merged.tools.sendMessage.enableAttachments },
       webSearch: { enabled: merged.tools.webSearch.enabled, tavilyKey: merged.tools.webSearch.tavilyKey },
     },
   };

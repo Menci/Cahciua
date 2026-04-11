@@ -24,6 +24,15 @@ telegram:
 database:
   path: "./data/cahciua.db"
 
+# Runtime configuration: shell and file I/O commands used by tools.
+# These are global (not per-chat) because they describe the execution environment.
+runtime:
+  shell: ["/bin/bash", "-c"]                          # command prefix for bash tool
+  # writeFile: ["/bin/bash", "-c", "/usr/bin/cat > \"$0\""]  # write stdin to file (path appended as arg)
+  # readFile: ["/usr/bin/cat"]                                # read file to stdout (path appended as arg)
+  # writeFileSizeLimit: 20971520                              # max bytes for download_file (default 20 MB)
+  # readFileSizeLimit: 20971520                               # max bytes for send_message attachments (default 20 MB)
+
 # Per-chat configuration. Keys (except "default") serve as the chat ID whitelist.
 # Each per-chat entry is deep-merged with "default" — only specify overrides.
 chats:
@@ -58,14 +67,17 @@ chats:
       trimStaleNoToolCallTurnResponses: false
       trimSelfMessagesCoveredBySendToolCalls: false
       trimToolResults: false
-    # Tools: enable extra tools for this chat (bash, web search).
+    # Tools: enable extra tools for this chat.
     # tools:
     #   bash:
     #     enabled: false
-    #     shell: ["/bin/bash", "-c"]       # command prefix for shell execution
+    #   downloadFile:
+    #     enabled: false                          # requires runtime.writeFile
+    #   sendMessage:
+    #     enableAttachments: false                # requires runtime.readFile
     #   webSearch:
     #     enabled: false
-    #     tavilyKey: ""                    # Tavily API key for web search
+    #     tavilyKey: ""                           # Tavily API key for web search
 
   # Per-chat overrides — uncomment and customize:
   # "751414718":                   # per-chat partial override (deep-merged with default)
