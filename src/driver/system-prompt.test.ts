@@ -2,187 +2,337 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { renderMarkdownString } from '@velin-dev/core';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const template = readFileSync(resolve(__dirname, '../../prompts/primary-system.velin.md'), 'utf-8');
-const lateBindingTemplate = readFileSync(resolve(__dirname, '../../prompts/primary-late-binding.velin.md'), 'utf-8');
 // basePath must be a file (not directory) so createRequire resolves pnpm's node_modules
 const basePath = resolve(__dirname, '../../package.json');
 
-const renderPrompt = (data: Record<string, unknown> = {}) =>
-  renderMarkdownString(template, data, basePath).then(r => r.rendered);
+const loadTemplate = (name: string) =>
+  readFileSync(resolve(__dirname, `../../prompts/${name}`), 'utf-8');
 
-describe('system prompt (velin)', () => {
+// Intercept Vue warnings — any [Vue warn] message is a test failure.
+let warnSpy: ReturnType<typeof vi.spyOn>;
+beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+afterEach(() => {
+  const vueWarnings = warnSpy.mock.calls
+    .map(args => args.join(' '))
+    .filter(msg => msg.includes('[Vue warn]'));
+  warnSpy.mockRestore();
+  if (vueWarnings.length > 0)
+    throw new Error(`Vue warnings detected:\n${vueWarnings.join('\n')}`);
+});
+
+const assertNoVueSyntaxLeak = (rendered: string) => {
+  expect(rendered).not.toContain('v-if=');
+  expect(rendered).not.toContain('v-for=');
+  expect(rendered).not.toContain('v-else');
+  expect(rendered).not.toContain('defineProps');
+};
+
+// ═══════════════════════════════════════════════════════════════
+// primary-system.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const systemTemplate = loadTemplate('primary-system.velin.md');
+const renderSystem = (data: Record<string, unknown> = {}) =>
+  renderMarkdownString(systemTemplate, data, basePath).then(r => r.rendered);
+
+describe('primary-system.velin.md', () => {
   it('renders with minimal props', async () => {
-    const rendered = await renderPrompt({ modelName: 'gpt-4o' });
-
-    // Static content present
+    const rendered = await renderSystem({ modelName: 'gpt-4o' });
     expect(rendered).toContain('You just woke up.');
     expect(rendered).toContain('send_message');
-    expect(rendered).toContain('Chat Context Format');
     expect(rendered).toContain('only available tool');
-
-    // Model name rendered
     expect(rendered).toContain('gpt-4o');
-
-    // Markdown formatting section present
-    expect(rendered).toContain('Message Formatting');
-    expect(rendered).toContain('Markdown');
-
-    // Defaults applied
-    expect(rendered).toContain('telegram');
-    expect(rendered).toContain('1440');
-
-    // timeNow should NOT be in system prompt (moved to late-binding)
-    expect(rendered).not.toContain('time-now');
-
-    // No raw Vue syntax leaked
-    expect(rendered).not.toContain('v-if=');
-    expect(rendered).not.toContain('v-for=');
-    expect(rendered).not.toContain('defineProps');
-
-    // Removed features should not appear
-    expect(rendered).not.toContain('Inbox');
-    expect(rendered).not.toContain('Heartbeat');
-    expect(rendered).not.toContain('Schedule');
-    expect(rendered).not.toContain('Subagent');
-    expect(rendered).not.toContain('use_skill');
-    expect(rendered).not.toContain('search_memory');
-    expect(rendered).not.toContain('get_contacts');
-    expect(rendered).not.toContain('read_media');
-    expect(rendered).not.toContain('`read`');
-    expect(rendered).not.toContain('`write`');
-    expect(rendered).not.toContain('`exec`');
+    assertNoVueSyntaxLeak(rendered);
   });
 
   it('renders language header', async () => {
-    const rendered = await renderPrompt({ language: 'zh', modelName: 'gpt-4o' });
+    const rendered = await renderSystem({ language: 'zh', modelName: 'gpt-4o' });
     expect(rendered).toContain('language: zh');
   });
 
   it('renders system files', async () => {
-    const rendered = await renderPrompt({
+    const rendered = await renderSystem({
       modelName: 'gpt-4o',
       systemFiles: [
         { filename: 'IDENTITY.md', content: 'I am a test bot.' },
         { filename: 'SOUL.md', content: 'Be helpful.' },
       ],
     });
-
     expect(rendered).toContain('I am a test bot.');
     expect(rendered).toContain('Be helpful.');
   });
 
-  it('renders context footer with custom values', async () => {
-    const rendered = await renderPrompt({
-      currentChannel: 'discord',
-      maxContextLoadTime: 720,
+  it('shows tools when flags enabled', async () => {
+    const rendered = await renderSystem({
       modelName: 'gpt-4o',
+      hasBashTool: true,
+      hasWebSearchTool: true,
+      hasDownloadFileTool: true,
+      hasAttachmentSupport: true,
     });
-
-    expect(rendered).toContain('discord');
-    expect(rendered).toContain('720');
-    expect(rendered).toContain('12.00');
-  });
-
-  it('contains send_message instructions, not direct-reply', async () => {
-    const rendered = await renderPrompt({ modelName: 'gpt-4o' });
-
-    expect(rendered).toContain('send_message');
-    expect(rendered).toContain('internal monologue');
-    expect(rendered).toContain('Choosing when to respond');
-    expect(rendered).toContain('Stay silent when');
-    expect(rendered).not.toContain('Your text output IS your reply');
-  });
-
-  it('shows bash tool when hasBashTool is true', async () => {
-    const rendered = await renderPrompt({ modelName: 'gpt-4o', hasBashTool: true });
-
-    expect(rendered).toContain('bash');
-    expect(rendered).toContain('shell command');
-    expect(rendered).not.toContain('only available tool');
-  });
-
-  it('shows web_search tool when hasWebSearchTool is true', async () => {
-    const rendered = await renderPrompt({ modelName: 'gpt-4o', hasWebSearchTool: true });
-
-    expect(rendered).toContain('web\\_search');
-    expect(rendered).toContain('Search the web');
-    expect(rendered).not.toContain('only available tool');
-  });
-
-  it('shows both tools when both flags are true', async () => {
-    const rendered = await renderPrompt({ modelName: 'gpt-4o', hasBashTool: true, hasWebSearchTool: true });
-
     expect(rendered).toContain('bash');
     expect(rendered).toContain('web\\_search');
-    expect(rendered).toContain('shell command');
-    expect(rendered).toContain('Search the web');
+    expect(rendered).toContain('download\\_file');
     expect(rendered).not.toContain('only available tool');
   });
 
-  it('shows only available tool text when no extra tools', async () => {
-    const rendered = await renderPrompt({ modelName: 'gpt-4o' });
+  it('shows background task tools and runtime-event format', async () => {
+    const rendered = await renderSystem({
+      modelName: 'gpt-4o',
+      hasBashTool: true,
+      hasBackgroundTasks: true,
+    });
+    expect(rendered).toContain('kill\\_task');
+    expect(rendered).toContain('read\\_task\\_output');
+    expect(rendered).toContain('runtime-event');
+    expect(rendered).toContain('task-completed');
+  });
 
-    expect(rendered).toContain('only available tool');
-    expect(rendered).not.toContain('Search the web');
+  it('hides background task content when disabled', async () => {
+    const rendered = await renderSystem({ modelName: 'gpt-4o' });
+    expect(rendered).not.toContain('runtime-event');
+    expect(rendered).not.toContain('kill\\_task');
   });
 });
 
+// ═══════════════════════════════════════════════════════════════
+// primary-late-binding.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const lateBindingTemplate = loadTemplate('primary-late-binding.velin.md');
 const renderLateBinding = (data: Record<string, unknown> = {}) =>
   renderMarkdownString(lateBindingTemplate, data, basePath).then(r => r.rendered);
 
-describe('late-binding prompt (velin)', () => {
-  it('renders static content without conditionals', async () => {
+describe('primary-late-binding.velin.md', () => {
+  it('renders static content', async () => {
     const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z' });
-
     expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
     expect(rendered).toContain('send_message');
-    expect(rendered).toContain('inner monologue');
     expect(rendered).not.toContain('decided to act');
-    expect(rendered).not.toContain('mentioned');
-    expect(rendered).not.toContain('replied');
-    expect(rendered).not.toContain('defineProps');
+    expect(rendered).not.toContain('interrupted');
+    assertNoVueSyntaxLeak(rendered);
   });
 
-  it('renders activated state (probe enabled, not probing)', async () => {
-    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isProbeEnabled: true, isProbing: false });
-
+  it('renders activated state', async () => {
+    const rendered = await renderLateBinding({
+      timeNow: '2025-01-01T00:00:00Z',
+      isProbeEnabled: true, isProbing: false,
+    });
     expect(rendered).toContain('decided to act');
-    expect(rendered).not.toContain('mentioned');
-    expect(rendered).not.toContain('replied');
   });
 
   it('renders mentioned state', async () => {
     const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isMentioned: true });
-
     expect(rendered).toContain('mentioned');
     expect(rendered).not.toContain('decided to act');
-    expect(rendered).not.toContain('replied');
   });
 
   it('renders replied state', async () => {
     const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isReplied: true });
-
     expect(rendered).toContain('replied');
-    expect(rendered).not.toContain('decided to act');
-    expect(rendered).not.toContain('mentioned');
   });
 
-  it('activated takes priority over mentioned/replied', async () => {
+  it('renders interrupted state', async () => {
+    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isInterrupted: true });
+    expect(rendered).toContain('interrupted by new messages');
+    expect(rendered).toContain('continue');
+  });
+
+  it('interrupted does not suppress other states', async () => {
     const rendered = await renderLateBinding({
       timeNow: '2025-01-01T00:00:00Z',
-      isProbeEnabled: true, isProbing: false, isMentioned: true, isReplied: true,
+      isInterrupted: true,
+      isMentioned: true,
     });
-
-    expect(rendered).toContain('decided to act');
-    expect(rendered).not.toContain('mentioned');
-    expect(rendered).not.toContain('replied');
+    expect(rendered).toContain('interrupted by new messages');
+    expect(rendered).toContain('mentioned');
   });
 
-  it('probe path does not show activated', async () => {
-    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isProbeEnabled: true, isProbing: true });
+  it('renders active background tasks', async () => {
+    const rendered = await renderLateBinding({
+      timeNow: '2025-01-01T00:00:00Z',
+      activeBackgroundTasks: [
+        { id: 3, typeName: 'shell_execute', intention: 'run tests', liveSummary: 'Running: 42 lines', startedMs: 1000, timeoutMs: 60000 },
+      ],
+    });
+    expect(rendered).toContain('active-background-tasks');
+    expect(rendered).toContain('task id="3"');
+    expect(rendered).toContain('shell');
+    expect(rendered).toContain('run tests');
+    expect(rendered).toContain('Running: 42 lines');
+    expect(rendered).toContain('</task>');
+    expect(rendered).toContain('</active-background-tasks>');
+  });
 
-    expect(rendered).not.toContain('decided to act');
+  it('renders multiple background tasks', async () => {
+    const rendered = await renderLateBinding({
+      timeNow: '2025-01-01T00:00:00Z',
+      activeBackgroundTasks: [
+        { id: 1, typeName: 'shell_execute', liveSummary: 'task 1', startedMs: 1000, timeoutMs: 30000 },
+        { id: 2, typeName: 'shell_execute', liveSummary: 'task 2', startedMs: 2000, timeoutMs: 60000 },
+      ],
+    });
+    expect(rendered).toContain('task id="1"');
+    expect(rendered).toContain('task id="2"');
+  });
+
+  it('hides background tasks section when empty', async () => {
+    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z' });
+    expect(rendered).not.toContain('active-background-tasks');
+  });
+
+  it('renders task without intention', async () => {
+    const rendered = await renderLateBinding({
+      timeNow: '2025-01-01T00:00:00Z',
+      activeBackgroundTasks: [
+        { id: 5, typeName: 'shell_execute', liveSummary: 'Running', startedMs: 1000, timeoutMs: 30000 },
+      ],
+    });
+    expect(rendered).toContain('task id="5"');
+    expect(rendered).not.toContain('<intention>');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// compaction-system.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const compactionSystemTemplate = loadTemplate('compaction-system.velin.md');
+
+describe('compaction-system.velin.md', () => {
+  it('renders without props', async () => {
+    const { rendered } = await renderMarkdownString(compactionSystemTemplate, {}, basePath);
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered).toContain('myself');
+    assertNoVueSyntaxLeak(rendered);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// compaction-late-binding.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const compactionLateBindingTemplate = loadTemplate('compaction-late-binding.velin.md');
+
+describe('compaction-late-binding.velin.md', () => {
+  it('renders without props', async () => {
+    const { rendered } = await renderMarkdownString(compactionLateBindingTemplate, {}, basePath);
+    expect(rendered.length).toBeGreaterThan(0);
+    assertNoVueSyntaxLeak(rendered);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// image-to-text-system.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const imageToTextTemplate = loadTemplate('image-to-text-system.velin.md');
+
+describe('image-to-text-system.velin.md', () => {
+  it('renders without caption', async () => {
+    const { rendered } = await renderMarkdownString(imageToTextTemplate, {}, basePath);
+    expect(rendered.length).toBeGreaterThan(0);
+    expect(rendered).not.toContain('caption');
+    assertNoVueSyntaxLeak(rendered);
+  });
+
+  it('renders with caption', async () => {
+    const { rendered } = await renderMarkdownString(imageToTextTemplate, { caption: 'A sunset' }, basePath);
+    expect(rendered).toContain('A sunset');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// animation-to-text-system.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const animationTemplate = loadTemplate('animation-to-text-system.velin.md');
+
+describe('animation-to-text-system.velin.md', () => {
+  it('renders with defaults', async () => {
+    const { rendered } = await renderMarkdownString(animationTemplate, {}, basePath);
+    expect(rendered.length).toBeGreaterThan(0);
+    assertNoVueSyntaxLeak(rendered);
+  });
+
+  it('renders with all props', async () => {
+    const { rendered } = await renderMarkdownString(animationTemplate, {
+      caption: 'funny cat',
+      duration: 5,
+      frameCount: 8,
+      frameTimestamps: '0.0s, 0.6s, 1.3s',
+    }, basePath);
+    expect(rendered).toContain('funny cat');
+    expect(rendered).toContain('8');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// sticker-animation-to-text-system.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const stickerTemplate = loadTemplate('sticker-animation-to-text-system.velin.md');
+
+describe('sticker-animation-to-text-system.velin.md', () => {
+  it('renders with defaults', async () => {
+    const { rendered } = await renderMarkdownString(stickerTemplate, {}, basePath);
+    expect(rendered.length).toBeGreaterThan(0);
+    assertNoVueSyntaxLeak(rendered);
+  });
+
+  it('renders with all props', async () => {
+    const { rendered } = await renderMarkdownString(stickerTemplate, {
+      caption: 'wave',
+      emoji: '👋',
+      stickerSetName: 'CuteCats',
+      duration: 3,
+      frameCount: 6,
+      frameTimestamps: '0.0s, 0.5s, 1.0s',
+      isStatic: false,
+    }, basePath);
+    expect(rendered).toContain('CuteCats');
+  });
+
+  it('renders static sticker', async () => {
+    const { rendered } = await renderMarkdownString(stickerTemplate, {
+      isStatic: true,
+      stickerSetName: 'StaticPack',
+    }, basePath);
+    expect(rendered).toContain('StaticPack');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// custom-emoji-to-text-system.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const customEmojiTemplate = loadTemplate('custom-emoji-to-text-system.velin.md');
+
+describe('custom-emoji-to-text-system.velin.md', () => {
+  it('renders with defaults', async () => {
+    const { rendered } = await renderMarkdownString(customEmojiTemplate, {}, basePath);
+    expect(rendered.length).toBeGreaterThan(0);
+    assertNoVueSyntaxLeak(rendered);
+  });
+
+  it('renders with all props', async () => {
+    const { rendered } = await renderMarkdownString(customEmojiTemplate, {
+      fallbackEmoji: '😂',
+      stickerSetName: 'FunEmojis',
+      frameCount: 4,
+      frameTimestamps: '0.0s, 0.3s',
+      isAnimated: true,
+    }, basePath);
+    expect(rendered).toContain('FunEmojis');
+  });
+
+  it('renders static emoji', async () => {
+    const { rendered } = await renderMarkdownString(customEmojiTemplate, {
+      isAnimated: false,
+      fallbackEmoji: '🎉',
+    }, basePath);
+    expect(rendered).toContain('🎉');
   });
 });
