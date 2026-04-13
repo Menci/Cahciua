@@ -3,6 +3,8 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
 import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentNode, ServiceAction } from '../adaptation/types';
 import type { Attachment, ForwardInfo, MessageEntity } from '../telegram/message/types';
 
+import type { RuntimeEventData } from '../runtime-event';
+
 type AnyMsg = Record<string, any>;
 
 export const users = sqliteTable('users', {
@@ -56,7 +58,7 @@ export const events = sqliteTable('events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
 
   chatId: text('chat_id').notNull(),
-  type: text('type').notNull().$type<'message' | 'edit' | 'delete' | 'service'>(),
+  type: text('type').notNull().$type<'message' | 'edit' | 'delete' | 'service' | 'runtime'>(),
   receivedAtMs: integer('received_at').notNull(),
   timestampSec: integer('timestamp').notNull(),
   utcOffsetMin: integer('utc_offset_min').notNull().default(480),
@@ -84,6 +86,9 @@ export const events = sqliteTable('events', {
 
   // Service event action — JSON discriminated union
   serviceAction: text('service_action', { mode: 'json' }).$type<ServiceAction>(),
+
+  // Runtime event data — JSON for runtime-originated events
+  runtimeData: text('runtime_data', { mode: 'json' }).$type<RuntimeEventData>(),
 }, table => [
   index('events_chat_id_idx').on(table.chatId),
 ]);
@@ -139,4 +144,22 @@ export const imageAltTexts = sqliteTable('image_alt_texts', {
   createdAt: integer('created_at').notNull(),
 }, table => [
   uniqueIndex('image_alt_texts_hash_idx').on(table.imageHash),
+]);
+
+export const backgroundTasks = sqliteTable('background_tasks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: text('session_id').notNull(),
+  typeName: text('type_name').notNull(),
+  intention: text('intention'),
+  timeoutMs: integer('timeout_ms').notNull(),
+  completed: integer('completed', { mode: 'boolean' }).notNull().default(false),
+  params: text('params', { mode: 'json' }).notNull().$type<unknown>(),
+  checkpoint: text('checkpoint', { mode: 'json' }).$type<unknown>(),
+  startedMs: integer('started_ms').notNull(),
+  lastUpdatedMs: integer('last_updated_ms').notNull(),
+  finalSummary: text('final_summary'),
+  fullOutputPath: text('full_output_path'),
+}, table => [
+  index('background_tasks_session_idx').on(table.sessionId),
+  index('background_tasks_completed_idx').on(table.completed),
 ]);

@@ -31,6 +31,9 @@ export interface RenderedContextSegment {
   mentionsMe?: boolean;
   // Reply-to target is a message sent by this bot
   repliesToMe?: boolean;
+  // Segment is a runtime event (e.g. background task completion). These bypass
+  // the probe gate — the bot always responds to runtime notifications.
+  isRuntimeEvent?: boolean;
 }
 
 export type RenderedContext = RenderedContextSegment[];

@@ -100,7 +100,20 @@ export type ICSystemEvent =
   | ICChatPhotoDeletedEvent
   | ICMessagePinnedEvent;
 
-export type ICNode = ICMessage | ICSystemEvent;
+export interface ICRuntimeEvent {
+  type: 'runtime_event';
+  kind: 'task_completed';
+  receivedAtMs: number;
+  timestampSec: number;
+  utcOffsetMin: number;
+  taskId: number;
+  taskType: string;
+  intention?: string;
+  finalSummary: string;
+  hasFullOutput: boolean;
+}
+
+export type ICNode = ICMessage | ICSystemEvent | ICRuntimeEvent;
 
 export interface ICUserState {
   user: CanonicalUser;

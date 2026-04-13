@@ -100,28 +100,60 @@ export const createSendMessageTool = (
 const BASH_MAX_OUTPUT = 4096;
 const BASH_TIMEOUT_MS = 30_000;
 
-export const createBashTool = (runtime: RuntimeConfig): CahciuaTool => ({
+export const createBashTool = (runtime: RuntimeConfig, backgroundTask?: {
+  startTask: (typeName: string, sessionId: string, params: unknown, intention: string | undefined, timeoutMs: number) => number;
+  sessionId: string;
+  backgroundThresholdSec: number;
+}): CahciuaTool => ({
   type: 'function',
   function: {
     name: 'bash',
     description:
       'Execute a shell command. Output (stdout+stderr combined) is truncated to 4 KB. ' +
-      'For large outputs, redirect to a file and read specific ranges.',
+      'For large outputs, redirect to a file and read specific ranges. ' +
+      (backgroundTask
+        ? `Set timeout_seconds > ${backgroundTask.backgroundThresholdSec} for long-running commands — they run as background tasks and return immediately with a task ID.`
+        : ''),
     parameters: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'The shell command to execute.' },
+        ...(backgroundTask ? {
+          timeout_seconds: {
+            type: 'number',
+            description: `Timeout in seconds. Commands with timeout > ${backgroundTask.backgroundThresholdSec}s run as background tasks and return immediately with a task ID. Short commands (e.g. ls, cat) typically need 5-10s; builds or tests may need 60-300s.`,
+          },
+          intention: { type: 'string', description: 'Brief description of what this command does (shown in background task status).' },
+        } : {}),
       },
-      required: ['command'],
+      required: backgroundTask ? ['command', 'timeout_seconds'] : ['command'],
     },
   },
   execute: async input => {
-    const { command } = input as { command: string };
+    const { command, timeout_seconds, intention } = input as { command: string; timeout_seconds?: number; intention?: string };
+    const timeoutSec = timeout_seconds ?? 30; // fallback for non-background-task mode
+
+    // Background task path
+    if (backgroundTask && timeoutSec > backgroundTask.backgroundThresholdSec) {
+      const taskId = backgroundTask.startTask(
+        'shell_execute',
+        backgroundTask.sessionId,
+        { command, shell: runtime.shell },
+        intention,
+        timeoutSec * 1000,
+      );
+      return {
+        content: { background_task_id: taskId, message: `Background task started (id: ${taskId}). You will be notified when it completes. Use kill_task to cancel or read_task_output to view results.` },
+        requiresFollowUp: true,
+      };
+    }
+
+    // Synchronous execution path
     return await new Promise<ToolExecuteResult>(resolve => {
       const child = execFile(
         runtime.shell[0]!,
         [...runtime.shell.slice(1), command],
-        { timeout: BASH_TIMEOUT_MS, maxBuffer: BASH_MAX_OUTPUT * 2 },
+        { timeout: Math.min(timeoutSec * 1000, BASH_TIMEOUT_MS), maxBuffer: BASH_MAX_OUTPUT * 2 },
         (error, stdout, stderr) => {
           let output = stdout + stderr;
           let truncated = false;
@@ -284,5 +316,53 @@ export const createDownloadFileTool = (deps: {
       );
       child.stdin?.end(buffer);
     });
+  },
+});
+
+export const createKillTaskTool = (
+  kill: (taskId: number) => { ok: boolean; error?: string },
+): CahciuaTool => ({
+  type: 'function',
+  function: {
+    name: 'kill_task',
+    description: 'Kill a running background task by its ID.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'The background task ID to kill.' },
+      },
+      required: ['task_id'],
+    },
+  },
+  execute: input => {
+    const { task_id } = input as { task_id: number };
+    const result = kill(task_id);
+    return { content: result, requiresFollowUp: true };
+  },
+});
+
+export const createReadTaskOutputTool = (
+  read: (taskId: number, offset?: number, limit?: number) => Promise<{ content: string; totalLines: number; truncated: boolean } | { error: string }>,
+): CahciuaTool => ({
+  type: 'function',
+  function: {
+    name: 'read_task_output',
+    description:
+      'Read the full output of a completed background task. Supports pagination for large outputs. ' +
+      'Use offset and limit to read specific ranges (line-based).',
+    parameters: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'number', description: 'The background task ID.' },
+        offset: { type: 'number', description: 'Starting line number (0-based). Default: 0.' },
+        limit: { type: 'number', description: 'Number of lines to read. Default: 200.' },
+      },
+      required: ['task_id'],
+    },
+  },
+  execute: async input => {
+    const { task_id, offset, limit } = input as { task_id: number; offset?: number; limit?: number };
+    const result = await read(task_id, offset, limit);
+    return { content: result, requiresFollowUp: true };
   },
 });

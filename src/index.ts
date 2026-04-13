@@ -1,13 +1,16 @@
 import { execFile } from 'node:child_process';
 
 import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage } from './adaptation';
-import type { CanonicalIMEvent, ContentNode } from './adaptation/types';
-import { getChatIds, loadConfig, resolveChatConfig, resolveModel, resolveRuntime } from './config/config';
+import type { ContentNode } from './adaptation/types';
+import { createBackgroundTaskManager } from './background-task';
+import { shellTaskFactory } from './background-task/shell';
+import { getChatIds, loadConfig, resolveBackgroundTasks, resolveChatConfig, resolveModel, resolveRuntime } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
 import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadMessageFileId, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
+import type { PipelineEvent } from './pipeline';
 import type { RenderParams } from './rendering';
 import { createTelegramManager } from './telegram';
 import { createAnimationToTextResolver } from './telegram/animation-to-text';
@@ -25,6 +28,7 @@ const logger = useLogger('cahciua');
 const main = async () => {
   const config = loadConfig();
   const runtimeConfig = resolveRuntime(config);
+  const backgroundTasksConfig = resolveBackgroundTasks(config);
 
   const chatIds = getChatIds(config);
 
@@ -116,7 +120,7 @@ const main = async () => {
     }
   };
 
-  const hydrateAltTextFromCache = (event: CanonicalIMEvent) => {
+  const hydrateAltTextFromCache = (event: PipelineEvent) => {
     if (event.type !== 'message' && event.type !== 'edit') return;
     for (const att of event.attachments) {
       if (att.altText) continue;
@@ -278,6 +282,24 @@ const main = async () => {
     pipeline.pushEvent(chatId, event);
   };
 
+  // Background task manager — created before driver, wired via lazy ref.
+  const driverRef: { handleEvent?: (chatId: string, rc: import('./rendering/types').RenderedContext) => void } = {};
+  const backgroundTaskManager = createBackgroundTaskManager({
+    db,
+    persistEvent: event => persistEvent(db, event),
+    pushPipelineEvent: (chatId, event) => pipeline.pushEvent(chatId, event),
+    handleDriverEvent: (chatId, rc) => driverRef.handleEvent?.(chatId, rc),
+    taskOutputDir: backgroundTasksConfig.outputDir,
+    retentionCount: backgroundTasksConfig.retentionCount,
+    logger,
+  });
+  backgroundTaskManager.registerFactory(shellTaskFactory);
+
+  // Recover incomplete background tasks from DB (tasks paused during last shutdown
+  // or left incomplete after a crash). Non-resumable tasks (like shell_execute)
+  // immediately complete with a failure message, generating a RuntimeEvent.
+  backgroundTaskManager.recoverTasks();
+
   const driver = createDriver({
     chatIds,
     resolveChatConfig: id => resolveChatConfig(config, id),
@@ -285,7 +307,6 @@ const main = async () => {
     loadTurnResponses: (chatId, afterMs) => loadTurnResponses(db, chatId, afterMs),
     persistTurnResponse: (chatId, tr) => persistTurnResponse(db, chatId, tr),
     persistProbeResponse: (chatId, probe) => persistProbeResponse(db, chatId, probe),
-    // TODO: introduce async background tasks for large file transfers
     sendMessage: async (chatId, text, replyToMessageId, attachments) => {
       // --- Text-only message ---
       if (!attachments || attachments.length === 0) {
@@ -341,8 +362,18 @@ const main = async () => {
     downloadMessageMedia: telegram.userbot
       ? (chatId, messageId) => telegram.userbot!.downloadMessageMedia(chatId, messageId)
       : undefined,
+    backgroundTask: {
+      startTask: (typeName, sessionId, params, intention, timeoutMs) =>
+        backgroundTaskManager.startTask(typeName, sessionId, params, intention, timeoutMs),
+      killTask: taskId => backgroundTaskManager.killTask(taskId, 'tool_call'),
+      getActiveTasks: sessionId => backgroundTaskManager.getActiveTasks(sessionId),
+      readTaskOutput: (taskId, offset, limit) => backgroundTaskManager.readTaskOutput(taskId, offset, limit),
+    },
     logger,
   });
+
+  // Wire lazy driver ref for background task completion notifications
+  driverRef.handleEvent = driver.handleEvent;
 
   logger.withFields({ chatIds }).log('Driver initialized');
 
@@ -444,6 +475,7 @@ const main = async () => {
 
   const shutdown = async () => {
     logger.log('Shutting down...');
+    backgroundTaskManager.shutdown();
     driver.stop();
     await telegram.stop();
     process.exit(0);

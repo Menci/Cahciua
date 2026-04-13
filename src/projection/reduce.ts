@@ -1,6 +1,6 @@
 import { enableMapSet, produce } from 'immer';
 
-import type { ICMessage, ICSystemEvent, ICUserState, IntermediateContext } from './types';
+import type { ICMessage, ICRuntimeEvent, ICSystemEvent, ICUserState, IntermediateContext } from './types';
 import { contentToPlainText } from '../adaptation';
 import type {
   CanonicalDeleteEvent,
@@ -10,6 +10,9 @@ import type {
   CanonicalServiceEvent,
   CanonicalUser,
 } from '../adaptation/types';
+import type { RuntimeEvent } from '../runtime-event';
+
+export type PipelineEvent = CanonicalIMEvent | RuntimeEvent;
 
 enableMapSet();
 
@@ -166,12 +169,29 @@ const reduceService = (draft: IntermediateContext, event: CanonicalServiceEvent)
   }
 };
 
-export const reduce = (ic: IntermediateContext, event: CanonicalIMEvent): IntermediateContext =>
+const reduceRuntime = (draft: IntermediateContext, event: RuntimeEvent) => {
+  const node: ICRuntimeEvent = {
+    type: 'runtime_event',
+    kind: event.kind,
+    receivedAtMs: event.receivedAtMs,
+    timestampSec: event.timestampSec,
+    utcOffsetMin: event.utcOffsetMin,
+    taskId: event.taskId,
+    taskType: event.taskType,
+    intention: event.intention,
+    finalSummary: event.finalSummary,
+    hasFullOutput: event.hasFullOutput,
+  };
+  draft.nodes.push(node);
+};
+
+export const reduce = (ic: IntermediateContext, event: PipelineEvent): IntermediateContext =>
   produce(ic, draft => {
     switch (event.type) {
     case 'message': reduceMessage(draft, event); break;
     case 'edit': reduceEdit(draft, event); break;
     case 'delete': reduceDelete(draft, event); break;
     case 'service': reduceService(draft, event); break;
+    case 'runtime': reduceRuntime(draft, event); break;
     }
   });

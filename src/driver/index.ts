@@ -9,9 +9,10 @@ import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { streamingChat } from './streaming';
 import { streamingResponses } from './streaming-responses';
-import { createBashTool, createDownloadFileTool, createSendMessageTool, createWebSearchTool } from './tools';
+import { createBashTool, createDownloadFileTool, createKillTaskTool, createReadTaskOutputTool, createSendMessageTool, createWebSearchTool } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, ProviderFormat, ResponsesTRDataItem, TRDataEntry, TurnResponse } from './types';
+import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
 import type { Attachment } from '../telegram/message/types';
@@ -60,6 +61,12 @@ export const createDriver = (config: DriverConfig, deps: {
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
   downloadFile: (fileId: string) => Promise<Buffer>;
   downloadMessageMedia?: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
+  backgroundTask?: {
+    startTask: (typeName: string, sessionId: string, params: unknown, intention: string | undefined, timeoutMs: number) => number;
+    killTask: (taskId: number) => { ok: boolean; error?: string };
+    getActiveTasks: (sessionId: string) => ActiveTaskInfo[];
+    readTaskOutput: (taskId: number, offset?: number, limit?: number) => Promise<{ content: string; totalLines: number; truncated: boolean } | { error: string }>;
+  };
   logger: Logger;
 }) => {
   const { logger } = deps;
@@ -189,9 +196,14 @@ export const createDriver = (config: DriverConfig, deps: {
             const hasWebSearchTool = chatConfig.tools.webSearch.enabled && !!chatConfig.tools.webSearch.tavilyKey;
             const hasDownloadFileTool = chatConfig.tools.downloadFile.enabled && !!deps.runtimeConfig.writeFile;
             const hasAttachmentSupport = chatConfig.tools.sendMessage.enableAttachments;
+            const hasBackgroundTasks = hasBashTool && !!deps.backgroundTask;
 
             const tools: CahciuaTool[] = [sendMessageTool];
-            if (hasBashTool) tools.push(createBashTool(deps.runtimeConfig));
+            if (hasBashTool) tools.push(createBashTool(deps.runtimeConfig, deps.backgroundTask ? {
+              startTask: deps.backgroundTask.startTask,
+              sessionId: chatId,
+              backgroundThresholdSec: chatConfig.tools.bash.backgroundThresholdSec,
+            } : undefined));
             if (hasWebSearchTool) tools.push(createWebSearchTool(chatConfig.tools.webSearch.tavilyKey));
             if (hasDownloadFileTool) tools.push(createDownloadFileTool({
               chatId,
@@ -200,6 +212,10 @@ export const createDriver = (config: DriverConfig, deps: {
               downloadFile: deps.downloadFile,
               downloadMessageMedia: deps.downloadMessageMedia,
             }));
+            if (hasBackgroundTasks) {
+              tools.push(createKillTaskTool(taskId => deps.backgroundTask!.killTask(taskId)));
+              tools.push(createReadTaskOutputTool((taskId, offset, limit) => deps.backgroundTask!.readTaskOutput(taskId, offset, limit)));
+            }
 
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
@@ -208,19 +224,19 @@ export const createDriver = (config: DriverConfig, deps: {
               hasWebSearchTool,
               hasDownloadFileTool,
               hasAttachmentSupport,
+              hasBackgroundTasks,
             });
 
             // --- Compute mention/reply state from RC ---
             const rcVal = rcAtStart;
             const lastMentionedAtMs = rcVal.reduce((max, seg) =>
-              (seg.mentionsMe || seg.repliesToMe) ? Math.max(max, seg.receivedAtMs) : max, 0);
+              (seg.mentionsMe || seg.repliesToMe || seg.isRuntimeEvent) ? Math.max(max, seg.receivedAtMs) : max, 0);
             const isMentioned = rcVal.some(seg => seg.mentionsMe && seg.receivedAtMs > lastProcessedMs());
             const isReplied = rcVal.some(seg => seg.repliesToMe && seg.receivedAtMs > lastProcessedMs());
 
             // --- Probe gate ---
-            // In group chats, if the bot was not recently @'d or replied to, use a
-            // small/cheap probe model to decide whether to respond. If the probe
-            // chooses silence (no tool calls), we skip the primary model entirely.
+            // Skip probe if: mentioned, replied to, or runtime event.
+            // In those cases go straight to primary model.
             if (chatConfig.probe.enabled) {
               const needsProbe = lastMentionedAtMs <= lastProcessedMs();
 
@@ -238,6 +254,7 @@ export const createDriver = (config: DriverConfig, deps: {
                 const probeLateBinding = await renderLateBindingPrompt({
                   timeNow: localTimeNow(),
                   isProbeEnabled: true, isProbing: true, isMentioned, isReplied,
+                  activeBackgroundTasks: deps.backgroundTask?.getActiveTasks(chatId),
                 });
                 injectLateBindingPrompt(probeMessages, probeLateBinding);
 
@@ -294,6 +311,7 @@ export const createDriver = (config: DriverConfig, deps: {
             const primaryLateBinding = await renderLateBindingPrompt({
               timeNow: localTimeNow(),
               isProbeEnabled: chatConfig.probe.enabled, isProbing: false, isMentioned, isReplied,
+              activeBackgroundTasks: deps.backgroundTask?.getActiveTasks(chatId),
             });
             injectLateBindingPrompt(ctx.messages, primaryLateBinding);
 

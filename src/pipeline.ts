@@ -1,11 +1,13 @@
 import { createPatch } from 'diff';
 
-import type { CanonicalIMEvent } from './adaptation/types';
 import { useLogger } from './config/logger';
 import { createEmptyIC, reduce } from './projection';
+import type { PipelineEvent } from './projection';
 import type { IntermediateContext } from './projection';
 import { rcToXml, render } from './rendering';
 import type { RenderedContext, RenderParams } from './rendering';
+
+export type { PipelineEvent } from './projection';
 
 // Per-chat IC/RC state manager. Encapsulates the Projection → Rendering
 // pipeline, debug dumping, and diff logging.
@@ -32,8 +34,8 @@ export const createPipeline = (renderParams: RenderParams) => {
     renderLogger.log(`RC diff:\n${patch}`);
   };
 
-  // Push a single canonical event through the pipeline: reduce IC → render RC → log diff.
-  const pushEvent = (chatId: string, event: CanonicalIMEvent): RenderedContext => {
+  // Push a single event through the pipeline: reduce IC → render RC → log diff.
+  const pushEvent = (chatId: string, event: PipelineEvent): RenderedContext => {
     const oldIC = sessions.get(chatId) ?? createEmptyIC(chatId);
     const newIC = reduce(oldIC, event);
     sessions.set(chatId, newIC);
@@ -47,7 +49,7 @@ export const createPipeline = (renderParams: RenderParams) => {
   };
 
   // Cold-start replay: rebuild IC from persisted events, then render RC.
-  const replayChat = (chatId: string, events: CanonicalIMEvent[]): RenderedContext => {
+  const replayChat = (chatId: string, events: PipelineEvent[]): RenderedContext => {
     let ic = createEmptyIC(chatId);
     for (const event of events)
       ic = reduce(ic, event);

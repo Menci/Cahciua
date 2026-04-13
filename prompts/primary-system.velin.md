@@ -18,6 +18,7 @@ const props = defineProps({
   hasWebSearchTool: { type: Boolean, default: false },
   hasDownloadFileTool: { type: Boolean, default: false },
   hasAttachmentSupport: { type: Boolean, default: false },
+  hasBackgroundTasks: { type: Boolean, default: false },
 })
 
 const maxContextLoadTimeHours = computed(() =>
@@ -25,7 +26,7 @@ const maxContextLoadTimeHours = computed(() =>
 )
 
 const hasExtraTools = computed(() =>
-  props.hasBashTool || props.hasWebSearchTool || props.hasDownloadFileTool
+  props.hasBashTool || props.hasWebSearchTool || props.hasDownloadFileTool || props.hasBackgroundTasks
 )
 
 const toolList = computed(() => {
@@ -36,6 +37,10 @@ const toolList = computed(() => {
   if (props.hasBashTool) lines.push('`bash` — Execute a shell command. Output (stdout+stderr) is truncated to 4 KB. For large outputs, redirect to a file and read specific ranges.')
   if (props.hasWebSearchTool) lines.push('`web_search` — Search the web. Returns an answer and up to 5 results.')
   if (props.hasDownloadFileTool) lines.push('`download_file` — Download a file attachment from the chat to a local path. Use the `file-id` attribute from attachment elements.')
+  if (props.hasBackgroundTasks) {
+    lines.push('`kill_task` — Kill a running background task by its ID.')
+    lines.push('`read_task_output` — Read the full output of a completed background task. Supports line-based pagination (offset, limit).')
+  }
   return 'Your available tools are:\n\n' + lines.map(l => '- ' + l).join('\n')
 })
 </script>
@@ -127,6 +132,22 @@ Attachments appear within messages and include a `file-id` attribute for use wit
 <attachment type="photo" size="1920x1080" file-id="123:0"/>
 <attachment type="document" name="report.pdf" mime="application/pdf" file-id="123:1"/>
 ```
+
+<div v-if="hasBackgroundTasks">
+
+Background task completion notifications appear as:
+
+```xml
+<runtime-event type="task-completed" task-id="3" task-type="shell_execute" t="...">
+  <intention>compile and run tests</intention>
+  <final-summary>Exited with code 0. 127 lines, 8432 bytes output.</final-summary>
+  <note>Full output available. Use read_task_output tool to view.</note>
+</runtime-event>
+```
+
+When `bash` is called with `timeout_seconds` > 10, it runs as a background task and returns immediately with a task ID. Active background tasks and their live status are shown in the late-binding prompt. Use `kill_task` to cancel and `read_task_output` to view output.
+
+</div>
 
 Resolved image descriptions may appear inline as:
 

@@ -1,6 +1,6 @@
 import type { RenderParams, RenderedContentPiece, RenderedContext, RenderedContextSegment } from './types';
 import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
-import type { ICMessage, ICSystemEvent, IntermediateContext } from '../projection/types';
+import type { ICMessage, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
 
 export type { RenderParams, RenderedContentPiece, RenderedContext, RenderedContextSegment } from './types';
 
@@ -208,6 +208,27 @@ const renderSystemEvent = (event: ICSystemEvent, contactNames?: Map<string, stri
   }
 };
 
+// --- RuntimeEvent → XML ---
+
+const renderRuntimeEvent = (event: ICRuntimeEvent): string => {
+  const t = formatTimestamp(event.timestampSec, event.utcOffsetMin);
+  const attrs = [
+    `type="${event.kind}"`,
+    `task-id="${event.taskId}"`,
+    `task-type="${escapeXml(event.taskType)}"`,
+    `t="${t}"`,
+  ];
+
+  const parts: string[] = [];
+  if (event.intention)
+    parts.push(`<intention>${escapeXml(event.intention)}</intention>`);
+  parts.push(`<final-summary>\n${escapeXml(event.finalSummary)}\n</final-summary>`);
+  if (event.hasFullOutput)
+    parts.push('<note>Full output available. Use read_task_output tool to view.</note>');
+
+  return `<runtime-event ${attrs.join(' ')}>\n${parts.join('\n')}\n</runtime-event>`;
+};
+
 // --- Public API ---
 
 export const render = (ic: IntermediateContext, params: RenderParams = {}): RenderedContext => {
@@ -219,6 +240,9 @@ export const render = (ic: IntermediateContext, params: RenderParams = {}): Rend
     if (node.type === 'message') {
       const { content, isMyself, isSelfSent, mentionsMe, repliesToMe } = renderMessage(node, params);
       segments.push({ receivedAtMs: node.receivedAtMs, content, ...(isMyself && { isMyself }), ...(isSelfSent && { isSelfSent }), ...(mentionsMe && { mentionsMe }), ...(repliesToMe && { repliesToMe }) });
+    } else if (node.type === 'runtime_event') {
+      const content = [{ type: 'text' as const, text: renderRuntimeEvent(node) }];
+      segments.push({ receivedAtMs: node.receivedAtMs, content, isRuntimeEvent: true });
     } else {
       const content = [{ type: 'text' as const, text: renderSystemEvent(node, params.contactNames) }];
       segments.push({ receivedAtMs: node.receivedAtMs, content });

@@ -1,10 +1,27 @@
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   timeNow: { type: String, required: true },
   isProbeEnabled: { type: Boolean, default: false },
   isProbing: { type: Boolean, default: false },
   isMentioned: { type: Boolean, default: false },
   isReplied: { type: Boolean, default: false },
+  activeBackgroundTasks: { type: Array, default: () => [] },
+})
+
+const backgroundTasksXml = computed(() => {
+  const tasks = props.activeBackgroundTasks
+  if (!tasks || tasks.length === 0) return ''
+  const lines = ['<active-background-tasks>']
+  for (const t of tasks) {
+    lines.push(`<task id="${t.id}" type="${t.typeName}" timeout-ms="${t.timeoutMs}" started-ms="${t.startedMs}">`)
+    if (t.intention) lines.push(`<intention>${t.intention}</intention>`)
+    lines.push(`<live-summary>\n${t.liveSummary}\n</live-summary>`)
+    lines.push('</task>')
+  }
+  lines.push('</active-background-tasks>')
+  return lines.join('\n')
 })
 </script>
 
@@ -25,5 +42,11 @@ You were mentioned — you will likely want to respond.
 <div v-else-if="isReplied">
 
 Someone replied to your message — you will likely want to respond.
+
+</div>
+<div v-if="backgroundTasksXml">
+
+Active background tasks:
+{{ backgroundTasksXml }}
 
 </div>

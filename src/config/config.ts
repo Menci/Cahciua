@@ -65,6 +65,7 @@ const ChatConfigSchema = v.object({
   tools: v.optional(v.object({
     bash: v.optional(v.object({
       enabled: v.optional(v.boolean(), false),
+      backgroundThresholdSec: v.optional(v.number(), 10),
     }), {}),
     downloadFile: v.optional(v.object({
       enabled: v.optional(v.boolean(), false),
@@ -115,6 +116,7 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   tools: v.partial(v.object({
     bash: v.partial(v.object({
       enabled: v.boolean(),
+      backgroundThresholdSec: v.number(),
     })),
     downloadFile: v.partial(v.object({
       enabled: v.boolean(),
@@ -129,6 +131,11 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   })),
 })), {});
 
+const BackgroundTasksSchema = v.optional(v.object({
+  outputDir: v.optional(v.string(), './data/task-outputs'),
+  retentionCount: v.optional(v.number(), 20),
+}), {});
+
 const ConfigSchema = v.object({
   models: v.record(v.string(), v.object(llmEndpointEntries)),
   telegram: v.object({
@@ -141,6 +148,7 @@ const ConfigSchema = v.object({
     path: v.optional(v.string(), './data/cahciua.db'),
   }), {}),
   runtime: RuntimeSchema,
+  backgroundTasks: BackgroundTasksSchema,
   chats: v.objectWithRest({ default: ChatConfigSchema }, ChatOverrideSchema),
 });
 
@@ -156,6 +164,11 @@ export interface RuntimeConfig {
   readFileSizeLimit: number;
 }
 
+export interface BackgroundTasksConfig {
+  outputDir: string;
+  retentionCount: number;
+}
+
 export interface ResolvedChatConfig {
   primaryModel: LlmEndpoint;
   primaryApiFormat: ProviderFormat;
@@ -166,7 +179,7 @@ export interface ResolvedChatConfig {
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number };
   featureFlags: FeatureFlags;
   tools: {
-    bash: { enabled: boolean };
+    bash: { enabled: boolean; backgroundThresholdSec: number };
     downloadFile: { enabled: boolean };
     sendMessage: { enableAttachments: boolean };
     webSearch: { enabled: boolean; tavilyKey: string };
@@ -187,6 +200,11 @@ export const resolveRuntime = (config: Config): RuntimeConfig => ({
   readFile: config.runtime.readFile,
   writeFileSizeLimit: config.runtime.writeFileSizeLimit,
   readFileSizeLimit: config.runtime.readFileSizeLimit,
+});
+
+export const resolveBackgroundTasks = (config: Config): BackgroundTasksConfig => ({
+  outputDir: config.backgroundTasks.outputDir,
+  retentionCount: config.backgroundTasks.retentionCount,
 });
 
 export const resolveModel = (config: Config, name: string): LlmEndpoint => {
@@ -234,7 +252,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     },
     featureFlags: merged.features,
     tools: {
-      bash: { enabled: merged.tools.bash.enabled },
+      bash: { enabled: merged.tools.bash.enabled, backgroundThresholdSec: merged.tools.bash.backgroundThresholdSec },
       downloadFile: { enabled: merged.tools.downloadFile.enabled },
       sendMessage: { enableAttachments: merged.tools.sendMessage.enableAttachments },
       webSearch: { enabled: merged.tools.webSearch.enabled, tavilyKey: merged.tools.webSearch.tavilyKey },

@@ -1,17 +1,18 @@
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 
 import type { DB } from './client';
-import { compactions, events, imageAltTexts, messages, probeResponses, turnResponses, users } from './schema';
+import { backgroundTasks, compactions, events, imageAltTexts, messages, probeResponses, turnResponses, users } from './schema';
 import { contentToPlainText } from '../adaptation';
 import type {
   CanonicalAttachment,
   CanonicalDeleteEvent,
   CanonicalEditEvent,
-  CanonicalIMEvent,
   CanonicalMessageEvent,
   CanonicalServiceEvent,
 } from '../adaptation/types';
 import type { CompactionSessionMeta, ResponsesTRDataItem, TRDataEntry, TurnResponse } from '../driver/types';
+import type { PipelineEvent } from '../projection/reduce';
+import type { RuntimeEvent, RuntimeEventData } from '../runtime-event';
 import type { ImageAltTextRecord } from '../telegram/image-to-text';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
 import type { Attachment } from '../telegram/message/types';
@@ -127,7 +128,7 @@ export const persistMessageDelete = (db: DB, del: TelegramMessageDelete) => {
     .run();
 };
 
-export const persistEvent = (db: DB, event: CanonicalIMEvent) => {
+export const persistEvent = (db: DB, event: PipelineEvent) => {
   const base = {
     chatId: event.chatId,
     type: event.type,
@@ -136,7 +137,17 @@ export const persistEvent = (db: DB, event: CanonicalIMEvent) => {
     utcOffsetMin: event.utcOffsetMin,
   };
 
-  if (event.type === 'delete') {
+  if (event.type === 'runtime') {
+    const runtimeData: RuntimeEventData = {
+      kind: event.kind,
+      taskId: event.taskId,
+      taskType: event.taskType,
+      intention: event.intention,
+      finalSummary: event.finalSummary,
+      hasFullOutput: event.hasFullOutput,
+    };
+    db.insert(events).values({ ...base, runtimeData }).run();
+  } else if (event.type === 'delete') {
     db.insert(events).values({
       ...base,
       messageIds: event.messageIds,
@@ -234,17 +245,35 @@ const reconstructServiceEvent = (row: EventRow): CanonicalServiceEvent => {
   return event;
 };
 
-const reconstructEvent = (row: EventRow): CanonicalIMEvent => {
+const reconstructRuntimeEvent = (row: EventRow): RuntimeEvent => {
+  const data = row.runtimeData!;
+  return {
+    type: 'runtime',
+    kind: data.kind,
+    chatId: row.chatId,
+    receivedAtMs: row.receivedAtMs,
+    timestampSec: row.timestampSec,
+    utcOffsetMin: row.utcOffsetMin,
+    taskId: data.taskId,
+    taskType: data.taskType,
+    intention: data.intention,
+    finalSummary: data.finalSummary,
+    hasFullOutput: data.hasFullOutput,
+  };
+};
+
+const reconstructEvent = (row: EventRow): PipelineEvent => {
   switch (row.type) {
   case 'message': return reconstructMessageEvent(row);
   case 'edit': return reconstructEditEvent(row);
   case 'delete': return reconstructDeleteEvent(row);
   case 'service': return reconstructServiceEvent(row);
+  case 'runtime': return reconstructRuntimeEvent(row);
   default: throw new Error(`Unknown event type: ${row.type}`);
   }
 };
 
-export const loadEvents = (db: DB, chatId: string, afterMs?: number): CanonicalIMEvent[] => {
+export const loadEvents = (db: DB, chatId: string, afterMs?: number): PipelineEvent[] => {
   const cond = afterMs != null
     ? and(eq(events.chatId, chatId), gte(events.receivedAtMs, afterMs))
     : eq(events.chatId, chatId);
@@ -437,7 +466,7 @@ export const updateEventAttachments = (db: DB, eventId: number, attachments: Can
 
 export interface EventWithId {
   id: number;
-  event: CanonicalIMEvent;
+  event: PipelineEvent;
 }
 
 export const loadEventsWithId = (db: DB, chatId: string, afterMs?: number): EventWithId[] => {
@@ -470,3 +499,58 @@ export const loadMessageAttachments = (db: DB, chatId: string, messageId: number
     .get();
   return row?.attachments ?? undefined;
 };
+
+// --- Background tasks storage ---
+
+export type BackgroundTaskRow = typeof backgroundTasks.$inferSelect;
+
+export const insertBackgroundTask = (db: DB, task: {
+  sessionId: string;
+  typeName: string;
+  intention?: string;
+  timeoutMs: number;
+  params: unknown;
+  startedMs: number;
+}): number => {
+  const result = db.insert(backgroundTasks).values({
+    sessionId: task.sessionId,
+    typeName: task.typeName,
+    intention: task.intention ?? null,
+    timeoutMs: task.timeoutMs,
+    params: task.params,
+    startedMs: task.startedMs,
+    lastUpdatedMs: task.startedMs,
+  }).run();
+  return Number(result.lastInsertRowid);
+};
+
+export const loadIncompleteBackgroundTasks = (db: DB): BackgroundTaskRow[] =>
+  db.select().from(backgroundTasks)
+    .where(eq(backgroundTasks.completed, false))
+    .all();
+
+export const updateBackgroundTaskCheckpoint = (db: DB, id: number, checkpoint: unknown, lastUpdatedMs: number) => {
+  db.update(backgroundTasks)
+    .set({ checkpoint, lastUpdatedMs })
+    .where(eq(backgroundTasks.id, id))
+    .run();
+};
+
+export const markBackgroundTaskCompleted = (db: DB, id: number, finalSummary: string, fullOutputPath: string | null) => {
+  db.update(backgroundTasks)
+    .set({ completed: true, finalSummary, fullOutputPath, lastUpdatedMs: Date.now() })
+    .where(eq(backgroundTasks.id, id))
+    .run();
+};
+
+export const loadBackgroundTask = (db: DB, id: number): BackgroundTaskRow | undefined =>
+  db.select().from(backgroundTasks)
+    .where(eq(backgroundTasks.id, id))
+    .get();
+
+/** Load completed tasks for a session, newest first (for retention eviction). */
+export const loadCompletedBackgroundTasks = (db: DB, sessionId: string): BackgroundTaskRow[] =>
+  db.select().from(backgroundTasks)
+    .where(and(eq(backgroundTasks.sessionId, sessionId), eq(backgroundTasks.completed, true)))
+    .orderBy(desc(backgroundTasks.id))
+    .all();

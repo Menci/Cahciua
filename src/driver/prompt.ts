@@ -22,6 +22,7 @@ export const renderSystemPrompt = async (params: {
   hasWebSearchTool?: boolean;
   hasDownloadFileTool?: boolean;
   hasAttachmentSupport?: boolean;
+  hasBackgroundTasks?: boolean;
 }) => {
   const { rendered } = await renderMarkdownString(systemPromptTemplate, params, basePath);
   return rendered;
@@ -33,6 +34,7 @@ export const renderLateBindingPrompt = async (params: {
   isProbing?: boolean;
   isMentioned?: boolean;
   isReplied?: boolean;
+  activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
 }) => {
   const { rendered } = await renderMarkdownString(lateBindingTemplate, params, basePath);
   return rendered;
