@@ -169,6 +169,13 @@
       "when": 1773907200000,
       "tag": "0023_create_background_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1773907200001,
+      "tag": "0024_backfill_requires_follow_up",
+      "breakpoints": true
     }
   ]
 }

@@ -69,6 +69,7 @@ export interface ResponseFunctionCallOutputItem {
   call_id: string;
   output: string;
   status?: 'completed' | 'incomplete';
+  requiresFollowUp?: boolean;
 }
 
 export interface ResponseTool {

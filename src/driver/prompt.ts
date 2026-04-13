@@ -35,6 +35,7 @@ export const renderLateBindingPrompt = async (params: {
   isMentioned?: boolean;
   isReplied?: boolean;
   activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
+  isInterrupted?: boolean;
 }) => {
   const { rendered } = await renderMarkdownString(lateBindingTemplate, params, basePath);
   return rendered;

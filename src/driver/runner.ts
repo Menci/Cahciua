@@ -95,7 +95,7 @@ export const createRunner = (config: RunnerConfig) => {
       for (const tc of toolCalls) {
         const result = await executeToolCall(tc.id, tc.function.name, tc.function.arguments, params.tools, params.log);
         anyRequiresFollowUp ||= result.requiresFollowUp;
-        stepData.push({ role: 'tool', tool_call_id: tc.id, content: result.output } as TRToolResultEntry);
+        stepData.push({ role: 'tool', tool_call_id: tc.id, content: result.output, requiresFollowUp: result.requiresFollowUp } as TRToolResultEntry);
       }
 
       params.log.withFields({
@@ -149,7 +149,7 @@ export const createRunner = (config: RunnerConfig) => {
       for (const fc of functionCalls) {
         const result = await executeToolCall(fc.call_id, fc.name, fc.arguments, params.tools, params.log);
         anyRequiresFollowUp ||= result.requiresFollowUp;
-        callOutputs.push({ type: 'function_call_output', call_id: fc.call_id, output: result.output });
+        callOutputs.push({ type: 'function_call_output', call_id: fc.call_id, output: result.output, requiresFollowUp: result.requiresFollowUp });
       }
       stepData.push(...callOutputs);
 

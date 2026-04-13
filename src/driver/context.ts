@@ -161,6 +161,36 @@ export const latestExternalEventMs = (
   return latest;
 };
 
+/**
+ * Pure function: was the last tool call loop interrupted by new messages?
+ *
+ * Returns true if the most recent TR ends with tool results that have
+ * requiresFollowUp=true — meaning the LLM wanted to continue but the loop
+ * broke due to incoming messages.
+ *
+ * Requires requiresFollowUp to be present on all tool result entries
+ * (backfilled by migration 0024).
+ */
+export const wasToolLoopInterrupted = (trs: TurnResponse[]): boolean => {
+  if (trs.length === 0) return false;
+  const lastTr = trs[trs.length - 1]!;
+
+  if (lastTr.provider === 'openai-chat') {
+    const data = lastTr.data as TRDataEntry[];
+    const toolResults = data.filter((e): e is import('./types').TRToolResultEntry => e.role === 'tool');
+    if (toolResults.length === 0) return false;
+    return toolResults.some(tr => tr.requiresFollowUp === true);
+  }
+
+  // Responses format
+  const data = lastTr.data as ResponsesTRDataItem[];
+  const callOutputs = data.filter(
+    (item): item is import('./responses-types').ResponseFunctionCallOutputItem => item.type === 'function_call_output',
+  );
+  if (callOutputs.length === 0) return false;
+  return callOutputs.some(co => co.requiresFollowUp === true);
+};
+
 const estimateTRTokens = (tr: TurnResponse): number => {
   const chunks: ContextChunk[] = tr.provider === 'responses'
     ? tr.data.map((data, step) => ({ type: 'tr' as const, provider: 'responses' as const, time: tr.requestedAtMs, step, data }))

@@ -3,7 +3,7 @@ import { computed, effect, signal } from 'alien-signals';
 import type { Message } from 'xsai';
 
 import { runCompaction } from './compaction';
-import { composeContext, findWorkingWindowCursor, latestExternalEventMs, trimImages } from './context';
+import { composeContext, findWorkingWindowCursor, latestExternalEventMs, trimImages, wasToolLoopInterrupted } from './context';
 import { messagesToResponsesInput, xsaiToolToResponsesTool } from './convert';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
@@ -227,17 +227,18 @@ export const createDriver = (config: DriverConfig, deps: {
               hasBackgroundTasks,
             });
 
-            // --- Compute mention/reply state from RC ---
+            // --- Compute mention/reply/interrupt state from RC + TRs ---
             const rcVal = rcAtStart;
+            const isInterrupted = wasToolLoopInterrupted(trs);
             const lastMentionedAtMs = rcVal.reduce((max, seg) =>
               (seg.mentionsMe || seg.repliesToMe || seg.isRuntimeEvent) ? Math.max(max, seg.receivedAtMs) : max, 0);
             const isMentioned = rcVal.some(seg => seg.mentionsMe && seg.receivedAtMs > lastProcessedMs());
             const isReplied = rcVal.some(seg => seg.repliesToMe && seg.receivedAtMs > lastProcessedMs());
 
             // --- Probe gate ---
-            // Skip probe if: mentioned, replied to, or runtime event.
+            // Skip probe if: mentioned, replied to, runtime event, or tool loop was interrupted.
             // In those cases go straight to primary model.
-            if (chatConfig.probe.enabled) {
+            if (chatConfig.probe.enabled && !isInterrupted) {
               const needsProbe = lastMentionedAtMs <= lastProcessedMs();
 
               if (needsProbe) {
@@ -311,6 +312,7 @@ export const createDriver = (config: DriverConfig, deps: {
             const primaryLateBinding = await renderLateBindingPrompt({
               timeNow: localTimeNow(),
               isProbeEnabled: chatConfig.probe.enabled, isProbing: false, isMentioned, isReplied,
+              isInterrupted,
               activeBackgroundTasks: deps.backgroundTask?.getActiveTasks(chatId),
             });
             injectLateBindingPrompt(ctx.messages, primaryLateBinding);

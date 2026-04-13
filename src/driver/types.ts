@@ -46,6 +46,7 @@ export interface TRToolResultEntry {
   role: 'tool';
   tool_call_id: string;
   content: string;
+  requiresFollowUp?: boolean;
 }
 
 export type TRDataEntry = TRAssistantEntry | TRToolResultEntry;
