@@ -73,6 +73,7 @@
 - Bot 过度使用句号（2.7 倍），人类在聊天中几乎不加句号
 - Bot 使用 emoji 频率是人类的 3.2 倍
 - Bot 发多句消息的频率是人类的 3 倍
+- 补充观察：人类的轻停顿经常直接交给空格或句式本身，而不是显式补一个逗号或句号
 
 ### 2.3 句子复杂度
 
@@ -152,6 +153,7 @@
 **人类消息的典型模式：**
 - 超短反应："草。""难绷""好好笑""？"
 - 不加标点直接结束："还是说吃prompt多""我没用"
+- 轻停顿直接靠空格或裸句承接："我看了下 应该是这个""我看了下应该是这个"
 - 口语化表达："我草这个还扔不回去""也没说的那么垃圾"
 - 省略语境（上下文依赖）："这个暂时还在做""不一定哦~"
 
@@ -238,7 +240,7 @@ Sound like a real conversation, not a Q&A system.
 基于以上数据和调研，在 `prompts/primary-system.velin.md` 中写入了 `### Naturalness guidelines` 章节，包含 6 个板块：
 
 1. **Length & density** — 针对消息长度 2.4 倍差异
-2. **Punctuation & formatting** — 针对句号（2.7×）、破折号（7×）、括号（2.4×）、逗号、冒号
+2. **Punctuation & formatting** — 针对句号（2.7×）、破折号（7×）、括号（2.4×）、逗号、冒号，以及轻停顿更常由空格/裸句承担
 3. **Emoji & expressiveness** — 针对 emoji 3.2 倍过度使用
 4. **Word choice** — 针对"确实"（3.7×）过度使用和语气词（0.4×）使用不足
 5. **Structure & tone** — 针对列表/总结/解释推理过程等文章化结构
@@ -249,3 +251,5 @@ Sound like a real conversation, not a Q&A system.
 - **给出替代方案**，如"确实"的替代词列表、用中文互联网表达代替 emoji
 - **篇幅控制在 ~30 行**，避免 system prompt 过长导致指令被稀释
 - **末尾显式提醒不要过度执行**，避免出现新的不自然
+
+2026-04 补充实现：`src/driver/send-message-human-likeness.ts` 新增 `trailing-period` 和 `dense-clause-punctuation` 两个 late-binding heuristics。前者回看 bot 是否反复用句号收尾，后者回看短消息里是否反复用多个逗号/冒号式停顿，从而把“优先写成无标点裸句或用空格承接轻停顿”从隐含观察提升为显式反馈。

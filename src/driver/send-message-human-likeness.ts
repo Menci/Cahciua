@@ -1,8 +1,18 @@
 import type { ResponsesTRDataItem, TRDataEntry, TurnResponse } from './types';
 
 export const RECENT_SEND_MESSAGE_WINDOW = 5;
+const SHORT_MESSAGE_CHAR_LIMIT = 32;
+const DENSE_CLAUSE_PUNCTUATION_THRESHOLD = 2;
 
 export const potentiallyNotHumanFeatureDefinitions = [
+  {
+    name: 'trailing-period',
+    description: 'Ended with a full stop.',
+  },
+  {
+    name: 'dense-clause-punctuation',
+    description: 'Packed a short message with multiple clause punctuation marks instead of using a space or a bare clause.',
+  },
   {
     name: 'multiple-markdown-bold',
     description: 'Used more than one Markdown bold span.',
@@ -32,6 +42,7 @@ const MARKDOWN_BOLD_RE = /(?<!\\)(\*\*|__)(?=\S)([\s\S]*?\S)\1/g;
 const MARKDOWN_LIST_RE = /(?:^|\r?\n)[ \t]{0,3}(?:[-+*][ \t]+\S|\d+[.)][ \t]+\S)/;
 const MARKDOWN_HEADER_RE = /(?:^|\r?\n)#{1,6}[ \t]+\S/;
 const NEWLINE_RE = /\r?\n/;
+const CLAUSE_PUNCTUATION_RE = /[，,、；;：:]/gu;
 
 const parseJsonRecord = (text: string): Record<string, unknown> | null => {
   try {
@@ -50,8 +61,27 @@ const extractSendMessageText = (args: string): string | null => {
 const isSuccessfulSendMessageResult = (output: string): boolean =>
   parseJsonRecord(output)?.ok === true;
 
+const countMatches = (text: string, re: RegExp): number => [...text.matchAll(re)].length;
+
+const hasTrailingPeriod = (text: string): boolean => {
+  const trimmed = text.trim();
+  if (trimmed.endsWith('。'))
+    return true;
+  return trimmed.endsWith('.') && !/\.{2,}$/.test(trimmed);
+};
+
+const hasDenseClausePunctuation = (text: string): boolean => {
+  const trimmed = text.trim();
+  return [...trimmed].length <= SHORT_MESSAGE_CHAR_LIMIT
+    && countMatches(trimmed, CLAUSE_PUNCTUATION_RE) >= DENSE_CLAUSE_PUNCTUATION_THRESHOLD;
+};
+
 export const assessSendMessageHumanLikeness = (text: string): PotentiallyNotHumanFeature[] => {
   const features: PotentiallyNotHumanFeature[] = [];
+  if (hasTrailingPeriod(text))
+    features.push('trailing-period');
+  if (hasDenseClausePunctuation(text))
+    features.push('dense-clause-punctuation');
   if ([...text.matchAll(MARKDOWN_BOLD_RE)].length > 1)
     features.push('multiple-markdown-bold');
   if (MARKDOWN_LIST_RE.test(text))

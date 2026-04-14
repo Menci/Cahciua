@@ -29,6 +29,17 @@ const sendMessageToolCall = (id: string, text: string) => ({
 });
 
 describe('send-message-human-likeness', () => {
+  it('detects trailing periods but not ellipses', () => {
+    expect(assessSendMessageHumanLikeness('行。')).toEqual(['trailing-period']);
+    expect(assessSendMessageHumanLikeness('ok.')).toEqual(['trailing-period']);
+    expect(assessSendMessageHumanLikeness('等等...')).toEqual([]);
+  });
+
+  it('detects punctuation-heavy short messages without flagging longer explanations', () => {
+    expect(assessSendMessageHumanLikeness('我看了下，问题不大，你先别动')).toEqual(['dense-clause-punctuation']);
+    expect(assessSendMessageHumanLikeness('这个问题我看了下，应该是上下文拼接顺序有点怪，不过现在先别动，我再收一下日志')).toEqual([]);
+  });
+
   it('detects multiple markdown bold spans only when there are more than one', () => {
     expect(assessSendMessageHumanLikeness('**once** only')).toEqual([]);
     expect(assessSendMessageHumanLikeness('**one** and **two**')).toEqual(['multiple-markdown-bold']);
@@ -98,14 +109,14 @@ describe('send-message-human-likeness', () => {
     ])).toBe('');
 
     const rendered = renderRecentSendMessageHumanLikenessXml([
-      { text: '**one** and **two**', features: ['multiple-markdown-bold'] },
-      { text: 'hello\nworld', features: ['newline'] },
+      { text: '行。', features: ['trailing-period'] },
+      { text: '我看了下，问题不大，你先别动', features: ['dense-clause-punctuation'] },
     ]);
 
     expect(rendered).toContain('checked-count="2"');
     expect(rendered).toContain('<human-likeness');
-    expect(rendered).toContain('multiple-markdown-bold');
-    expect(rendered).toContain('newline');
+    expect(rendered).toContain('trailing-period');
+    expect(rendered).toContain('dense-clause-punctuation');
     expect(rendered).toContain('<guidance>If those patterns were intentional');
   });
 });
