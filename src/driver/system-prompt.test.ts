@@ -75,12 +75,10 @@ describe('primary-system.velin.md', () => {
       hasAttachmentSupport: true,
     });
     expect(rendered).toContain('bash');
-    expect(rendered).toContain('web\\_search');
-    expect(rendered).toContain('download\\_file');
-    expect(rendered).toContain('read\\_image');
+    expect(rendered).toContain('web_search');
+    expect(rendered).toContain('download_file');
+    expect(rendered).toContain('read_image');
     expect(rendered).toContain('filesystem (by path)');
-    expect(rendered).toContain('download\\_file');
-    expect(rendered).toContain('read\\_image');
     expect(rendered).not.toContain('only available tool');
   });
 
@@ -92,7 +90,7 @@ describe('primary-system.velin.md', () => {
     });
     expect(rendered).toContain('current conversation (by file-id)');
     expect(rendered).not.toContain('filesystem (by path)');
-    expect(rendered).toContain('use with the \\`read\\_image\\` tool');
+    expect(rendered).toContain('use with the `read_image` tool');
   });
 
   it('shows background task tools and runtime-event format', async () => {
@@ -101,8 +99,8 @@ describe('primary-system.velin.md', () => {
       hasBashTool: true,
       hasBackgroundTasks: true,
     });
-    expect(rendered).toContain('kill\\_task');
-    expect(rendered).toContain('read\\_task\\_output');
+    expect(rendered).toContain('kill_task');
+    expect(rendered).toContain('read_task_output');
     expect(rendered).toContain('runtime-event');
     expect(rendered).toContain('task-completed');
   });
@@ -110,7 +108,7 @@ describe('primary-system.velin.md', () => {
   it('hides background task content when disabled', async () => {
     const rendered = await renderSystem({ modelName: 'gpt-4o' });
     expect(rendered).not.toContain('runtime-event');
-    expect(rendered).not.toContain('kill\\_task');
+    expect(rendered).not.toContain('kill_task');
   });
 });
 
