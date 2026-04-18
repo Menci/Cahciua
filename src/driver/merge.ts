@@ -1,75 +1,60 @@
-import type { ContextChunk, TurnResponse } from './types';
 import type { RenderedContext, RenderedContentPiece } from '../rendering/types';
+import type { ConversationEntry, InputMessage, InputPart } from '../unified-api/types';
 
-// Merge RC segments and TRs into a ContextChunk[] array.
+const pieceToPart = (piece: RenderedContentPiece): InputPart =>
+  piece.type === 'text'
+    ? { kind: 'text', text: piece.text }
+    : { kind: 'image', image: piece.image, detail: 'low' };
+
+const rcUserMessage = (pieces: RenderedContentPiece[]): InputMessage => ({
+  kind: 'message',
+  role: 'user',
+  parts: pieces.map(pieceToPart),
+});
+
+// Merge RC segments and TR entries into a unified ConversationEntry[] timeline.
 //
-// Design: RC is intentionally a flat array of individually-timestamped segments.
-// The Rendering layer produces segments without any knowledge of TRs — it only
-// sees IC and RenderParams. This merge function re-groups consecutive RC segments
-// (those not separated by a TR) into single rc chunks. The grouping boundary
-// is determined by TR timestamps, which is Driver-layer knowledge. This keeps the
-// Rendering → Driver dependency one-directional and the Rendering layer pure.
+// RC segments are interleaved with TR entries by timestamp. Each TR's entries
+// share the TR's requestedAtMs as their primary sort key; within a TR, original
+// array order is preserved via a secondary index. Consecutive RC segments
+// (with no TR entries between them) collapse into one user InputMessage.
 //
-// Each entry is assigned a sort key: RC segments use receivedAtMs,
-// TR entries use (requestedAtMs, step) where step is the array index
-// within the TR's data. This provides a unified timeline without
-// special-case anchoring logic.
-//
-// Tiebreaker: RC before TR on equal timestamp (Anthropic role alternation).
-// Consecutive RC segments between non-RC entries merge into one rc chunk.
-export const mergeContext = (rc: RenderedContext, trs: TurnResponse[]): ContextChunk[] => {
-  type Entry =
+// Tiebreaker on equal timestamps: RC sorts before TR (so user messages precede
+// the assistant turn they triggered — Anthropic role alternation stays valid).
+export const mergeContext = (rc: RenderedContext, trs: { requestedAtMs: number; entries: ConversationEntry[] }[]): ConversationEntry[] => {
+  type Slot =
     | { kind: 'rc'; time: number; step: -1; content: RenderedContentPiece[] }
-    | { kind: 'tr'; provider: 'openai-chat'; time: number; step: number; data: Extract<ContextChunk, { type: 'tr'; provider: 'openai-chat' }>['data'] }
-    | { kind: 'tr'; provider: 'responses'; time: number; step: number; data: Extract<ContextChunk, { type: 'tr'; provider: 'responses' }>['data'] };
+    | { kind: 'tr'; time: number; step: number; entry: ConversationEntry };
 
-  const entries: Entry[] = [];
-
+  const slots: Slot[] = [];
   for (const seg of rc)
-    entries.push({ kind: 'rc', time: seg.receivedAtMs, step: -1, content: seg.content });
-
-  for (const t of trs) {
-    if (t.provider === 'responses') {
-      for (let i = 0; i < t.data.length; i++)
-        entries.push({ kind: 'tr', provider: 'responses', time: t.requestedAtMs, step: i, data: t.data[i]! });
-    } else {
-      for (let i = 0; i < t.data.length; i++)
-        entries.push({ kind: 'tr', provider: 'openai-chat', time: t.requestedAtMs, step: i, data: t.data[i]! });
-    }
+    slots.push({ kind: 'rc', time: seg.receivedAtMs, step: -1, content: seg.content });
+  for (const tr of trs) {
+    for (let i = 0; i < tr.entries.length; i++)
+      slots.push({ kind: 'tr', time: tr.requestedAtMs, step: i, entry: tr.entries[i]! });
   }
 
-  entries.sort((a, b) => {
+  slots.sort((a, b) => {
     if (a.time !== b.time) return a.time - b.time;
-    // RC before TR on equal timestamp
     if (a.kind !== b.kind) return a.kind === 'rc' ? -1 : 1;
     return a.step - b.step;
   });
 
-  // Build chunks: consecutive RC entries merge into one rc chunk.
-  const chunks: ContextChunk[] = [];
-  let pendingContent: RenderedContentPiece[] = [];
-  let pendingTime = 0;
-
-  const flushRC = () => {
-    if (pendingContent.length > 0) {
-      chunks.push({ type: 'rc', time: pendingTime, step: -1, content: pendingContent });
-      pendingContent = [];
-    }
+  const out: ConversationEntry[] = [];
+  let pending: RenderedContentPiece[] = [];
+  const flushPending = () => {
+    if (pending.length === 0) return;
+    out.push(rcUserMessage(pending));
+    pending = [];
   };
-
-  for (const entry of entries) {
-    if (entry.kind === 'rc') {
-      pendingContent.push(...entry.content);
-      pendingTime = entry.time;
+  for (const slot of slots) {
+    if (slot.kind === 'rc') {
+      pending.push(...slot.content);
     } else {
-      flushRC();
-      if (entry.provider === 'responses')
-        chunks.push({ type: 'tr', provider: 'responses', time: entry.time, step: entry.step, data: entry.data });
-      else
-        chunks.push({ type: 'tr', provider: 'openai-chat', time: entry.time, step: entry.step, data: entry.data });
+      flushPending();
+      out.push(slot.entry);
     }
   }
-  flushRC();
-
-  return chunks;
+  flushPending();
+  return out;
 };

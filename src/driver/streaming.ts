@@ -1,8 +1,7 @@
 import type { Logger } from '@guiiai/logg';
-import type { Message } from 'xsai';
 
 import { parseSSEStream } from './sse';
-import type { ExtendedMessage } from './types';
+import type { ChatCompletionsAssistantMessage } from '../unified-api/chat-types';
 
 // Chat Completions SSE chunk shape (subset we consume)
 interface ChatStreamChunk {
@@ -39,7 +38,7 @@ export interface StreamingChatParams {
   baseURL: string;
   apiKey: string;
   model: string;
-  messages: Message[];
+  messages: unknown[];
   system?: string;
   tools?: ToolSchema[];
   timeoutSec?: number;
@@ -48,7 +47,7 @@ export interface StreamingChatParams {
 }
 
 export interface StreamingChatResult {
-  choices: Array<{ finish_reason: string; message: ExtendedMessage }>;
+  choices: Array<{ finish_reason: string; message: ChatCompletionsAssistantMessage }>;
   usage: { prompt_tokens: number; completion_tokens: number };
 }
 
@@ -94,7 +93,7 @@ export const streamingChat = async (params: StreamingChatParams): Promise<Stream
 
     // Accumulated state for the single choice we care about
     let finishReason = '';
-    const message: ExtendedMessage = { role: 'assistant' };
+    const message: ChatCompletionsAssistantMessage = { role: 'assistant' };
     let usage = { prompt_tokens: 0, completion_tokens: 0 };
 
     // Accumulators for logging batched deltas

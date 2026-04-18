@@ -1,7 +1,8 @@
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 
 import type { DB } from './client';
-import { backgroundTasks, compactions, events, imageAltTexts, messages, probeResponses, turnResponses, users } from './schema';
+import { codec } from './codec';
+import { backgroundTasks, compactions, events, imageAltTexts, messages, probeResponsesV2, turnResponsesV2, users } from './schema';
 import { contentToPlainText } from '../adaptation';
 import type {
   CanonicalAttachment,
@@ -10,12 +11,13 @@ import type {
   CanonicalMessageEvent,
   CanonicalServiceEvent,
 } from '../adaptation/types';
-import type { CompactionSessionMeta, ResponsesTRDataItem, TRDataEntry, TurnResponse } from '../driver/types';
+import type { CompactionSessionMeta, ProbeResponseV2, TurnResponseV2 } from '../driver/types';
 import type { PipelineEvent } from '../projection/reduce';
 import type { RuntimeEvent, RuntimeEventData } from '../runtime-event';
 import type { ImageAltTextRecord } from '../telegram/image-to-text';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
 import type { Attachment } from '../telegram/message/types';
+import type { ConversationEntry } from '../unified-api/types';
 
 export const upsertUser = (db: DB, user: TelegramUser) => {
   db.insert(users)
@@ -303,54 +305,40 @@ export const loadKnownChatIds = (db: DB): string[] => {
   return rows.map(r => r.chatId);
 };
 
-export const persistTurnResponse = (db: DB, chatId: string, tr: TurnResponse) => {
-  db.insert(turnResponses).values({
+export const persistTurnResponse = async (db: DB, chatId: string, tr: TurnResponseV2): Promise<void> => {
+  const entriesJson = await codec.stringify(tr.entries);
+  db.insert(turnResponsesV2).values({
     chatId,
     requestedAt: tr.requestedAtMs,
-    provider: tr.provider,
-    data: tr.data,
-    sessionMeta: null,
+    entries: entriesJson,
     inputTokens: tr.inputTokens,
     outputTokens: tr.outputTokens,
-    reasoningSignatureCompat: tr.reasoningSignatureCompat ?? '',
+    modelName: tr.modelName,
   }).run();
 };
 
-type TurnResponseRow = typeof turnResponses.$inferSelect;
+type TurnResponseV2Row = typeof turnResponsesV2.$inferSelect;
 
-const reconstructTurnResponse = (row: TurnResponseRow): TurnResponse => {
-  switch (row.provider) {
-  case 'openai-chat':
-    return {
-      requestedAtMs: row.requestedAt,
-      provider: 'openai-chat',
-      data: row.data as TRDataEntry[],
-      inputTokens: row.inputTokens,
-      outputTokens: row.outputTokens,
-      reasoningSignatureCompat: row.reasoningSignatureCompat ?? '',
-    };
-  case 'responses':
-    return {
-      requestedAtMs: row.requestedAt,
-      provider: 'responses',
-      data: row.data as ResponsesTRDataItem[],
-      inputTokens: row.inputTokens,
-      outputTokens: row.outputTokens,
-      reasoningSignatureCompat: row.reasoningSignatureCompat ?? '',
-    };
-  default:
-    throw new Error(`Unknown turn response provider: ${row.provider}`);
-  }
+const reconstructTurnResponseV2 = async (row: TurnResponseV2Row): Promise<TurnResponseV2> => {
+  const entries = await codec.parse(row.entries) as ConversationEntry[];
+  return {
+    requestedAtMs: row.requestedAt,
+    entries,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    modelName: row.modelName,
+  };
 };
 
-export const loadTurnResponses = (db: DB, chatId: string, afterMs?: number): TurnResponse[] => {
+export const loadTurnResponses = async (db: DB, chatId: string, afterMs?: number): Promise<TurnResponseV2[]> => {
   const query = afterMs != null
-    ? db.select().from(turnResponses)
-        .where(and(eq(turnResponses.chatId, chatId), gte(turnResponses.requestedAt, afterMs)))
-    : db.select().from(turnResponses)
-        .where(eq(turnResponses.chatId, chatId));
+    ? db.select().from(turnResponsesV2)
+        .where(and(eq(turnResponsesV2.chatId, chatId), gte(turnResponsesV2.requestedAt, afterMs)))
+    : db.select().from(turnResponsesV2)
+        .where(eq(turnResponsesV2.chatId, chatId));
 
-  return query.orderBy(turnResponses.requestedAt, turnResponses.id).all().map(reconstructTurnResponse);
+  const rows = query.orderBy(turnResponsesV2.requestedAt, turnResponsesV2.id).all();
+  return await Promise.all(rows.map(reconstructTurnResponseV2));
 };
 
 // --- Compaction storage (append-only) ---
@@ -387,35 +375,25 @@ export const loadCompaction = (db: DB, chatId: string): CompactionSessionMeta | 
 
 // --- Probe response storage ---
 
-type AnyMsg = Record<string, any>;
-
-export const persistProbeResponse = (db: DB, chatId: string, probe: {
-  requestedAtMs: number;
-  provider: string;
-  data: AnyMsg[];
-  inputTokens: number;
-  outputTokens: number;
-  reasoningSignatureCompat: string;
-  isActivated: boolean;
-}) => {
-  db.insert(probeResponses).values({
+export const persistProbeResponse = async (db: DB, chatId: string, probe: ProbeResponseV2): Promise<void> => {
+  const entriesJson = await codec.stringify(probe.entries);
+  db.insert(probeResponsesV2).values({
     chatId,
     requestedAt: probe.requestedAtMs,
-    provider: probe.provider,
-    data: probe.data,
+    entries: entriesJson,
     inputTokens: probe.inputTokens,
     outputTokens: probe.outputTokens,
-    reasoningSignatureCompat: probe.reasoningSignatureCompat,
+    modelName: probe.modelName,
     isActivated: probe.isActivated,
-    createdAt: Date.now(),
+    createdAt: probe.createdAt,
   }).run();
 };
 
 export const loadLastProbeTime = (db: DB, chatId: string): number => {
-  const row = db.select({ requestedAt: probeResponses.requestedAt })
-    .from(probeResponses)
-    .where(eq(probeResponses.chatId, chatId))
-    .orderBy(desc(probeResponses.id))
+  const row = db.select({ requestedAt: probeResponsesV2.requestedAt })
+    .from(probeResponsesV2)
+    .where(eq(probeResponsesV2.chatId, chatId))
+    .orderBy(desc(probeResponsesV2.id))
     .limit(1)
     .get();
   return row?.requestedAt ?? 0;

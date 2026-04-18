@@ -23,6 +23,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
     "@guiiai/logg": "^1.2.11",
     "@velin-dev/core": "^0.3.4",
     "alien-signals": "^3.1.2",

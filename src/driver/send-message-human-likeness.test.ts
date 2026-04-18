@@ -1,31 +1,48 @@
 import { describe, expect, it } from 'vitest';
 
-import { appendRecentSendMessageAssessments, assessSendMessageHumanLikeness, collectRecentSendMessageAssessments, renderRecentSendMessageHumanLikenessXml } from './send-message-human-likeness';
-import type { ResponsesTRDataItem, TRDataEntry, TurnResponse } from './types';
+import {
+  appendRecentSendMessageAssessments,
+  assessSendMessageHumanLikeness,
+  collectRecentSendMessageAssessments,
+  renderRecentSendMessageHumanLikenessXml,
+} from './send-message-human-likeness';
+import type { TurnResponseV2 } from './types';
+import type { ConversationEntry } from '../unified-api/types';
 
-const chatTr = (requestedAtMs: number, data: TRDataEntry[]): TurnResponse => ({
+const tr = (requestedAtMs: number, entries: ConversationEntry[]): TurnResponseV2 => ({
   requestedAtMs,
-  provider: 'openai-chat',
-  data,
+  entries,
   inputTokens: 0,
   outputTokens: 0,
+  modelName: 'test-model',
 });
 
-const responsesTr = (requestedAtMs: number, data: ResponsesTRDataItem[]): TurnResponse => ({
-  requestedAtMs,
-  provider: 'responses',
-  data,
-  inputTokens: 0,
-  outputTokens: 0,
+const sendCall = (callId: string, text: string): ConversationEntry => ({
+  kind: 'message',
+  role: 'assistant',
+  parts: [{ kind: 'toolCall', callId, name: 'send_message', args: JSON.stringify({ text }) }],
+  reasoning: undefined,
 });
 
-const sendMessageToolCall = (id: string, text: string) => ({
-  id,
-  type: 'function' as const,
-  function: {
-    name: 'send_message',
-    arguments: JSON.stringify({ text }),
-  },
+const sendCalls = (calls: Array<{ callId: string; text: string }>): ConversationEntry => ({
+  kind: 'message',
+  role: 'assistant',
+  parts: calls.map(c => ({ kind: 'toolCall', callId: c.callId, name: 'send_message', args: JSON.stringify({ text: c.text }) })),
+  reasoning: undefined,
+});
+
+const okResult = (callId: string, messageId: string): ConversationEntry => ({
+  kind: 'toolResult',
+  callId,
+  payload: JSON.stringify({ ok: true, message_id: messageId }),
+  requiresFollowUp: false,
+});
+
+const errResult = (callId: string): ConversationEntry => ({
+  kind: 'toolResult',
+  callId,
+  payload: JSON.stringify({ error: 'boom' }),
+  requiresFollowUp: true,
 });
 
 describe('send-message-human-likeness', () => {
@@ -53,34 +70,24 @@ describe('send-message-human-likeness', () => {
     ]);
   });
 
-  it('collects only successful send_message calls across providers and keeps the latest five', () => {
+  it('collects only successful send_message calls and keeps the latest five', () => {
     const collected = collectRecentSendMessageAssessments([
-      chatTr(1000, [
-        { role: 'assistant', tool_calls: [sendMessageToolCall('tc1', 'one')] },
-        { role: 'tool', tool_call_id: 'tc1', content: JSON.stringify({ ok: true, message_id: '1' }) },
+      tr(1000, [sendCall('tc1', 'one'), okResult('tc1', '1')]),
+      tr(2000, [
+        sendCalls([{ callId: 'tc2', text: 'two' }, { callId: 'tc3', text: 'ignored' }]),
+        okResult('tc2', '2'),
+        errResult('tc3'),
       ]),
-      chatTr(2000, [
-        { role: 'assistant', tool_calls: [sendMessageToolCall('tc2', 'two'), sendMessageToolCall('tc3', 'ignored')] },
-        { role: 'tool', tool_call_id: 'tc2', content: JSON.stringify({ ok: true, message_id: '2' }) },
-        { role: 'tool', tool_call_id: 'tc3', content: JSON.stringify({ error: 'boom' }) },
+      tr(3000, [sendCall('fc1', 'three'), okResult('fc1', '3')]),
+      tr(4000, [
+        sendCalls([{ callId: 'fc2', text: 'four' }, { callId: 'fc3', text: 'five' }]),
+        okResult('fc2', '4'),
+        okResult('fc3', '5'),
       ]),
-      responsesTr(3000, [
-        { type: 'function_call', call_id: 'fc1', name: 'send_message', arguments: JSON.stringify({ text: 'three' }), status: 'completed' },
-        { type: 'function_call_output', call_id: 'fc1', output: JSON.stringify({ ok: true, message_id: '3' }) },
-      ]),
-      responsesTr(4000, [
-        { type: 'function_call', call_id: 'fc2', name: 'send_message', arguments: JSON.stringify({ text: 'four' }), status: 'completed' },
-        { type: 'function_call', call_id: 'fc3', name: 'send_message', arguments: JSON.stringify({ text: 'five' }), status: 'completed' },
-        { type: 'function_call_output', call_id: 'fc2', output: JSON.stringify({ ok: true, message_id: '4' }) },
-        { type: 'function_call_output', call_id: 'fc3', output: JSON.stringify({ ok: true, message_id: '5' }) },
-      ]),
-      chatTr(5000, [
-        { role: 'assistant', tool_calls: [sendMessageToolCall('tc4', 'six')] },
-        { role: 'tool', tool_call_id: 'tc4', content: JSON.stringify({ ok: true, message_id: '6' }) },
-      ]),
+      tr(5000, [sendCall('tc4', 'six'), okResult('tc4', '6')]),
     ]);
 
-    expect(collected.map(message => message.text)).toEqual(['two', 'three', 'four', 'five', 'six']);
+    expect(collected.map(m => m.text)).toEqual(['two', 'three', 'four', 'five', 'six']);
   });
 
   it('appends new successful send_message calls into the recent window', () => {
@@ -92,13 +99,10 @@ describe('send-message-human-likeness', () => {
         { text: 'four', features: [] },
         { text: 'five', features: [] },
       ],
-      chatTr(6000, [
-        { role: 'assistant', tool_calls: [sendMessageToolCall('tc6', 'six')] },
-        { role: 'tool', tool_call_id: 'tc6', content: JSON.stringify({ ok: true, message_id: '6' }) },
-      ]),
+      tr(6000, [sendCall('tc6', 'six'), okResult('tc6', '6')]),
     );
 
-    expect(recent.map(message => message.text)).toEqual(['two', 'three', 'four', 'five', 'six']);
+    expect(recent.map(m => m.text)).toEqual(['two', 'three', 'four', 'five', 'six']);
   });
 
   it('renders xml for both empty and flagged recent messages', () => {

@@ -3,15 +3,13 @@ models:
     apiBaseUrl: ""
     apiKey: ""
     model: "claude-opus-4-6"
-    reasoningSignatureCompat: "anthropic"
-    # apiFormat: "responses"        # optional: 'openai-chat' (default) or 'responses'
+    # apiFormat: "responses"        # optional: 'openai-chat' (default), 'responses', or 'anthropic-messages'
     # timeoutSec: 120                # optional: abort requests that stream for too long
     # maxImagesAllowed: 100     # optional: drop oldest images when context exceeds this limit
   probe:
     apiBaseUrl: ""
     apiKey: ""
     model: "claude-haiku-4-5"
-    reasoningSignatureCompat: "anthropic"
     # timeoutSec: 60                 # optional: abort requests that stream for too long
     # maxImagesAllowed: 10     # optional: Gemini Flash allows max 10 images
 

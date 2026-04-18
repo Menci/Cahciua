@@ -1,5 +1,4 @@
 // OpenAI Responses API type definitions
-// Adapted from copilot-deno/src/lib/responses-types.ts
 
 // ── Request types ──
 

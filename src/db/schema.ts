@@ -106,6 +106,32 @@ export const turnResponses = sqliteTable('turn_responses', {
   index('turn_responses_chat_requested_idx').on(table.chatId, table.requestedAt),
 ]);
 
+export const turnResponsesV2 = sqliteTable('turn_responses_v2', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  chatId: text('chat_id').notNull(),
+  requestedAt: integer('requested_at').notNull(),
+  entries: text('entries').notNull(),
+  inputTokens: integer('input_tokens').notNull(),
+  outputTokens: integer('output_tokens').notNull(),
+  modelName: text('model_name').notNull().default(''),
+}, table => [
+  index('turn_responses_v2_chat_requested_idx').on(table.chatId, table.requestedAt),
+]);
+
+export const probeResponsesV2 = sqliteTable('probe_responses_v2', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  chatId: text('chat_id').notNull(),
+  requestedAt: integer('requested_at').notNull(),
+  entries: text('entries').notNull(),
+  inputTokens: integer('input_tokens').notNull(),
+  outputTokens: integer('output_tokens').notNull(),
+  modelName: text('model_name').notNull().default(''),
+  isActivated: integer('is_activated', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+}, table => [
+  index('probe_responses_v2_chat_idx').on(table.chatId),
+]);
+
 export const compactions = sqliteTable('compactions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   chatId: text('chat_id').notNull(),

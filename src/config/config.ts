@@ -10,8 +10,7 @@ const llmEndpointEntries = {
   apiBaseUrl: v.string(),
   apiKey: v.string(),
   model: v.string(),
-  apiFormat: v.optional(v.picklist(['openai-chat', 'responses'])),
-  reasoningSignatureCompat: v.optional(v.string()),
+  apiFormat: v.optional(v.picklist(['openai-chat', 'responses', 'anthropic-messages'])),
   maxImagesAllowed: v.optional(v.number()),
   timeoutSec: v.optional(v.number()),
 };

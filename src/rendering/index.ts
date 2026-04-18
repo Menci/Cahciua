@@ -1,3 +1,5 @@
+import sharp from 'sharp';
+
 import type { RenderParams, RenderedContentPiece, RenderedContext, RenderedContextSegment } from './types';
 import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
@@ -161,7 +163,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
   // Append thumbnail images as separate content pieces (Driver converts to provider format)
   for (const att of msg.attachments) {
     if (!att.altText && att.thumbnailWebp)
-      pieces.push({ type: 'image', url: `data:image/webp;base64,${att.thumbnailWebp}` });
+      pieces.push({ type: 'image', image: sharp(Buffer.from(att.thumbnailWebp, 'base64')) });
   }
 
   return { content: pieces, isMyself, isSelfSent, mentionsMe, repliesToMe };

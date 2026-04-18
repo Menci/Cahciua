@@ -176,6 +176,13 @@
       "when": 1773907200001,
       "tag": "0024_backfill_requires_follow_up",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1773993600000,
+      "tag": "0025_create_v2_tables",
+      "breakpoints": true
     }
   ]
 }

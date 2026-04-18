@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createReadImageTool } from './tools';
+import { createReadImageTool, createTool, executeToolCall } from './tools';
 
 const createTinyPng = async (): Promise<Buffer> => {
   const { default: sharp } = await import('sharp');
@@ -60,7 +60,62 @@ describe('createReadImageTool', () => {
     expect(readFile).toHaveBeenCalledWith('/tmp/test.png');
     expect(result).toMatchObject({
       requiresFollowUp: true,
-      content: [{ type: 'input_image', detail: 'low' }],
+      content: [{ kind: 'image', detail: 'low' }],
     });
+  });
+});
+
+describe('executeToolCall', () => {
+  const log = { withFields: () => log, withError: () => log, error: () => {}, log: () => {} } as any;
+
+  const greetTool = createTool({
+    name: 'greet',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    },
+    execute: async (input) => {
+      const { name } = input as { name: string };
+      return { content: `hello ${name}`, requiresFollowUp: false };
+    },
+  });
+
+  it('returns error for unknown tool', async () => {
+    const result = await executeToolCall('id1', 'nonexistent', '{}', [greetTool], log);
+    const payload = JSON.parse(result.payload as string);
+    expect(payload.error).toContain('Unknown tool: nonexistent');
+  });
+
+  it('returns error for invalid JSON args', async () => {
+    const result = await executeToolCall('id1', 'greet', '{not json', [greetTool], log);
+    const payload = JSON.parse(result.payload as string);
+    expect(payload.error).toContain('Invalid JSON');
+    expect(payload.error).toContain('{not json');
+  });
+
+  it('returns error when args fail schema validation', async () => {
+    const result = await executeToolCall('id1', 'greet', '{"age": 5}', [greetTool], log);
+    const payload = JSON.parse(result.payload as string);
+    expect(payload.error).toContain('do not match schema');
+    expect(payload.error).toContain('name');
+  });
+
+  it('executes successfully with valid args', async () => {
+    const result = await executeToolCall('id1', 'greet', '{"name": "world"}', [greetTool], log);
+    expect(result.payload).toBe('hello world');
+    expect(result.requiresFollowUp).toBe(false);
+  });
+
+  it('returns error when tool.execute throws', async () => {
+    const throwingTool = createTool({
+      name: 'greet',
+      parameters: greetTool.function.parameters,
+      execute: async () => { throw new Error('boom'); },
+    });
+    const result = await executeToolCall('id1', 'greet', '{"name": "x"}', [throwingTool], log);
+    const payload = JSON.parse(result.payload as string);
+    expect(payload.error).toContain('boom');
+    expect(result.requiresFollowUp).toBe(true);
   });
 });

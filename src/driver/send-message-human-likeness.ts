@@ -1,4 +1,5 @@
-import type { ResponsesTRDataItem, TRDataEntry, TurnResponse } from './types';
+import type { TurnResponseV2 } from './types';
+import type { ConversationEntry } from '../unified-api/types';
 
 export const RECENT_SEND_MESSAGE_WINDOW = 5;
 const SHORT_MESSAGE_CHAR_LIMIT = 32;
@@ -93,21 +94,22 @@ export const assessSendMessageHumanLikeness = (text: string): PotentiallyNotHuma
   return features;
 };
 
-const extractChatSendMessageAssessments = (entries: TRDataEntry[]): SendMessageHumanLikenessAssessment[] => {
+const extractSendMessageAssessments = (entries: ConversationEntry[]): SendMessageHumanLikenessAssessment[] => {
   const successfulCallIds = new Set(
     entries
-      .filter((entry): entry is Extract<TRDataEntry, { role: 'tool' }> => entry.role === 'tool')
-      .filter(entry => typeof entry.content === 'string' && isSuccessfulSendMessageResult(entry.content))
-      .map(entry => entry.tool_call_id),
+      .filter((e): e is Extract<ConversationEntry, { kind: 'toolResult' }> => e.kind === 'toolResult')
+      .filter(e => typeof e.payload === 'string' && isSuccessfulSendMessageResult(e.payload))
+      .map(e => e.callId),
   );
 
   const assessments: SendMessageHumanLikenessAssessment[] = [];
   for (const entry of entries) {
-    if (entry.role !== 'assistant') continue;
-    for (const toolCall of entry.tool_calls ?? []) {
-      if (toolCall.function.name !== 'send_message') continue;
-      if (!successfulCallIds.has(toolCall.id)) continue;
-      const text = extractSendMessageText(toolCall.function.arguments);
+    if (entry.kind !== 'message' || entry.role !== 'assistant') continue;
+    for (const part of entry.parts) {
+      if (part.kind !== 'toolCall') continue;
+      if (part.name !== 'send_message') continue;
+      if (!successfulCallIds.has(part.callId)) continue;
+      const text = extractSendMessageText(part.args);
       if (text == null) continue;
       assessments.push({ text, features: assessSendMessageHumanLikeness(text) });
     }
@@ -115,43 +117,18 @@ const extractChatSendMessageAssessments = (entries: TRDataEntry[]): SendMessageH
   return assessments;
 };
 
-const extractResponsesSendMessageAssessments = (items: ResponsesTRDataItem[]): SendMessageHumanLikenessAssessment[] => {
-  const successfulCallIds = new Set(
-    items
-      .filter((item): item is Extract<ResponsesTRDataItem, { type: 'function_call_output' }> => item.type === 'function_call_output')
-      .filter(item => typeof item.output === 'string' && isSuccessfulSendMessageResult(item.output))
-      .map(item => item.call_id),
-  );
-
-  const assessments: SendMessageHumanLikenessAssessment[] = [];
-  for (const item of items) {
-    if (item.type !== 'function_call') continue;
-    if (item.name !== 'send_message') continue;
-    if (!successfulCallIds.has(item.call_id)) continue;
-    const text = extractSendMessageText(item.arguments);
-    if (text == null) continue;
-    assessments.push({ text, features: assessSendMessageHumanLikeness(text) });
-  }
-  return assessments;
-};
-
-const extractSendMessageAssessments = (tr: TurnResponse): SendMessageHumanLikenessAssessment[] =>
-  tr.provider === 'responses'
-    ? extractResponsesSendMessageAssessments(tr.data)
-    : extractChatSendMessageAssessments(tr.data);
-
 export const collectRecentSendMessageAssessments = (
-  trs: TurnResponse[],
+  trs: TurnResponseV2[],
   limit = RECENT_SEND_MESSAGE_WINDOW,
 ): SendMessageHumanLikenessAssessment[] =>
-  trs.flatMap(extractSendMessageAssessments).slice(-limit);
+  trs.flatMap(tr => extractSendMessageAssessments(tr.entries)).slice(-limit);
 
 export const appendRecentSendMessageAssessments = (
   current: SendMessageHumanLikenessAssessment[],
-  tr: TurnResponse,
+  tr: TurnResponseV2,
   limit = RECENT_SEND_MESSAGE_WINDOW,
 ): SendMessageHumanLikenessAssessment[] =>
-  [...current, ...extractSendMessageAssessments(tr)].slice(-limit);
+  [...current, ...extractSendMessageAssessments(tr.entries)].slice(-limit);
 
 export const renderRecentSendMessageHumanLikenessXml = (
   recentMessages: SendMessageHumanLikenessAssessment[],

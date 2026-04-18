@@ -4,11 +4,13 @@ export interface RenderParams {
   contactNames?: Map<string, string>;
 }
 
+import type { Sharp } from 'sharp';
+
 // Provider-agnostic content piece — maps to LLM API content parts.
-// Driver converts to provider-specific format (OpenAI image_url / Anthropic base64 image).
+// Driver converts to provider-specific format at the wire boundary.
 export type RenderedContentPiece =
   | { type: 'text'; text: string }
-  | { type: 'image'; url: string };
+  | { type: 'image'; image: Sharp };
 
 // Rendered Context (RC) — the output of the Rendering layer.
 // One segment per IC node. Carries receivedAtMs from the source event for merge ordering.

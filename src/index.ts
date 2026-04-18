@@ -7,7 +7,7 @@ import { shellTaskFactory } from './background-task/shell';
 import { getChatIds, loadConfig, resolveBackgroundTasks, resolveChatConfig, resolveModel, resolveRuntime } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
-import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadMessageFileId, loadTurnResponses, lookupChatId, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadMessageFileId, loadTurnResponses, lookupChatId, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { PipelineEvent } from './pipeline';
@@ -70,6 +70,7 @@ const main = async () => {
 
   const db = createDatabase(config.database.path, logger);
   runMigrations(db, logger);
+  await migrateV1ToV2(db, logger);
 
   // Image-to-text resolver — shared between cold-start replay and live ingress.
   const imageToTextResolver = createImageToTextResolver({

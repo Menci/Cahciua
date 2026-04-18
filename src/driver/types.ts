@@ -1,91 +1,34 @@
-import type { ResponseFunctionCallOutputItem, ResponseInputContent, ResponseOutputItem } from './responses-types';
 import type { ResolvedChatConfig } from '../config/config';
-import type { RenderedContentPiece } from '../rendering/types';
+import type { ConversationEntry } from '../unified-api/types';
 
-export type ProviderFormat = 'openai-chat' | 'responses';
+export type ProviderFormat = 'openai-chat' | 'responses' | 'anthropic-messages';
 
-// OpenAI Chat Completions format entries stored in TR data.
-// No DB migration needed — these types describe the existing JSON shape.
-
-export interface TRToolCall {
-  id: string;
-  type: 'function';
-  function: { name: string; arguments: string };
-}
-
-export interface ExtendedMessagePart {
-  type: string;
-  text?: string;
-  image_url?: { url: string; detail?: 'auto' | 'low' | 'high' };
-  source?: unknown;
-  [key: string]: unknown;
-}
-
-export interface ExtendedMessage {
-  role: 'system' | 'developer' | 'user' | 'assistant' | 'tool';
-  content?: string | null | ExtendedMessagePart[];
-  tool_calls?: TRToolCall[];
-  tool_call_id?: string;
-  reasoning_text?: string;
-  reasoning_opaque?: string;
-  reasoning_content?: string;
-  reasoning?: string;
-}
-
-export interface TRAssistantEntry {
-  role: 'assistant';
-  content?: string | null | ExtendedMessagePart[];
-  tool_calls?: TRToolCall[];
-  reasoning_text?: string;
-  reasoning_opaque?: string;
-  reasoning_content?: string;
-  reasoning?: string;
-}
-
-export interface TRToolResultEntry {
-  role: 'tool';
-  tool_call_id: string;
-  content: string | ResponseInputContent[];
-  requiresFollowUp?: boolean;
-}
-
-export type TRDataEntry = TRAssistantEntry | TRToolResultEntry;
-export type ResponsesTRDataItem = ResponseOutputItem | ResponseFunctionCallOutputItem;
-
-interface BaseTurnResponse {
+export interface TurnResponseV2 {
   requestedAtMs: number;
+  entries: ConversationEntry[];
   inputTokens: number;
   outputTokens: number;
-  reasoningSignatureCompat?: string;
+  modelName: string;
 }
 
-export interface ChatTurnResponse extends BaseTurnResponse {
-  provider: 'openai-chat';
-  data: TRDataEntry[];
+export interface ProbeResponseV2 {
+  requestedAtMs: number;
+  entries: ConversationEntry[];
+  inputTokens: number;
+  outputTokens: number;
+  modelName: string;
+  isActivated: boolean;
+  createdAt: number;
 }
-
-export interface ResponsesTurnResponse extends BaseTurnResponse {
-  provider: 'responses';
-  data: ResponsesTRDataItem[];
-}
-
-export type TurnResponse = ChatTurnResponse | ResponsesTurnResponse;
 
 export interface LlmEndpoint {
   apiBaseUrl: string;
   apiKey: string;
   model: string;
   apiFormat?: ProviderFormat;
-  reasoningSignatureCompat?: string;
   maxImagesAllowed?: number;
   timeoutSec?: number;
 }
-
-// ContextChunk — merge output intermediate representation
-export type ContextChunk =
-  | { type: 'rc'; time: number; step: -1; content: RenderedContentPiece[] }
-  | { type: 'tr'; provider: 'openai-chat'; time: number; step: number; data: TRDataEntry }
-  | { type: 'tr'; provider: 'responses'; time: number; step: number; data: ResponsesTRDataItem };
 
 export interface DriverConfig {
   chatIds: string[];

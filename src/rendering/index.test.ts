@@ -301,7 +301,7 @@ describe('render', () => {
       const pieces = rc[0]!.content;
       expect(pieces).toHaveLength(2);
       expect(pieces[0]!.type).toBe('text');
-      expect(pieces[1]).toEqual({ type: 'image', url: 'data:image/webp;base64,AAAA' });
+      expect(pieces[1]!.type).toBe('image');
     });
 
     it('renders inline image alt text and omits image content piece', () => {
@@ -339,8 +339,8 @@ describe('render', () => {
       })]));
       const pieces = rc[0]!.content;
       expect(pieces).toHaveLength(3); // 1 text + 2 images
-      expect(pieces[1]).toEqual({ type: 'image', url: 'data:image/webp;base64,AAA' });
-      expect(pieces[2]).toEqual({ type: 'image', url: 'data:image/webp;base64,BBB' });
+      expect(pieces[1]!.type).toBe('image');
+      expect(pieces[2]!.type).toBe('image');
     });
 
     it('skips image piece when no thumbnail', () => {
