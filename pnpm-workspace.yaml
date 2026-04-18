@@ -1,4 +1,11 @@
 packages: []
 onlyBuiltDependencies:
   - better-sqlite3
+  - bufferutil
+  - es5-ext
   - esbuild
+  - ffmpeg-static
+  - lottie-frame
+  - sharp
+  - unrs-resolver
+  - utf-8-validate
