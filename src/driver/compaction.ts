@@ -3,7 +3,7 @@ import type { Logger } from '@guiiai/logg';
 import { callLlm, type LlmCallConfig } from './call-llm';
 import { composeContext } from './context';
 import { renderCompactionSystemPrompt, renderCompactionUserInstruction } from './prompt';
-import type { CompactionSessionMeta, FeatureFlags, TurnResponseV2 } from './types';
+import type { CompactionSessionMeta, TurnResponseV2 } from './types';
 import type { RenderedContext } from '../rendering/types';
 import type {
   ConversationEntry,
@@ -18,7 +18,6 @@ export interface CompactionParams extends LlmCallConfig {
   existingSummary?: string;
   oldCursorMs: number;
   newCursorMs: number;
-  featureFlags?: FeatureFlags;
   maxImagesAllowed?: number;
   log: Logger;
 }
@@ -46,7 +45,7 @@ export const runCompaction = async (params: CompactionParams): Promise<Compactio
 
   const ctx = composeContext(
     params.rcWindow, params.trsWindow, COMPACT_MAX_TOKENS,
-    params.model, params.featureFlags, params.existingSummary,
+    params.model, params.existingSummary,
   );
 
   const entries: ConversationEntry[] = [

@@ -25,11 +25,11 @@ database:
 # Runtime configuration: shell and file I/O commands used by tools.
 # These are global (not per-chat) because they describe the execution environment.
 runtime:
-  shell: ["/bin/bash", "-c"]                          # command prefix for bash tool
-  # writeFile: ["/bin/bash", "-c", "/usr/bin/cat > \"$0\""]  # write stdin to file (path appended as arg)
-  # readFile: ["/usr/bin/cat"]                                # read file to stdout (path appended as arg); enables local-path read_image and send_message attachments
-  # writeFileSizeLimit: 20971520                              # max bytes for download_file (default 20 MB)
-  # readFileSizeLimit: 20971520                               # max bytes for runtime.readFile consumers (send_message attachments, local-path read_image)
+  shell: ["/bin/bash", "-c"]                                   # command prefix for bash tool
+  writeFile: ["/bin/bash", "-c", "/usr/bin/cat > \"$0\""]      # write stdin to file (path appended as arg); required
+  readFile: ["/usr/bin/cat"]                                   # read file to stdout (path appended as arg); required
+  # writeFileSizeLimit: 20971520                               # max bytes for download_file (default 20 MB)
+  # readFileSizeLimit: 20971520                                # max bytes for runtime.readFile consumers (send_message attachments, read_image)
 
 # Per-chat configuration. Keys (except "default") serve as the chat ID whitelist.
 # Each per-chat entry is deep-merged with "default" — only specify overrides.
@@ -37,11 +37,9 @@ chats:
   default:
     model: "primary"            # references a key in models
     compaction:
-      enabled: true
       maxContextEstTokens: 512000    # high water mark: trigger compaction when estimated context exceeds this
       workingWindowEstTokens: 8000   # low water mark: how many estimated tokens of raw content to retain after compaction
       # model: "primary"           # optional: override model for compaction calls (defaults to chat model)
-      dryRun: false               # true = call LLM and log summary, but don't persist or apply
     # Probe: use a small/cheap model to decide whether to respond in group chats.
     # When the bot is not @'d or replied to, the probe model runs first. If it
     # chooses silence (no tool calls), the primary model is skipped entirely.
@@ -60,25 +58,12 @@ chats:
       enabled: false
       model: "primary"            # references a key in models
       # maxFrames: 5              # max equidistant frames for animated custom emoji (default 5)
-    # Feature flags should be enabled in local dev config when first introduced.
-    features:
-      trimStaleNoToolCallTurnResponses: false
-      trimSelfMessagesCoveredBySendToolCalls: false
-      trimToolResults: false
-    # Tools: enable extra tools for this chat.
+    # Tools: configuration for enabled tools.
     tools:
-      readImage:
-        enabled: false                            # works with attachment file-id only; add runtime.readFile for local path support
-    # Other optional tools:
-    #   bash:
-    #     enabled: false
-    #   downloadFile:
-    #     enabled: false                          # requires runtime.writeFile
-    #   sendMessage:
-    #     enableAttachments: false                # requires runtime.readFile
-    #   webSearch:
-    #     enabled: false
-    #     tavilyKey: ""                           # Tavily API key for web search
+      # bash:
+      #   backgroundThresholdSec: 10               # timeout threshold above which bash runs as background task
+      webSearch:
+        tavilyKey: ""                              # Tavily API key for web search (required)
 
   # Per-chat overrides — uncomment and customize:
   # "751414718":                   # per-chat partial override (deep-merged with default)

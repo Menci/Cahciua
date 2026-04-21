@@ -72,7 +72,6 @@ export interface SendMessageAttachment {
 
 export const createSendMessageTool = (
   send: (text: string, replyTo?: string, attachments?: SendMessageAttachment[]) => Promise<{ messageId: string }>,
-  enableAttachments: boolean,
 ): CahciuaTool => {
   const properties: Record<string, unknown> = {
     text: { type: 'string', description: 'The message to send. When sending attachments, this becomes the caption.' },
@@ -81,10 +80,7 @@ export const createSendMessageTool = (
       type: 'boolean',
       description: 'Set to true if you need to perform additional actions after this message (e.g., send another message, use another tool). Defaults to false.',
     },
-  };
-
-  if (enableAttachments) {
-    properties.attachments = {
+    attachments: {
       type: 'array',
       description: 'Media attachments to send. Multiple attachments are sent as a media group (album). Telegram media groups support up to 10 items; photos and videos can be mixed, but audio and documents must be grouped separately.',
       items: {
@@ -100,14 +96,12 @@ export const createSendMessageTool = (
         },
         required: ['type', 'path'],
       },
-    };
-  }
+    },
+  };
 
   return createTool({
     name: 'send_message',
-    description: enableAttachments
-      ? 'Send a message in the current conversation, optionally with media attachments.'
-      : 'Send a message in the current conversation.',
+    description: 'Send a message in the current conversation, optionally with media attachments.',
     parameters: {
       type: 'object',
       properties,
@@ -132,38 +126,34 @@ export const createSendMessageTool = (
 const BASH_MAX_OUTPUT = 4096;
 const BASH_TIMEOUT_MS = 30_000;
 
-export const createBashTool = (runtime: RuntimeConfig, backgroundTask?: {
+export const createBashTool = (runtime: RuntimeConfig, backgroundTask: {
   startTask: (typeName: string, sessionId: string, params: unknown, intention: string | undefined, timeoutMs: number) => number;
   sessionId: string;
   backgroundThresholdSec: number;
 }): CahciuaTool => createTool({
   name: 'bash',
   description:
-    'Execute a shell command. Output (stdout+stderr combined) is truncated to 4 KB. ' +
-    `For large outputs, redirect to a file and read specific ranges. ${
-      backgroundTask
-        ? `Set timeout_seconds > ${backgroundTask.backgroundThresholdSec} for long-running commands — they run as background tasks and return immediately with a task ID.`
-        : ''}`,
+    'Execute a shell command. Output (stdout+stderr combined) is truncated to 4 KB. '
+    + 'For large outputs, redirect to a file and read specific ranges. '
+    + `Set timeout_seconds > ${backgroundTask.backgroundThresholdSec} for long-running commands — they run as background tasks and return immediately with a task ID.`,
   parameters: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'The shell command to execute.' },
-        ...(backgroundTask ? {
-          timeout_seconds: {
-            type: 'number',
-            description: `Timeout in seconds. Commands with timeout > ${backgroundTask.backgroundThresholdSec}s run as background tasks and return immediately with a task ID. Short commands (e.g. ls, cat) typically need 5-10s; builds or tests may need 60-300s.`,
-          },
-          intention: { type: 'string', description: 'Brief description of what this command does (shown in background task status).' },
-        } : {}),
+        timeout_seconds: {
+          type: 'number',
+          description: `Timeout in seconds. Commands with timeout > ${backgroundTask.backgroundThresholdSec}s run as background tasks and return immediately with a task ID. Short commands (e.g. ls, cat) typically need 5-10s; builds or tests may need 60-300s.`,
+        },
+        intention: { type: 'string', description: 'Brief description of what this command does (shown in background task status).' },
       },
-      required: backgroundTask ? ['command', 'timeout_seconds'] : ['command'],
+      required: ['command', 'timeout_seconds'],
     },
   execute: async input => {
-    const { command, timeout_seconds, intention } = input as { command: string; timeout_seconds?: number; intention?: string };
-    const timeoutSec = timeout_seconds ?? 30; // fallback for non-background-task mode
+    const { command, timeout_seconds, intention } = input as { command: string; timeout_seconds: number; intention?: string };
+    const timeoutSec = timeout_seconds;
 
     // Background task path
-    if (backgroundTask && timeoutSec > backgroundTask.backgroundThresholdSec) {
+    if (timeoutSec > backgroundTask.backgroundThresholdSec) {
       const taskId = backgroundTask.startTask(
         'shell_execute',
         backgroundTask.sessionId,
@@ -317,7 +307,7 @@ export const createDownloadFileTool = (deps: {
       };
     }
 
-    const writeCmd = deps.runtime.writeFile!;
+    const writeCmd = deps.runtime.writeFile;
     return await new Promise<ToolResult>(resolve => {
       const child = execFile(
         writeCmd[0]!,
@@ -396,13 +386,11 @@ const prepareImage = async (buffer: Buffer, detail: 'low' | 'high'): Promise<Buf
 
 export const createReadImageTool = (deps: {
   downloadAttachment: (fileId: string) => Promise<Buffer>;
-  readFile?: (path: string) => Promise<Buffer>;
+  readFile: (path: string) => Promise<Buffer>;
   resolveImageToText?: (buffer: Buffer, detail: 'low' | 'high') => Promise<string>;
 }): CahciuaTool => createTool({
   name: 'read_image',
-  description: deps.readFile
-    ? 'Read and analyze an image from a chat attachment or the filesystem.'
-    : 'Read and analyze an image from a chat attachment in the current conversation.',
+  description: 'Read and analyze an image from a chat attachment or the filesystem.',
   parameters: {
     type: 'object',
     properties: {
@@ -410,12 +398,10 @@ export const createReadImageTool = (deps: {
         type: 'string',
         description: 'The file-id from an attachment element (format: messageId:index).',
       },
-      ...(deps.readFile ? {
-        path: {
-          type: 'string',
-          description: 'Filesystem path to an image file.',
-        },
-      } : {}),
+      path: {
+        type: 'string',
+        description: 'Filesystem path to an image file.',
+      },
       detail: {
         type: 'string',
         enum: ['low', 'high'],
@@ -427,19 +413,15 @@ export const createReadImageTool = (deps: {
     const { file_id, path, detail: rawDetail } = input as { file_id?: string; path?: string; detail?: string };
     const detail: 'low' | 'high' = rawDetail === 'high' ? 'high' : 'low';
 
-    if (!deps.readFile) {
-      if (!file_id || path)
-        return { content: JSON.stringify({ error: 'This chat only supports read_image by file_id from the current conversation.' }), requiresFollowUp: true };
-    } else if ((!file_id && !path) || (file_id && path)) {
+    if ((!file_id && !path) || (file_id && path))
       return { content: JSON.stringify({ error: 'Provide exactly one of file_id or path.' }), requiresFollowUp: true };
-    }
 
     // 1. Acquire buffer
     let buffer: Buffer;
     try {
       buffer = file_id
         ? await deps.downloadAttachment(file_id)
-        : await deps.readFile!(path!);
+        : await deps.readFile(path!);
     } catch (err) {
       return { content: JSON.stringify({ error: String(err instanceof Error ? err.message : err) }), requiresFollowUp: true };
     }

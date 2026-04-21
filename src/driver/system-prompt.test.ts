@@ -42,7 +42,6 @@ describe('primary-system.velin.md', () => {
     const rendered = await renderSystem({ modelName: 'gpt-4o' });
     expect(rendered).toContain('You just woke up.');
     expect(rendered).toContain('send_message');
-    expect(rendered).toContain('only available tool');
     expect(rendered).toContain('gpt-4o');
     assertNoVueSyntaxLeak(rendered);
   });
@@ -64,51 +63,17 @@ describe('primary-system.velin.md', () => {
     expect(rendered).toContain('Be helpful.');
   });
 
-  it('shows tools when flags enabled', async () => {
-    const rendered = await renderSystem({
-      modelName: 'gpt-4o',
-      hasBashTool: true,
-      hasWebSearchTool: true,
-      hasDownloadFileTool: true,
-      hasReadImageTool: true,
-      hasReadImageFilePathSupport: true,
-      hasAttachmentSupport: true,
-    });
+  it('shows all tools', async () => {
+    const rendered = await renderSystem({ modelName: 'gpt-4o' });
     expect(rendered).toContain('bash');
     expect(rendered).toContain('web_search');
     expect(rendered).toContain('download_file');
     expect(rendered).toContain('read_image');
     expect(rendered).toContain('filesystem (by path)');
-    expect(rendered).not.toContain('only available tool');
-  });
-
-  it('renders file-id-only read_image description when filesystem access is unavailable', async () => {
-    const rendered = await renderSystem({
-      modelName: 'gpt-4o',
-      hasReadImageTool: true,
-      hasReadImageFilePathSupport: false,
-    });
-    expect(rendered).toContain('current conversation (by file-id)');
-    expect(rendered).not.toContain('filesystem (by path)');
-    expect(rendered).toContain('use with the `read_image` tool');
-  });
-
-  it('shows background task tools and runtime-event format', async () => {
-    const rendered = await renderSystem({
-      modelName: 'gpt-4o',
-      hasBashTool: true,
-      hasBackgroundTasks: true,
-    });
     expect(rendered).toContain('kill_task');
     expect(rendered).toContain('read_task_output');
     expect(rendered).toContain('runtime-event');
     expect(rendered).toContain('task-completed');
-  });
-
-  it('hides background task content when disabled', async () => {
-    const rendered = await renderSystem({ modelName: 'gpt-4o' });
-    expect(rendered).not.toContain('runtime-event');
-    expect(rendered).not.toContain('kill_task');
   });
 });
 

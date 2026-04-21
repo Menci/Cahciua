@@ -55,7 +55,7 @@ export const createDriver = (config: DriverConfig, deps: {
   downloadFile: (fileId: string) => Promise<Buffer>;
   downloadMessageMedia?: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
   resolveModel: (name: string) => LlmEndpoint;
-  backgroundTask?: {
+  backgroundTask: {
     startTask: (typeName: string, sessionId: string, params: unknown, intention: string | undefined, timeoutMs: number) => number;
     killTask: (taskId: number) => { ok: boolean; error?: string };
     getActiveTasks: (sessionId: string) => ActiveTaskInfo[];
@@ -167,7 +167,7 @@ export const createDriver = (config: DriverConfig, deps: {
             const sum = summary();
 
             const trs = await loadTRs(chatId, cursor);
-            const ctx = composeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, chatConfig.primaryModel.model, chatConfig.featureFlags, sum);
+            const ctx = composeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, chatConfig.primaryModel.model, sum);
             if (!ctx) return;
 
             log.withFields({
@@ -185,15 +185,7 @@ export const createDriver = (config: DriverConfig, deps: {
               }).log('send_message tool called');
               const sent = await deps.sendMessage(chatId, text, replyTo ? Number(replyTo) : undefined, attachments);
               return { messageId: String(sent.messageId) };
-            }, chatConfig.tools.sendMessage.enableAttachments);
-
-            const hasBashTool = chatConfig.tools.bash.enabled;
-            const hasWebSearchTool = chatConfig.tools.webSearch.enabled && !!chatConfig.tools.webSearch.tavilyKey;
-            const hasDownloadFileTool = chatConfig.tools.downloadFile.enabled && !!deps.runtimeConfig.writeFile;
-            const hasReadImageTool = chatConfig.tools.readImage.enabled;
-            const hasReadImageFilePathSupport = !!deps.runtimeConfig.readFile;
-            const hasAttachmentSupport = chatConfig.tools.sendMessage.enableAttachments;
-            const hasBackgroundTasks = hasBashTool && !!deps.backgroundTask;
+            });
 
             const downloadAttachment = createAttachmentDownloader({
               chatId,
@@ -203,17 +195,17 @@ export const createDriver = (config: DriverConfig, deps: {
             });
 
             const tools: CahciuaTool[] = [sendMessageTool];
-            if (hasBashTool) tools.push(createBashTool(deps.runtimeConfig, deps.backgroundTask ? {
+            tools.push(createBashTool(deps.runtimeConfig, {
               startTask: deps.backgroundTask.startTask,
               sessionId: chatId,
               backgroundThresholdSec: chatConfig.tools.bash.backgroundThresholdSec,
-            } : undefined));
-            if (hasWebSearchTool) tools.push(createWebSearchTool(chatConfig.tools.webSearch.tavilyKey));
-            if (hasDownloadFileTool) tools.push(createDownloadFileTool({
+            }));
+            tools.push(createWebSearchTool(chatConfig.tools.webSearch.tavilyKey));
+            tools.push(createDownloadFileTool({
               downloadAttachment,
               runtime: deps.runtimeConfig,
             }));
-            if (hasReadImageTool) {
+            {
               const readFileCmd = deps.runtimeConfig.readFile;
               const resolveImageToText = chatConfig.imageToText.enabled && chatConfig.imageToText.model
                 ? async (buffer: Buffer, detail: 'low' | 'high') => {
@@ -238,41 +230,30 @@ export const createDriver = (config: DriverConfig, deps: {
 
               tools.push(createReadImageTool({
                 downloadAttachment,
-                readFile: readFileCmd
-                  ? async path => {
-                    const { execFile } = await import('node:child_process');
-                    return await new Promise<Buffer>((resolve, reject) => {
-                      const child = execFile(
-                        readFileCmd[0]!,
-                        [...readFileCmd.slice(1), path],
-                        { timeout: 60_000, maxBuffer: deps.runtimeConfig.readFileSizeLimit, encoding: 'buffer' as any },
-                        (error, stdout) => {
-                          if (error) reject(new Error(`Failed to read file: ${error.message}`));
-                          else resolve(stdout as unknown as Buffer);
-                        },
-                      );
-                      child.stdin?.end();
-                    });
-                  }
-                  : undefined,
+                readFile: async path => {
+                  const { execFile } = await import('node:child_process');
+                  return await new Promise<Buffer>((resolve, reject) => {
+                    const child = execFile(
+                      readFileCmd[0]!,
+                      [...readFileCmd.slice(1), path],
+                      { timeout: 60_000, maxBuffer: deps.runtimeConfig.readFileSizeLimit, encoding: 'buffer' as any },
+                      (error, stdout) => {
+                        if (error) reject(new Error(`Failed to read file: ${error.message}`));
+                        else resolve(stdout as unknown as Buffer);
+                      },
+                    );
+                    child.stdin?.end();
+                  });
+                },
                 resolveImageToText,
               }));
             }
-            if (hasBackgroundTasks) {
-              tools.push(createKillTaskTool(taskId => deps.backgroundTask!.killTask(taskId)));
-              tools.push(createReadTaskOutputTool((taskId, offset, limit) => deps.backgroundTask!.readTaskOutput(taskId, offset, limit)));
-            }
+            tools.push(createKillTaskTool(taskId => deps.backgroundTask.killTask(taskId)));
+            tools.push(createReadTaskOutputTool((taskId, offset, limit) => deps.backgroundTask.readTaskOutput(taskId, offset, limit)));
 
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
               modelName: chatConfig.primaryModel.model,
-              hasBashTool,
-              hasWebSearchTool,
-              hasDownloadFileTool,
-              hasReadImageTool,
-              hasReadImageFilePathSupport,
-              hasAttachmentSupport,
-              hasBackgroundTasks,
             });
 
             // --- Compute mention/reply/interrupt state from RC + TRs ---
@@ -291,7 +272,7 @@ export const createDriver = (config: DriverConfig, deps: {
               isMentioned, isReplied,
               recentSendMessageHumanLikenessXml,
               isInterrupted,
-              activeBackgroundTasks: deps.backgroundTask?.getActiveTasks(chatId),
+              activeBackgroundTasks: deps.backgroundTask.getActiveTasks(chatId),
             };
 
             // --- Probe gate ---
@@ -388,7 +369,6 @@ export const createDriver = (config: DriverConfig, deps: {
     let lastCheckedRc: RenderedContext | null = null;
 
     const disposeCompactionEffect = effect(() => {
-      if (!chatConfig.compaction.enabled) return;
       const rcVal = rc();
       if (rcVal.length === 0) return;
 
@@ -407,14 +387,8 @@ export const createDriver = (config: DriverConfig, deps: {
             const compactEndpoint = chatConfig.compaction.model ?? chatConfig.primaryModel;
 
             const trs = await loadTRs(chatId, cursor);
-            // Estimate tokens WITHOUT summary — summary should not count toward
-            // the working window budget, otherwise it grows until it fills the
-            // budget and compaction degrades into a sliding window.
-            const ctx = composeContext(rc(), trs, chatConfig.compaction.maxContextEstTokens, compactEndpoint.model, chatConfig.featureFlags);
+            const ctx = composeContext(rc(), trs, chatConfig.compaction.maxContextEstTokens, compactEndpoint.model);
             if (!ctx) return;
-            // Trigger at maxContextEstTokens (high water mark), compact down to
-            // workingWindowEstTokens (low water mark). This gives a wide gap
-            // before the next compaction fires.
             if (ctx.rawEstimatedTokens <= chatConfig.compaction.maxContextEstTokens) return;
 
             const newCursorMs = findWorkingWindowCursor(rc(), trs, chatConfig.compaction.workingWindowEstTokens);
@@ -426,7 +400,6 @@ export const createDriver = (config: DriverConfig, deps: {
               rawEstimatedTokens: ctx.rawEstimatedTokens,
               triggerAt: chatConfig.compaction.maxContextEstTokens,
               retainBudget: chatConfig.compaction.workingWindowEstTokens,
-              dryRun: !!chatConfig.compaction.dryRun,
             }).log('Triggering compaction');
 
             const newMeta = await runCompaction({
@@ -441,30 +414,19 @@ export const createDriver = (config: DriverConfig, deps: {
               existingSummary: sum,
               oldCursorMs: cursor ?? 0,
               newCursorMs,
-              featureFlags: chatConfig.featureFlags,
               maxImagesAllowed: compactEndpoint.maxImagesAllowed,
               log,
             });
 
-            if (chatConfig.compaction.dryRun) {
-              log.withFields({
-                chatId,
-                newCursorMs,
-                summaryLength: newMeta.summary.length,
-              }).log(`Compaction dry-run complete. Summary:\n${newMeta.summary}`);
-            } else {
-              // Persist to dedicated compactions table
-              deps.persistCompaction(chatId, newMeta);
+            deps.persistCompaction(chatId, newMeta);
 
-              log.withFields({
-                chatId,
-                newCursorMs,
-                summaryLength: newMeta.summary.length,
-              }).log('Compaction complete');
+            log.withFields({
+              chatId,
+              newCursorMs,
+              summaryLength: newMeta.summary.length,
+            }).log('Compaction complete');
 
-              // Update signal — cursor effect auto-applies to pipeline + rc
-              compactionMeta(newMeta);
-            }
+            compactionMeta(newMeta);
           } catch (err) {
             log.withError(err).error('Compaction failed');
           } finally {

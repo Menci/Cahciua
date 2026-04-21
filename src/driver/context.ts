@@ -1,6 +1,5 @@
 import { mergeContext } from './merge';
 import type { TurnResponseV2 } from './types';
-import type { FeatureFlags } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
 import { stripReasoning } from '../unified-api/reasoning';
 import type {
@@ -60,7 +59,7 @@ export const wasToolLoopInterrupted = (trs: TurnResponseV2[]): boolean => {
   return toolResults.some(tr => tr.requiresFollowUp);
 };
 
-// --- Feature flag: trimStaleNoToolCallTurnResponses ---
+// --- trimStaleNoToolCallTurnResponses ---
 const KEEP_NO_TOOL_CALL_TRS = 5;
 
 const trimStaleNoToolCallTRs = (trs: TurnResponseV2[]): TurnResponseV2[] => {
@@ -72,7 +71,7 @@ const trimStaleNoToolCallTRs = (trs: TurnResponseV2[]): TurnResponseV2[] => {
   return trs.filter((_, i) => !dropSet.has(i));
 };
 
-// --- Feature flag: trimToolResults ---
+// --- trimToolResults ---
 const TOOL_RESULT_TRIM_THRESHOLD = 512;
 const TOOL_RESULT_KEEP_RECENT_OVERSIZED = 5;
 
@@ -133,7 +132,7 @@ const trimToolResults = (trs: TurnResponseV2[]): TurnResponseV2[] => {
   });
 };
 
-// --- Feature flag: trimSelfMessagesCoveredBySendToolCalls ---
+// --- trimSelfMessagesCoveredBySendToolCalls ---
 const filterSelfSentSegments = (rc: RenderedContext): RenderedContext =>
   rc.filter(seg => !seg.isSelfSent);
 
@@ -206,12 +205,9 @@ export const composeContext = (
   trs: TurnResponseV2[],
   maxTokens: number,
   currentModelName: string,
-  featureFlags?: FeatureFlags,
   compactSummary?: string,
 ): { entries: ConversationEntry[]; estimatedTokens: number; rawEstimatedTokens: number } | null => {
-  let effectiveRC = rc;
-  if (featureFlags?.trimSelfMessagesCoveredBySendToolCalls)
-    effectiveRC = filterSelfSentSegments(effectiveRC);
+  const effectiveRC = filterSelfSentSegments(rc);
 
   // Strip reasoning from TRs whose modelName does not match current model.
   // Signatures only round-trip within the same model.
@@ -220,10 +216,8 @@ export const composeContext = (
       ? tr
       : { ...tr, entries: stripReasoning(tr.entries) });
 
-  if (featureFlags?.trimStaleNoToolCallTurnResponses)
-    sanitizedTRs = trimStaleNoToolCallTRs(sanitizedTRs);
-  if (featureFlags?.trimToolResults)
-    sanitizedTRs = trimToolResults(sanitizedTRs);
+  sanitizedTRs = trimStaleNoToolCallTRs(sanitizedTRs);
+  sanitizedTRs = trimToolResults(sanitizedTRs);
 
   const merged = mergeContext(effectiveRC, sanitizedTRs);
   if (merged.length === 0 && !compactSummary) return null;

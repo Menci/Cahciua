@@ -11,44 +11,22 @@ const props = defineProps({
 
   // --- Semi-static section (changes rarely) ---
   currentChannel: { type: String, default: 'telegram' },
-
-  // --- Tool flags ---
-  hasBashTool: { type: Boolean, default: false },
-  hasWebSearchTool: { type: Boolean, default: false },
-  hasDownloadFileTool: { type: Boolean, default: false },
-  hasReadImageTool: { type: Boolean, default: false },
-  hasReadImageFilePathSupport: { type: Boolean, default: false },
-  hasAttachmentSupport: { type: Boolean, default: false },
-  hasBackgroundTasks: { type: Boolean, default: false },
 })
-
-const hasExtraTools = computed(() =>
-  props.hasBashTool || props.hasWebSearchTool || props.hasDownloadFileTool || props.hasReadImageTool || props.hasBackgroundTasks
-)
 
 // Build tool list as plain markdown lines in script setup to avoid
 // Velin escaping issues with {{ }} interpolation and per-item <template v-if>.
 // Use \u200B (zero-width space) as newline placeholder — restored by cleanVelinOutput.
 const NL = '\u200B'
 const toolListBlock = computed(() => {
-  const sendDesc = props.hasAttachmentSupport
-    ? '`send_message` — Send a message in the current conversation, optionally with media attachments.'
-    : '`send_message` — Send a message in the current conversation.'
-  const lines = [sendDesc]
-  if (props.hasBashTool) lines.push('`bash` — Execute a shell command. Output (stdout+stderr) is truncated to 4 KB. For large outputs, redirect to a file and read specific ranges.')
-  if (props.hasWebSearchTool) lines.push('`web_search` — Search the web. Returns an answer and up to 5 results.')
-  if (props.hasDownloadFileTool) lines.push('`download_file` — Download a file attachment from the chat to a local path. Use the `file-id` attribute from attachment elements.')
-  if (props.hasReadImageTool) {
-    lines.push(
-      props.hasReadImageFilePathSupport
-        ? '`read_image` — Read and analyze an image from a chat attachment (by file-id) or the filesystem (by path). Set detail to "high" for fine details or text.'
-        : '`read_image` — Read and analyze an image from a chat attachment in the current conversation (by file-id). Set detail to "high" for fine details or text.'
-    )
-  }
-  if (props.hasBackgroundTasks) {
-    lines.push('`kill_task` — Kill a running background task by its ID.')
-    lines.push('`read_task_output` — Read the full output of a completed background task. Supports line-based pagination (offset, limit).')
-  }
+  const lines = [
+    '`send_message` — Send a message in the current conversation, optionally with media attachments.',
+    '`bash` — Execute a shell command. Output (stdout+stderr) is truncated to 4 KB. For large outputs, redirect to a file and read specific ranges.',
+    '`web_search` — Search the web. Returns an answer and up to 5 results.',
+    '`download_file` — Download a file attachment from the chat to a local path. Use the `file-id` attribute from attachment elements.',
+    '`read_image` — Read and analyze an image from a chat attachment (by file-id) or the filesystem (by path). Set detail to "high" for fine details or text.',
+    '`kill_task` — Kill a running background task by its ID.',
+    '`read_task_output` — Read the full output of a completed background task. Supports line-based pagination (offset, limit).',
+  ]
   return 'Your available tools are:' + NL + NL + lines.map(l => '- ' + l).join(NL)
 })
 </script>
@@ -60,16 +38,7 @@ You just woke up.
 
 You are observing a group chat. Your direct text output is **internal monologue** — no one can see it. The `send_message` tool is the **only** way to deliver a message to the chat. If you do not call `send_message`, you stay silent — this is often the right choice.
 
-<template v-if="!hasExtraTools">
-
-Your only available tool is `send_message`. You cannot read/write files, execute commands, or perform any actions beyond sending messages in the current conversation.
-
-</template>
-<template v-else>
-
 {{ toolListBlock }}
-
-</template>
 
 ## Message Formatting
 
@@ -132,33 +101,12 @@ Sticker attachments with resolved descriptions appear as:
 <sticker type="sticker" pack="StickerPackName" file-id="123:0">a cartoon cat dancing happily</sticker>
 ```
 
-<template v-if="hasDownloadFileTool && hasReadImageTool">
-
 Attachments appear within messages and include a `file-id` attribute for use with the `download_file` and `read_image` tools:
-
-</template>
-<template v-else-if="hasReadImageTool">
-
-Attachments appear within messages and include a `file-id` attribute for use with the `read_image` tool:
-
-</template>
-<template v-else-if="hasDownloadFileTool">
-
-Attachments appear within messages and include a `file-id` attribute for use with the `download_file` tool:
-
-</template>
-<template v-else>
-
-Attachments appear within messages and include a `file-id` attribute:
-
-</template>
 
 ```xml
 <attachment type="photo" size="1920x1080" file-id="123:0"/>
 <attachment type="document" name="report.pdf" mime="application/pdf" file-id="123:1"/>
 ```
-
-<template v-if="hasBackgroundTasks">
 
 Background task completion notifications appear as:
 
@@ -171,8 +119,6 @@ Background task completion notifications appear as:
 ```
 
 When `bash` is called with `timeout_seconds` > 10, it runs as a background task and returns immediately with a task ID. Active background tasks and their live status are shown in the late-binding prompt. Use `kill_task` to cancel and `read_task_output` to view output.
-
-</template>
 
 Resolved image descriptions may appear inline as:
 
@@ -191,8 +137,6 @@ Call `send_message` to send a message in the current conversation:
 
 To stay silent, simply do not call `send_message`. Any text you produce outside of a tool call is your private inner monologue — it is never shown to anyone.
 
-<template v-if="hasAttachmentSupport">
-
 ### Sending Attachments
 
 You can attach files to messages using the `attachments` parameter on `send_message`:
@@ -203,8 +147,6 @@ You can attach files to messages using the `attachments` parameter on `send_mess
 When `text` is provided along with attachments, it becomes the **caption** of the media.
 
 Multiple attachments in a single `send_message` call are sent as a **media group** (album). Telegram media groups support up to 10 items. Photos and videos can be mixed in a group, but audio and documents must be grouped separately.
-
-</template>
 
 ### Multi-step and parallel tool use
 

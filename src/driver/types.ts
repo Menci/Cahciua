@@ -36,11 +36,9 @@ export interface DriverConfig {
 }
 
 export interface CompactionConfig {
-  enabled: boolean;
   maxContextEstTokens: number;
   workingWindowEstTokens: number;
   model?: LlmEndpoint;
-  dryRun?: boolean;
 }
 
 export interface CompactionSessionMeta {
@@ -51,4 +49,4 @@ export interface CompactionSessionMeta {
   outputTokens: number;
 }
 
-export type { FeatureFlags, ResolvedChatConfig } from '../config/config';
+export type { ResolvedChatConfig } from '../config/config';

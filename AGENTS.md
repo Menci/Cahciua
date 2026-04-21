@@ -301,25 +301,19 @@ Before any actual provider request is sent, the Driver applies a final request-l
 - Responses path: `prepareResponsesInputForSend()` converts the same intermediate `Message[]` into Responses API input items.
 - Model image limits (`maxImagesAllowed`) are enforced at this final send boundary on **every** request, not just once when a turn starts. This ensures tool-generated images (for example `read_image`) cannot bypass per-model image caps in later steps, probes, or compaction calls.
 
-`read_image` supports two runtime modes:
-- Without `runtime.readFile`: attachment-only mode. The tool can read images already present in chat context via `file-id`.
-- With `runtime.readFile`: attachment + filesystem mode. The tool also accepts a local `path`.
+`read_image` supports attachment file-id and local filesystem path modes.
 
 ### isSelfSent Pipeline
 
 Bot's own sent messages are marked `isSelfSent: true` at creation time (in the synthetic event bypass in `src/index.ts`). This flag flows through the full pipeline: `CanonicalMessageEvent.isSelfSent` → `events.is_self_sent` (DB) → `ICMessage.isSelfSent` → `RenderedContextSegment.isSelfSent`. The flag is set at creation, not derived from sender ID (bot may change accounts).
 
-### Feature Flags
+### Context Optimizations
 
-Feature flags for experimental optimizations. Controlled via `config.yaml` under the `features` key. Defined in `src/config/config.ts` as part of the `Config` schema, loaded at startup, passed to Driver via `DriverConfig.featureFlags`.
+The following optimizations are always active in `composeContext()`:
 
-| Flag | Config Key | Effect |
-|------|------------|--------|
-| `trimStaleNoToolCallTurnResponses` | `features.trimStaleNoToolCallTurnResponses` | Keep only latest 5 TRs without tool calls; older pure-text TRs are dropped before merge |
-| `trimSelfMessagesCoveredBySendToolCalls` | `features.trimSelfMessagesCoveredBySendToolCalls` | Filter RC segments with `isSelfSent=true` from context assembly (removes duplicate representation — bot messages exist in both RC via userbot and TRs via tool call results) |
-| `trimToolResults` | `features.trimToolResults` | Distance-based mechanical trimming of older oversized tool call results. Oversized means text content `>512 chars` or image content with `detail !== 'low'`. Only the latest 5 oversized results are kept untrimmed; older oversized results are mechanically trimmed / downgraded. Known limitation: image downgrade currently rewrites only the `detail` flag, not the embedded image buffer, so non-OpenAI models that ignore `detail` still receive the original full-size image. Keeps `TRAssistantEntry` (call structure + reasoning) intact |
-
-Feature flags must not affect correctness — only context efficiency. Add new flags to the `features` section in `ConfigSchema` in `src/config/config.ts` and this table.
+- **trimStaleNoToolCallTurnResponses**: Keep only latest 5 TRs without tool calls; older pure-text TRs are dropped before merge.
+- **trimSelfMessagesCoveredBySendToolCalls**: Filter RC segments with `isSelfSent=true` from context assembly (removes duplicate representation — bot messages exist in both RC via userbot and TRs via tool call results).
+- **trimToolResults**: Distance-based mechanical trimming of older oversized tool call results. Oversized means text content `>512 chars` or image content with `detail !== 'low'`. Only the latest 5 oversized results are kept untrimmed; older oversized results are mechanically trimmed / downgraded.
 
 ### Context Compaction
 
@@ -354,11 +348,9 @@ Compaction proactively summarizes historical conversation context to prevent LLM
 **Token estimation**: Context size is estimated using a `CHARS_PER_TOKEN = 2` heuristic (not an actual tokenizer). Summary size is excluded from the compaction trigger check to prevent the summary from growing until it fills the budget (which would degrade compaction into a sliding window). `findWorkingWindowCursor` counts both RC segments and TRs when determining the cursor position.
 
 **Config** (`compaction` section in `config.yaml`):
-- `enabled` (boolean, default `false`): whether to run compaction. When disabled, existing compaction data is still loaded (cursor + summary applied), but no new compaction runs.
 - `maxContextEstTokens` (number, default `200000`): high water mark — trigger compaction when estimated context exceeds this. Also used by `trimContext` to cap the LLM request size.
 - `workingWindowEstTokens` (number, default `8000`): low water mark — how many estimated tokens of raw content to retain after compaction.
 - `model` (string, optional): override model for compaction LLM calls (references a key in the `models` registry). Defaults to `llm.model`.
-- `dryRun` (boolean, default `false`): call LLM and log summary, but don't persist or apply.
 
 **Empty content sanitization**: Anthropic API rejects assistant messages with empty `content` (empty string, null, or pure-thinking entries with no content/tool_calls). `composeContext` sanitizes these: `content: '' | null | undefined` → `delete content`; empty-shell assistant messages (no content, no tool_calls) are filtered out entirely.
 

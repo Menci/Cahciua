@@ -19,24 +19,22 @@ const llmEndpointEntries = {
 
 const DEFAULT_FILE_SIZE_LIMIT = 20 * 1024 * 1024; // 20 MB
 
-const RuntimeSchema = v.optional(v.object({
+const RuntimeSchema = v.object({
   shell: v.optional(v.array(v.string()), ['/bin/bash', '-c']),
-  writeFile: v.optional(v.array(v.string())),
-  readFile: v.optional(v.array(v.string())),
+  writeFile: v.array(v.string()),
+  readFile: v.array(v.string()),
   writeFileSizeLimit: v.optional(v.number(), DEFAULT_FILE_SIZE_LIMIT),
   readFileSizeLimit: v.optional(v.number(), DEFAULT_FILE_SIZE_LIMIT),
-}), {});
+});
 
 // --- Chat-level config schemas ---
 
 const ChatConfigSchema = v.object({
   model: v.optional(v.string(), 'primary'),
   compaction: v.optional(v.object({
-    enabled: v.optional(v.boolean(), false),
     maxContextEstTokens: v.optional(v.number(), 200000),
     workingWindowEstTokens: v.optional(v.number(), 8000),
     model: v.optional(v.string()),
-    dryRun: v.optional(v.boolean(), false),
   }), {}),
   probe: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
@@ -56,41 +54,23 @@ const ChatConfigSchema = v.object({
     model: v.optional(v.string(), ''),
     maxFrames: v.optional(v.number(), 5),
   }), {}),
-  features: v.optional(v.object({
-    trimStaleNoToolCallTurnResponses: v.optional(v.boolean(), false),
-    trimSelfMessagesCoveredBySendToolCalls: v.optional(v.boolean(), false),
-    trimToolResults: v.optional(v.boolean(), false),
-  }), {}),
-  tools: v.optional(v.object({
+  tools: v.object({
     bash: v.optional(v.object({
-      enabled: v.optional(v.boolean(), false),
       backgroundThresholdSec: v.optional(v.number(), 10),
     }), {}),
-    downloadFile: v.optional(v.object({
-      enabled: v.optional(v.boolean(), false),
-    }), {}),
-    sendMessage: v.optional(v.object({
-      enableAttachments: v.optional(v.boolean(), false),
-    }), {}),
-    webSearch: v.optional(v.object({
-      enabled: v.optional(v.boolean(), false),
-      tavilyKey: v.optional(v.string(), ''),
-    }), {}),
-    readImage: v.optional(v.object({
-      enabled: v.optional(v.boolean(), false),
-    }), {}),
-  }), {}),
+    webSearch: v.object({
+      tavilyKey: v.pipe(v.string(), v.minLength(1)),
+    }),
+  }),
 });
 
 // Per-chat overrides: all fields optional, no defaults
 const ChatOverrideSchema = v.optional(v.partial(v.object({
   model: v.string(),
   compaction: v.partial(v.object({
-    enabled: v.boolean(),
     maxContextEstTokens: v.number(),
     workingWindowEstTokens: v.number(),
     model: v.string(),
-    dryRun: v.boolean(),
   })),
   probe: v.partial(v.object({
     enabled: v.boolean(),
@@ -110,28 +90,12 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
     model: v.string(),
     maxFrames: v.number(),
   })),
-  features: v.partial(v.object({
-    trimStaleNoToolCallTurnResponses: v.boolean(),
-    trimSelfMessagesCoveredBySendToolCalls: v.boolean(),
-    trimToolResults: v.boolean(),
-  })),
   tools: v.partial(v.object({
     bash: v.partial(v.object({
-      enabled: v.boolean(),
       backgroundThresholdSec: v.number(),
     })),
-    downloadFile: v.partial(v.object({
-      enabled: v.boolean(),
-    })),
-    sendMessage: v.partial(v.object({
-      enableAttachments: v.boolean(),
-    })),
     webSearch: v.partial(v.object({
-      enabled: v.boolean(),
       tavilyKey: v.string(),
-    })),
-    readImage: v.partial(v.object({
-      enabled: v.boolean(),
     })),
   })),
 })), {});
@@ -159,12 +123,11 @@ const ConfigSchema = v.object({
 
 export type Config = v.InferOutput<typeof ConfigSchema>;
 export type ChatConfig = v.InferOutput<typeof ChatConfigSchema>;
-export type FeatureFlags = ChatConfig['features'];
 
 export interface RuntimeConfig {
   shell: string[];
-  writeFile?: string[];
-  readFile?: string[];
+  writeFile: string[];
+  readFile: string[];
   writeFileSizeLimit: number;
   readFileSizeLimit: number;
 }
@@ -182,13 +145,9 @@ export interface ResolvedChatConfig {
   imageToText: { enabled: boolean; model?: string };
   animationToText: { enabled: boolean; model?: string; maxFrames: number };
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number };
-  featureFlags: FeatureFlags;
   tools: {
-    bash: { enabled: boolean; backgroundThresholdSec: number };
-    downloadFile: { enabled: boolean };
-    sendMessage: { enableAttachments: boolean };
-    webSearch: { enabled: boolean; tavilyKey: string };
-    readImage: { enabled: boolean };
+    bash: { backgroundThresholdSec: number };
+    webSearch: { tavilyKey: string };
   };
 }
 
@@ -256,13 +215,9 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
       model: merged.customEmojiToText.model || undefined,
       maxFrames: merged.customEmojiToText.maxFrames,
     },
-    featureFlags: merged.features,
     tools: {
-      bash: { enabled: merged.tools.bash.enabled, backgroundThresholdSec: merged.tools.bash.backgroundThresholdSec },
-      downloadFile: { enabled: merged.tools.downloadFile.enabled },
-      sendMessage: { enableAttachments: merged.tools.sendMessage.enableAttachments },
-      webSearch: { enabled: merged.tools.webSearch.enabled, tavilyKey: merged.tools.webSearch.tavilyKey },
-      readImage: { enabled: merged.tools.readImage.enabled },
+      bash: { backgroundThresholdSec: merged.tools.bash.backgroundThresholdSec },
+      webSearch: { tavilyKey: merged.tools.webSearch.tavilyKey },
     },
   };
 };

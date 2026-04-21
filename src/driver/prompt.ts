@@ -32,13 +32,6 @@ export const renderSystemPrompt = async (params: {
   modelName: string;
   currentChannel?: string;
   systemFiles?: { filename: string; content: string }[];
-  hasBashTool?: boolean;
-  hasWebSearchTool?: boolean;
-  hasDownloadFileTool?: boolean;
-  hasReadImageTool?: boolean;
-  hasReadImageFilePathSupport?: boolean;
-  hasAttachmentSupport?: boolean;
-  hasBackgroundTasks?: boolean;
 }) => {
   const { rendered } = await renderMarkdownString(systemPromptTemplate, params, basePath);
   return cleanVelinOutput(rendered);

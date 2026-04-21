@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { composeContext } from './context';
 import type { TurnResponseV2 } from './types';
-import type { FeatureFlags } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
 import type { ConversationEntry, InputPart, ToolResult } from '../unified-api/types';
 
@@ -44,37 +43,17 @@ const toolResult = (callId: string, payload: string | InputPart[]): ToolResult =
 
 const longText = (label: string): string => `${label}:${'x'.repeat(1000)}`;
 
-const flags = (overrides: Partial<FeatureFlags> = {}): FeatureFlags => ({
-  trimStaleNoToolCallTurnResponses: false,
-  trimSelfMessagesCoveredBySendToolCalls: false,
-  trimToolResults: false,
-  ...overrides,
-});
-
 const getToolResults = (entries: ConversationEntry[]): ToolResult[] =>
   entries.filter((e): e is ToolResult => e.kind === 'toolResult');
 
 describe('composeContext — trimToolResults', () => {
-  it('does not trim when feature flag is off', () => {
-    const rc: RenderedContext = [textSeg(100, 'hi')];
-    const trs = [1, 2, 3].map(i =>
-      tr(100 + i * 100, [assistantToolCall(`tc${i}`), toolResult(`tc${i}`, longText(`r${i}`))]));
-
-    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL, flags({ trimToolResults: false }));
-    expect(result).not.toBeNull();
-    const tres = getToolResults(result!.entries);
-    expect(tres).toHaveLength(3);
-    for (const t of tres) expect(typeof t.payload === 'string' && t.payload.includes('[trimmed'))
-      .toBe(false);
-  });
-
   it('keeps only the last 5 oversized tool results untrimmed', () => {
     const rc: RenderedContext = [textSeg(100, 'hi')];
     const contents = Array.from({ length: 7 }, (_, i) => longText(`r${i + 1}`));
     const trs = contents.map((c, i) =>
       tr(200 + i * 100, [assistantToolCall(`tc${i + 1}`), toolResult(`tc${i + 1}`, c)]));
 
-    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL, flags({ trimToolResults: true }));
+    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL);
     const tres = getToolResults(result!.entries);
     expect(tres).toHaveLength(7);
     expect(tres[0]!.payload).toMatch(/\[trimmed/);
@@ -88,7 +67,7 @@ describe('composeContext — trimToolResults', () => {
     const trs = contents.map((c, i) =>
       tr(200 + i * 100, [assistantToolCall(`tc${i + 1}`), toolResult(`tc${i + 1}`, c)]));
 
-    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL, flags({ trimToolResults: true }));
+    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL);
     const tres = getToolResults(result!.entries);
     for (let i = 0; i < 5; i++) expect(tres[i]!.payload).toBe(contents[i]);
   });
@@ -102,7 +81,7 @@ describe('composeContext — trimToolResults', () => {
         tr(300 + i * 100, [assistantToolCall(`tc${i + 1}`), toolResult(`tc${i + 1}`, longText(`r${i + 1}`))])),
     ];
 
-    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL, flags({ trimToolResults: true }));
+    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL);
     const trimmed = getToolResults(result!.entries)[0]!.payload as string;
     expect(trimmed).toContain('HEAD');
     expect(trimmed).toContain('TAIL');
@@ -121,7 +100,7 @@ describe('composeContext — trimToolResults', () => {
         tr(300 + i * 100, [assistantToolCall(`tc${i + 1}`), toolResult(`tc${i + 1}`, longText(`r${i + 1}`))])),
     ];
 
-    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL, flags({ trimToolResults: true }));
+    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL);
     const entries = result!.entries;
     const tres = getToolResults(entries);
     expect(tres[0]!.payload).toMatch(/\[trimmed/);
@@ -174,7 +153,7 @@ describe('composeContext — misc', () => {
   });
 
   it('prepends compact summary as first user message', () => {
-    const result = composeContext([textSeg(100, 'hi')], [], 100_000, CURRENT_MODEL, undefined, 'earlier stuff');
+    const result = composeContext([textSeg(100, 'hi')], [], 100_000, CURRENT_MODEL, 'earlier stuff');
     expect(result).not.toBeNull();
     const first = result!.entries[0]!;
     expect(first.kind).toBe('message');

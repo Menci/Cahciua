@@ -33,16 +33,13 @@ const main = async () => {
 
   const chatIds = getChatIds(config);
 
-  // Validate runtime config against tool enablement
-  for (const chatId of chatIds) {
-    const chatConfig = resolveChatConfig(config, chatId);
-    if (chatConfig.tools.bash.enabled && runtimeConfig.shell.length === 0)
-      throw new Error(`Chat ${chatId} has bash.enabled=true but runtime.shell is not configured`);
-    if (chatConfig.tools.downloadFile.enabled && !runtimeConfig.writeFile)
-      throw new Error(`Chat ${chatId} has downloadFile.enabled=true but runtime.writeFile is not configured`);
-    if (chatConfig.tools.sendMessage.enableAttachments && !runtimeConfig.readFile)
-      throw new Error(`Chat ${chatId} has sendMessage.enableAttachments=true but runtime.readFile is not configured`);
-  }
+  // Validate runtime config
+  if (runtimeConfig.shell.length === 0)
+    throw new Error('runtime.shell must be configured');
+  if (!runtimeConfig.writeFile || runtimeConfig.writeFile.length === 0)
+    throw new Error('runtime.writeFile must be configured');
+  if (!runtimeConfig.readFile || runtimeConfig.readFile.length === 0)
+    throw new Error('runtime.readFile must be configured');
 
   // Compute per-chat image-to-text enablement
   const imageToTextChatIds = new Set(
@@ -223,7 +220,7 @@ const main = async () => {
   // Helper: read a file from the workspace via the configured readFile command.
   const readWorkspaceFile = (path: string): Promise<Buffer> =>
     new Promise<Buffer>((resolve, reject) => {
-      const cmd = runtimeConfig.readFile!;
+      const cmd = runtimeConfig.readFile;
       const child = execFile(
         cmd[0]!,
         [...cmd.slice(1), path],
