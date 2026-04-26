@@ -12,7 +12,7 @@ Cahciua is a Telegram group chat bot built on the **Deterministic Context Pipeli
 2. **Projection**: `IC' = Reducers(IC, CanonicalIMEvent)` — pure-function state machine producing an Intermediate Context (IC).
 3. **Rendering**: `RC = Render(IC, RenderParams)` — serialization with viewport filtering, producing Rendered Context (RC).
 
-The Driver layer sits after Rendering: it merges RC (chat context) with its own TRs (bot responses, tool results) by timestamp to assemble the final LLM API request. Driver owns tool call loops, reactive scheduling, and context compaction. Supports two API formats: OpenAI Chat Completions (`openai-chat`, via xsai with SSE streaming) and OpenAI Responses API (`responses`, via direct fetch with SSE streaming). TRs are stored in raw provider format; conversion happens at API boundaries when composing context or sending requests.
+The Driver layer sits after Rendering: it merges RC (chat context) with its own TRs (bot responses, tool results) by timestamp to assemble the final LLM API request. Driver owns tool call loops, reactive scheduling, and context compaction. Supports three API formats: OpenAI Chat Completions (`openai-chat`), Anthropic Messages API (`anthropic-messages`), and OpenAI Responses API (`responses`), all via direct `fetch` (non-streaming). TRs are stored in raw provider format; conversion happens at API boundaries when composing context or sending requests.
 
 Key design goals: KV Cache friendly (append-only history, static system prompt, epoch-based compaction), group chat native (message batching, multi-user identity tracking, anti-injection via XML fencing), autonomous reply (bot decides whether to respond via Tool Call, not synchronous response).
 
@@ -25,14 +25,14 @@ Key design goals: KV Cache friendly (append-only history, static system prompt, 
 | DB / Persistence | Done | events, messages, turn_responses, compactions, probe_responses, image_alt_texts tables; 22 migrations |
 | Projection | Done | Reducer (message/edit/delete), MetaReducer (user rename detection), Immer-based immutability |
 | Rendering | Done | `render(IC, RenderParams) → RC`, XML serialization, viewport filtering, thumbnail content pieces, inline `<image>` / `<animation>` / `<sticker>` / `<custom-emoji>` alt text rendering |
-| Driver | Done | Dual-provider SSE streaming (OpenAI Chat Completions via xsai + Responses API via fetch), manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization (per-provider format), reactive orchestration (alien-signals), context compaction (LLM-based summarization with append-only history), probe/activate gate (small model decides silence vs activation), format conversion (openai-chat ↔ responses) at API boundaries |
+| Driver | Done | Tri-provider non-streaming LLM calls (OpenAI Chat Completions, Anthropic Messages, OpenAI Responses — all via direct fetch), manual tool execution, per-step TR persistence, mid-turn interruption, reasoning sanitization (per-provider format), reactive orchestration (alien-signals), context compaction (LLM-based summarization with append-only history), probe/activate gate (small model decides silence vs activation), format conversion (openai-chat ↔ responses ↔ anthropic-messages) at API boundaries |
 
 ## Tech Stack
 
 - **Runtime**: Node.js (>=22), TypeScript, tsx (dev), tsdown (build).
 - **Telegram Bot API**: grammY — primary message handling, sending replies, commands.
 - **Telegram User API**: gramjs (`telegram` on npm) — MTProto client for history fetching, reply-to context resolution, seeing other bots' messages.
-- **LLM**: Two API format paths — OpenAI Chat Completions (via xsAI `chat()` with `stream: true`) and OpenAI Responses API (via direct `fetch` with SSE streaming). `composeContext()` builds an intermediate `Message[]`: user content parts use Responses-style `input_text` / `input_image`, while assistant/tool entries stay TR-shaped. Final conversion to provider wire format happens only at the last send boundary (`prepareChatMessagesForSend` / `prepareResponsesInputForSend`) so probe, compaction, and step loops share the same normalization and image-limit enforcement. SSE streaming helpers in `src/driver/streaming.ts` (chat) and `src/driver/streaming-responses.ts` (responses) parse chunks and log deltas in real time.
+- **LLM**: Three API format paths — OpenAI Chat Completions, Anthropic Messages API, and OpenAI Responses API — all via direct `fetch` (non-streaming). `composeContext()` builds an intermediate `Message[]`: user content parts use Responses-style `input_text` / `input_image`, while assistant/tool entries stay TR-shaped. Final conversion to provider wire format happens only at the last send boundary (`prepareChatMessagesForSend` / `prepareResponsesInputForSend`) so probe, compaction, and step loops share the same normalization and image-limit enforcement. Provider call helpers in `src/driver/chat.ts`, `src/driver/messages.ts`, and `src/driver/responses.ts`.
 - **Image processing**: sharp — thumbnails, GIF frame extraction, image resizing.
 - **Animation processing**: ffmpeg-static + ffprobe-static (bundled binaries via npm) — MP4/WEBM frame extraction; lottie-frame (native rlottie + libpng addon) — TGS/Lottie frame rendering. System deps: `libpng-dev`, `librlottie-dev`.
 - **Database**: SQLite via better-sqlite3, Drizzle ORM.
@@ -77,11 +77,11 @@ src/
 │   ├── convert.ts          # Format conversion + chat-completions send prep helpers (openai-chat ↔ responses, tool-result image extraction)
 │   ├── convert.test.ts     # Conversion + round-trip fidelity tests
 │   ├── constants.ts        # Driver-scoped constants and dump-dir bootstrap helpers
-│   ├── responses-types.ts  # OpenAI Responses API type definitions (request/response/stream events)
-│   ├── sse.ts              # Shared SSE line-buffer parser used by both provider streamers
-│   ├── runner.ts           # LLM step loop: dual-provider SSE streaming + manual tool execution
-│   ├── streaming.ts        # SSE streaming chat: parses OpenAI-compat SSE into ChatCompletion result with per-chunk logging
-│   ├── streaming-responses.ts # SSE streaming responses: parses Responses API SSE into output items with per-chunk logging
+│   ├── responses-types.ts  # OpenAI Responses API type definitions (request/response)
+│   ├── chat.ts             # OpenAI Chat Completions API caller (non-streaming fetch)
+│   ├── messages.ts         # Anthropic Messages API caller (non-streaming fetch)
+│   ├── responses.ts        # OpenAI Responses API caller (non-streaming fetch)
+│   ├── runner.ts           # LLM step loop: multi-provider calls + manual tool execution
 │   ├── compaction.ts       # Context compaction: LLM-based conversation summarization (dual-provider)
 │   ├── prompt.ts           # Prompt rendering — loads all velin templates from prompts/
 │   ├── send-message-human-likeness.ts # Heuristics for recent send_message human-likeness feedback (markdown-heavy formatting, newlines, trailing periods, punctuation-heavy short messages) used by late-binding
@@ -107,7 +107,7 @@ src/
     ├── custom-emoji-to-text.ts  # Blocking custom emoji→alt text workflow (static + animated)
     ├── custom-emoji-to-text-prompt.ts # Velin prompt renderer for custom emoji description workflow
     ├── frame-extractor.ts     # Frame extraction from animations (MP4/WEBM via ffmpeg, GIF via sharp, TGS via lottie-frame)
-    ├── llm-description.ts     # Shared utilities for image/animation description LLM calls (semaphore, streaming helpers)
+    ├── llm-description.ts     # Shared utilities for image/animation description LLM calls (semaphore, text extraction)
     ├── session-ingress-queue.ts # Per-chat ordered commit queue with speculative async transforms
     ├── thumbnail.ts         # sharp-based thumbnail generation (pixel-budget ≤75k pixels ≈ 100 Claude tokens)
     ├── gramjs-logger.ts     # Patches gramjs internal logger to @guiiai/logg

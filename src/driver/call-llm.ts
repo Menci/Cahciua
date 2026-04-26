@@ -2,11 +2,11 @@ import { writeFileSync } from 'node:fs';
 
 import type { Logger } from '@guiiai/logg';
 
-import { trimImages } from './context';
+import { chatCompletions } from './chat';
 import { DUMP_DIR } from './constants';
-import { streamingChat } from './streaming';
-import { streamingMessages } from './streaming-messages';
-import { streamingResponses } from './streaming-responses';
+import { trimImages } from './context';
+import { messagesApi } from './messages';
+import { responsesApi } from './responses';
 import type { ProviderFormat } from './types';
 import {
   fromChatCompletionsOutput,
@@ -89,7 +89,7 @@ export const callLlm = async (
     const wireTools = optionalTools(tools?.map(toResponsesToolSchema));
     dump(options?.dumpId, 'request', { model: config.model, instructions: system, input, tools: wireTools });
 
-    const response = await streamingResponses({
+    const response = await responsesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
       log: log!, label, timeoutSec: config.timeoutSec,
@@ -110,7 +110,7 @@ export const callLlm = async (
     const wireTools = optionalTools(tools?.map(toAnthropicToolSchema));
     dump(options?.dumpId, 'request', { model: config.model, system: effectiveSystem, messages, tools: wireTools });
 
-    const response = await streamingMessages({
+    const response = await messagesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: effectiveSystem, messages, ...(wireTools ? { tools: wireTools } : {}),
       log: log!, label, timeoutSec: config.timeoutSec,
@@ -128,7 +128,7 @@ export const callLlm = async (
   const wireTools = optionalTools(tools?.map(toChatToolSchema));
   dump(options?.dumpId, 'request', { model: config.model, system, messages: chatMessages, tools: wireTools });
 
-  const response = await streamingChat({
+  const response = await chatCompletions({
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
     log: log!, label, timeoutSec: config.timeoutSec,

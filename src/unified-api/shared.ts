@@ -1,7 +1,6 @@
 import { type Sharp } from 'sharp';
 
-import type { ChatCompletionsContentPart } from './chat-types';
-import type { ResponsesInputContent } from './chat-types';
+import type { ChatCompletionsContentPart, ResponsesInputContent } from './chat-types';
 import type { Extra, ExtraSource, ImagePart, InputPart } from './types';
 
 /** Capture `obj` keys outside `coreKeys` into `Extra.fields` so unknown

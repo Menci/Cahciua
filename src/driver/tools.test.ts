@@ -74,7 +74,7 @@ describe('executeToolCall', () => {
       properties: { name: { type: 'string' } },
       required: ['name'],
     },
-    execute: async (input) => {
+    execute: async input => {
       const { name } = input as { name: string };
       return { content: `hello ${name}`, requiresFollowUp: false };
     },

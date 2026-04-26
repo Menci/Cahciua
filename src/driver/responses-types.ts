@@ -144,27 +144,3 @@ export interface ResponseOutputReasoning {
   summary: { type: 'summary_text'; text: string }[];
   encrypted_content?: string;
 }
-
-// ── Stream event types ──
-
-export type ResponseStreamEvent =
-  | { type: 'response.created'; response: ResponsesResult }
-  | { type: 'response.in_progress'; response: ResponsesResult }
-  | { type: 'response.output_item.added'; output_index: number; item: ResponseOutputItem }
-  | { type: 'response.output_item.done'; output_index: number; item: ResponseOutputItem }
-  | { type: 'response.content_part.added'; item_id: string; output_index: number; content_index: number; part: ResponseOutputContentBlock }
-  | { type: 'response.content_part.done'; item_id: string; output_index: number; content_index: number; part: ResponseOutputContentBlock }
-  | { type: 'response.reasoning_summary_part.added'; item_id: string; output_index: number; summary_index: number; part: { type: 'summary_text'; text: string } }
-  | { type: 'response.reasoning_summary_part.done'; item_id: string; output_index: number; summary_index: number; part: { type: 'summary_text'; text: string } }
-  | { type: 'response.reasoning_summary_text.delta'; item_id: string; output_index: number; summary_index: number; delta: string }
-  | { type: 'response.reasoning_summary_text.done'; item_id: string; output_index: number; summary_index: number; text: string }
-  | { type: 'response.output_text.delta'; item_id: string; output_index: number; content_index: number; delta: string }
-  | { type: 'response.output_text.done'; item_id: string; output_index: number; content_index: number; text: string }
-  | { type: 'response.function_call_arguments.delta'; item_id: string; output_index: number; delta: string }
-  | { type: 'response.function_call_arguments.done'; item_id: string; output_index: number; arguments: string }
-  | { type: 'response.completed'; response: ResponsesResult }
-  | { type: 'response.incomplete'; response: ResponsesResult }
-  | { type: 'response.failed'; response: ResponsesResult }
-  | { type: 'error'; message: string; code?: string }
-  | { type: 'ping' }
-  | { type: string; [key: string]: unknown };

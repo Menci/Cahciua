@@ -10,10 +10,10 @@
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│ LLM API Client 层（仅 HTTP/SSE，provider-native wire）│
-│   streaming.ts            (OpenAI Chat Completions)  │
-│   streaming-responses.ts  (OpenAI Responses)         │
-│   streaming-messages.ts   (Anthropic Messages, 新增) │
+│ LLM API Client 层（仅 HTTP，provider-native wire）    │
+│   chat.ts                (OpenAI Chat Completions)   │
+│   responses.ts           (OpenAI Responses)          │
+│   messages.ts            (Anthropic Messages)        │
 └────────────┬─────────────────────────────┬───────────┘
              │ from*Output                 │ to*Input
              ▼                             ▲
@@ -26,7 +26,7 @@
 ```
 
 **硬性规则**：
-- 出 streaming client 立即转 IR；业务代码不许见到任何
+- 出 API client 立即转 IR；业务代码不许见到任何
   wire 格式的 LLM 数据（assistant message、function_call、
   tool_use、reasoning 等）。
 - tool call 循环内，assistant 输出先转 IR，工具结果以
@@ -51,7 +51,7 @@
 | `src/driver/runner.ts` | 转 IR、统一循环 |
 | `src/driver/compaction.ts` | 改 IR |
 | `src/driver/send-message-human-likeness.ts` | 重写，扫 IR |
-| `src/driver/streaming-messages.ts`（新）| Anthropic 原生 SSE |
+| `src/driver/messages.ts` | Anthropic 原生 HTTP |
 | `src/driver/index.ts` | 入口与分发 |
 | 各 `*.test.ts` | 测试迁移 |
 
@@ -159,7 +159,7 @@ CREATE INDEX probe_responses_v2_chat_idx
   提取 `args` JSON 里的 `text`。
 
 ### D9. Anthropic 原生路径本次一起做
-- 新增 `src/driver/streaming-messages.ts`。
+- 新增 `src/driver/messages.ts`。
 - config 增加 `apiFormat: 'anthropic-messages'`。
 - HTTP 客户端不关心 provider 差异，header/URL 按 provider
   透传到 fetch，不做封装抽象。
@@ -206,12 +206,12 @@ drizzle migrator 跑完后、driver/pipeline 启动之前,在 `src/index.ts` 启
 5. codec Sharp 注册在 `src/db/codec.ts`（新）。
 6. `src/db/migrate-v2.ts` 回填逻辑。
 7. `persistence.ts` 增 v2 读写函数，启动钩子调迁移。
-8. runner + streaming 客户端接 IR：在 runner 内 from*Output。
+8. runner + API client 接 IR：在 runner 内 from*Output。
 9. context.ts / merge.ts 改操作 IR。
 10. send-message-human-likeness.ts 重写。
 11. compaction.ts 改 IR。
 12. driver/index.ts 粘合。
-13. streaming-messages.ts（Anthropic）+ runner 分发。
+13. messages.ts（Anthropic）+ runner 分发。
 14. 删除旧 `convert.ts`、旧 `types.ts` 中的废弃类型。
 15. 测试迁移。
 

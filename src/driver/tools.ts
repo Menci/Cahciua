@@ -137,17 +137,17 @@ export const createBashTool = (runtime: RuntimeConfig, backgroundTask: {
     + 'For large outputs, redirect to a file and read specific ranges. '
     + `Set timeout_seconds > ${backgroundTask.backgroundThresholdSec} for long-running commands — they run as background tasks and return immediately with a task ID.`,
   parameters: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'The shell command to execute.' },
-        timeout_seconds: {
-          type: 'number',
-          description: `Timeout in seconds. Commands with timeout > ${backgroundTask.backgroundThresholdSec}s run as background tasks and return immediately with a task ID. Short commands (e.g. ls, cat) typically need 5-10s; builds or tests may need 60-300s.`,
-        },
-        intention: { type: 'string', description: 'Brief description of what this command does (shown in background task status).' },
+    type: 'object',
+    properties: {
+      command: { type: 'string', description: 'The shell command to execute.' },
+      timeout_seconds: {
+        type: 'number',
+        description: `Timeout in seconds. Commands with timeout > ${backgroundTask.backgroundThresholdSec}s run as background tasks and return immediately with a task ID. Short commands (e.g. ls, cat) typically need 5-10s; builds or tests may need 60-300s.`,
       },
-      required: ['command', 'timeout_seconds'],
+      intention: { type: 'string', description: 'Brief description of what this command does (shown in background task status).' },
     },
+    required: ['command', 'timeout_seconds'],
+  },
   execute: async input => {
     const { command, timeout_seconds, intention } = input as { command: string; timeout_seconds: number; intention?: string };
     const timeoutSec = timeout_seconds;

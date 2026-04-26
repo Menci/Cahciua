@@ -1,8 +1,7 @@
 import type { Logger } from '@guiiai/logg';
-import type { Message } from 'xsai';
 
-import { streamingChat } from '../driver/streaming';
-import { streamingResponses } from '../driver/streaming-responses';
+import { chatCompletions } from '../driver/chat';
+import { responsesApi } from '../driver/responses';
 import type { LlmEndpoint } from '../driver/types';
 
 export const createSemaphore = (max: number) => {
@@ -42,7 +41,6 @@ export interface ImageContentPart {
   detail?: 'high' | 'low' | 'auto';
 }
 
-/** Shared LLM call for image/animation description workflows. */
 export const callDescriptionLlm = async (params: {
   model: LlmEndpoint;
   system: string;
@@ -64,7 +62,7 @@ export const callDescriptionLlm = async (params: {
         ...images.map(img => ({ type: 'input_image', image_url: img.url, detail: img.detail ?? 'high' as const })),
       ],
     }];
-    const response = await streamingResponses({
+    const response = await responsesApi({
       baseURL: model.apiBaseUrl,
       apiKey: model.apiKey,
       model: model.model,
@@ -82,13 +80,13 @@ export const callDescriptionLlm = async (params: {
   }
 
   const chatMessages = [{
-    role: 'user',
+    role: 'user' as const,
     content: [
-      { type: 'text', text: userText },
-      ...images.map(img => ({ type: 'image_url', image_url: { url: img.url, detail: img.detail ?? 'high' as const } })),
+      { type: 'text' as const, text: userText },
+      ...images.map(img => ({ type: 'image_url' as const, image_url: { url: img.url, detail: img.detail ?? 'high' as const } })),
     ],
-  } as Message];
-  const response = await streamingChat({
+  }];
+  const response = await chatCompletions({
     baseURL: model.apiBaseUrl,
     apiKey: model.apiKey,
     model: model.model,
