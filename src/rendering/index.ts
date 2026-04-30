@@ -81,6 +81,8 @@ const truncateXml = (xml: string, maxLen: number): string => {
   // If we're inside a tag, truncate before the opening '<'
   if (lastOpen > lastClose) cutAt = lastOpen;
   if (cutAt <= 0) return '';
+  // Don't split a surrogate pair — step back if the char before cutAt is a high surrogate.
+  if ((xml.charCodeAt(cutAt - 1) & 0xFC00) === 0xD800) cutAt--;
   return `${xml.slice(0, cutAt)}…`;
 };
 
