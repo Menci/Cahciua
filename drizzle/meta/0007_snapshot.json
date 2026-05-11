@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a1b2c3d4-content-node-string-ids-0006",
-  "prevId": "7da9e4d9-3e8a-4b23-9141-815a7ba37b5f",
+  "id": "a1b2c3d4-backfill-events-content-0007",
+  "prevId": "a1b2c3d4-content-node-string-ids-0006",
   "tables": {
     "events": {
       "name": "events",

@@ -2,7 +2,7 @@
   "version": "6",
   "dialect": "sqlite",
   "id": "b2c3d4e5-events-utc-offset-0008",
-  "prevId": "a1b2c3d4-content-node-string-ids-0006",
+  "prevId": "a1b2c3d4-backfill-events-content-0007",
   "tables": {
     "events": {
       "name": "events",
