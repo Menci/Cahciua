@@ -265,6 +265,7 @@ const convertGramjsMessageBase = (message: Api.Message, senderInfo?: TelegramUse
     entities: convertGramjsEntities(message.entities),
     replyToMessageId: replyTo?.replyToMsgId,
     replyToTopId: replyTo?.replyToTopId,
+    replyQuoteText: (replyTo?.quote == true) ? replyTo.quoteText : undefined,
     attachments: convertGramjsMedia(message.media),
   };
 };

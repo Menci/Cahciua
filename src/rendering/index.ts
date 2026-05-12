@@ -146,6 +146,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
   if (msg.replyToMessageId) {
     const replyAttrs = [`id="${escapeXml(msg.replyToMessageId)}"`];
     if (msg.replyToSender) replyAttrs.push(`sender="${escapeXml(formatSender(msg.replyToSender, params.contactNames))}"`);
+    if (msg.replyQuoteText != null) replyAttrs.push(`quote="${escapeXml(msg.replyQuoteText)}"`);
     const preview = msg.replyToContent
       ? truncateXml(renderContent(msg.replyToContent), REPLY_PREVIEW_MAX_CHARS)
       : (msg.replyToPreview ? escapeXml(msg.replyToPreview) : '');
