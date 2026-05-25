@@ -7,6 +7,11 @@ settings:
 overrides:
   esbuild: ^0.24.0
 
+patchedDependencies:
+  lottie-frame:
+    hash: a5331038d607898e392a41c32a0d97f8a82daaed70f384a9646cf78f476171f1
+    path: patches/lottie-frame.patch
+
 importers:
 
   .:
@@ -49,7 +54,7 @@ importers:
         version: 10.2.0
       lottie-frame:
         specifier: ^1.1.0
-        version: 1.1.0
+        version: 1.1.0(patch_hash=a5331038d607898e392a41c32a0d97f8a82daaed70f384a9646cf78f476171f1)
       markdown-it:
         specifier: ^14.1.1
         version: 14.1.1
@@ -5518,7 +5523,7 @@ snapshots:
 
   longest-streak@3.1.0: {}
 
-  lottie-frame@1.1.0:
+  lottie-frame@1.1.0(patch_hash=a5331038d607898e392a41c32a0d97f8a82daaed70f384a9646cf78f476171f1):
     dependencies:
       node-addon-api: 7.1.1
       prebuild-install: 7.1.3
