@@ -26,9 +26,18 @@ const prepareStaticImageUrl = async (buffer: Buffer): Promise<string> => {
       fit: 'inside',
       withoutEnlargement: true,
     })
+    .flatten({ background: '#ffffff' })
     .png()
     .toBuffer();
   return `data:image/png;base64,${resized.toString('base64')}`;
+};
+
+const prepareFrameImageUrl = async (buffer: Buffer): Promise<string> => {
+  const flattened = await sharp(buffer)
+    .flatten({ background: '#ffffff' })
+    .png()
+    .toBuffer();
+  return `data:image/png;base64,${flattened.toString('base64')}`;
 };
 
 export const createCustomEmojiToTextResolver = (params: {
@@ -95,7 +104,7 @@ export const createCustomEmojiToTextResolver = (params: {
           const extractionResult = await extractFrames(buffer, syntheticAtt, params.maxFrames);
           const uniqueFrames = deduplicateFrames(extractionResult.frames);
           if (uniqueFrames.length === 1) isAnimated = false;
-          images = uniqueFrames.map(buf => ({ url: `data:image/png;base64,${buf.toString('base64')}` }));
+          images = await Promise.all(uniqueFrames.map(async buf => ({ url: await prepareFrameImageUrl(buf) })));
           frameCount = uniqueFrames.length;
           timestamps = extractionResult.frameTimestamps
             ? extractionResult.frameTimestamps.map(t => `${t.toFixed(1)}s`).join(', ')
@@ -136,7 +145,7 @@ export const createCustomEmojiToTextResolver = (params: {
     })();
 
     inflightByKey.set(cacheKey, task);
-    void task.finally(() => inflightByKey.delete(cacheKey));
+    void task.finally(() => inflightByKey.delete(cacheKey)).catch(() => {});
     return task;
   };
 

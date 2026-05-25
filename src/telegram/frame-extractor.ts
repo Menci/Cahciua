@@ -68,6 +68,7 @@ const pickFrameIndices = (totalFrames: number, maxFrames = DEFAULT_MAX_FRAMES): 
 const resizeFrame = (buffer: Buffer): Promise<Buffer> =>
   sharp(buffer)
     .resize(FRAME_MAX_EDGE, FRAME_MAX_EDGE, { fit: 'inside', withoutEnlargement: true })
+    .flatten({ background: '#ffffff' })
     .png()
     .toBuffer();
 
@@ -175,7 +176,9 @@ const extractTgsFrames = async (buffer: Buffer, maxFrames: number): Promise<{ fr
   const parsed = JSON.parse(lottieJson.toString('utf-8'));
   const inPoint = typeof parsed.ip === 'number' ? parsed.ip : 0;
   const outPoint = typeof parsed.op === 'number' ? parsed.op : 1;
-  const totalFrames = Math.max(1, Math.round(outPoint - inPoint));
+  // rlottie exposes valid frame indices as 0..totalFrame()-1. Lottie `op` may be
+  // fractional; rounding can select `totalFrame()` itself and crash native export.
+  const totalFrames = Math.max(1, Math.floor(outPoint - inPoint));
   const width = typeof parsed.w === 'number' ? parsed.w : 512;
   const height = typeof parsed.h === 'number' ? parsed.h : 512;
   const fps = typeof parsed.fr === 'number' && parsed.fr > 0 ? parsed.fr : undefined;

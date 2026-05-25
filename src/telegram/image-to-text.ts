@@ -37,6 +37,7 @@ const prepareImageToTextUrl = async (buffer: Buffer): Promise<string> => {
       fit: 'inside',
       withoutEnlargement: true,
     })
+    .flatten({ background: '#ffffff' })
     .png()
     .toBuffer();
   return `data:image/png;base64,${resized.toString('base64')}`;
@@ -105,7 +106,7 @@ export const createImageToTextResolver = (params: {
     })();
 
     inflightByHash.set(imageHash, task);
-    void task.finally(() => inflightByHash.delete(imageHash));
+    void task.finally(() => inflightByHash.delete(imageHash)).catch(() => {});
     return task;
   };
 

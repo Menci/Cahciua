@@ -101,7 +101,7 @@ export const createAnimationToTextResolver = (params: {
     })();
 
     inflightByHash.set(cacheKey, task);
-    void task.finally(() => inflightByHash.delete(cacheKey));
+    void task.finally(() => inflightByHash.delete(cacheKey)).catch(() => {});
     return task;
   };
 
