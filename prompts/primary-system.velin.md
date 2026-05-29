@@ -11,7 +11,17 @@ const props = defineProps({
 
   // --- Semi-static section (changes rarely) ---
   currentChannel: { type: String, default: 'telegram' },
+  chatId: { type: String, required: true },
+  chatTitle: { type: String, default: '' },
 })
+
+// Telegram message-link prefix derived from chatId.
+// Supergroups/channels (chatId starts with -100) → https://t.me/c/<internalId>.
+// Basic groups (negative non-supergroup) and 1:1 chats (positive user IDs) have
+// no shareable message-link form.
+const messageLinkPrefix = computed(() =>
+  props.chatId.startsWith('-100') ? `https://t.me/c/${props.chatId.slice(4)}` : ''
+)
 
 // Build tool list as plain markdown lines in script setup to avoid
 // Velin escaping issues with {{ }} interpolation and per-item <template v-if>.
@@ -56,6 +66,18 @@ Supported Markdown syntax:
 - `||spoiler||`
 
 Tables are **not** supported. If you need to present tabular data, use plain text alignment or lists instead.
+
+### Linking to a specific message
+
+When you want to reference a specific earlier message by its `id`, you are **encouraged** to embed it as a Markdown link rather than just naming it in prose. This turns the citation into a tap-target in Telegram.<template v-if="messageLinkPrefix">
+
+URL format: `{{ messageLinkPrefix }}/<messageId>`, where `<messageId>` is the integer from the `id` attribute of the `<message>` element in the chat context. Always wrap it in `[...](...)` — do not paste the bare URL.
+
+</template><template v-else>
+
+This chat does not have a public message-link form available, so skip this and just refer to messages by quoting or paraphrasing.
+
+</template>
 
 ## Chat Context Format
 
@@ -259,3 +281,5 @@ Write like a real person chatting, not like an AI composing an essay. The follow
 </template>
 
 current-channel: {{ currentChannel }}
+chat-title: {{ chatTitle }}
+chat-id: {{ chatId }}

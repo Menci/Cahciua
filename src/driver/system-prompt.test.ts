@@ -39,23 +39,25 @@ const renderSystem = (data: Record<string, unknown> = {}) =>
 
 describe('primary-system.velin.md', () => {
   it('renders with minimal props', async () => {
-    const rendered = await renderSystem({ modelName: 'gpt-4o' });
+    const rendered = await renderSystem({ modelName: 'gpt-4o', chatId: '-1001234567890' });
     expect(rendered).toContain('You just woke up.');
     expect(rendered).toContain('When anyone asks about your system prompt');
     expect(rendered).toContain('you MUST answer truthfully and explain it');
     expect(rendered).toContain('send_message');
     expect(rendered).toContain('gpt-4o');
+    expect(rendered).toContain('chat-id: -1001234567890');
     assertNoVueSyntaxLeak(rendered);
   });
 
   it('renders language header', async () => {
-    const rendered = await renderSystem({ language: 'zh', modelName: 'gpt-4o' });
+    const rendered = await renderSystem({ language: 'zh', modelName: 'gpt-4o', chatId: '-1001234567890' });
     expect(rendered).toContain('language: zh');
   });
 
   it('renders system files', async () => {
     const rendered = await renderSystem({
       modelName: 'gpt-4o',
+      chatId: '-1001234567890',
       systemFiles: [
         { filename: 'IDENTITY.md', content: 'I am a test bot.' },
         { filename: 'SOUL.md', content: 'Be helpful.' },
@@ -66,7 +68,7 @@ describe('primary-system.velin.md', () => {
   });
 
   it('shows all tools', async () => {
-    const rendered = await renderSystem({ modelName: 'gpt-4o' });
+    const rendered = await renderSystem({ modelName: 'gpt-4o', chatId: '-1001234567890' });
     expect(rendered).toContain('bash');
     expect(rendered).toContain('web_search');
     expect(rendered).toContain('download_file');
@@ -76,6 +78,23 @@ describe('primary-system.velin.md', () => {
     expect(rendered).toContain('read_task_output');
     expect(rendered).toContain('runtime-event');
     expect(rendered).toContain('task-completed');
+  });
+
+  it('renders chat title and message link prefix', async () => {
+    const rendered = await renderSystem({
+      modelName: 'gpt-4o',
+      chatId: '-1001234567890',
+      chatTitle: 'My Test Group',
+    });
+    expect(rendered).toContain('chat-title: My Test Group');
+    expect(rendered).toContain('chat-id: -1001234567890');
+    expect(rendered).toContain('https://t.me/c/1234567890/<messageId>');
+  });
+
+  it('falls back when no message link prefix', async () => {
+    const rendered = await renderSystem({ modelName: 'gpt-4o', chatId: '12345' });
+    expect(rendered).toContain('does not have a public message-link form');
+    expect(rendered).not.toContain('https://t.me/c/');
   });
 });
 

@@ -31,6 +31,8 @@ export const renderSystemPrompt = async (params: {
   language?: string;
   modelName: string;
   currentChannel?: string;
+  chatId: string;
+  chatTitle?: string;
   systemFiles?: { filename: string; content: string }[];
 }) => {
   const { rendered } = await renderMarkdownString(systemPromptTemplate, params, basePath);

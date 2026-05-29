@@ -377,6 +377,7 @@ const main = async () => {
     loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
     persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
     setCompactCursor: (chatId, cursorMs) => pipeline.setCompactCursor(chatId, cursorMs),
+    getChatTitle: chatId => pipeline.getIC(chatId)?.chatTitle,
     runtimeConfig,
     loadMessageAttachments: (chatId, messageId) => loadMessageAttachments(db, chatId, messageId),
     downloadFile: fileId => telegram.bot.downloadFile(fileId),

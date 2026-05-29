@@ -50,6 +50,7 @@ export const createDriver = (config: DriverConfig, deps: {
   loadLastProbeTime: (chatId: string) => number;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
   setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
+  getChatTitle: (chatId: string) => string | undefined;
   runtimeConfig: RuntimeConfig;
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
   downloadFile: (fileId: string) => Promise<Buffer>;
@@ -254,6 +255,8 @@ export const createDriver = (config: DriverConfig, deps: {
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
               modelName: chatConfig.primaryModel.model,
+              chatId,
+              chatTitle: deps.getChatTitle(chatId),
             });
 
             // --- Compute mention/reply/interrupt state from RC + TRs ---
