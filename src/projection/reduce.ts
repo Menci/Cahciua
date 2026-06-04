@@ -37,7 +37,7 @@ const truncate = (text: string, max: number): string => {
     sliced = sliced.slice(0, -1);
   }
   return `${sliced}…`;
-}
+};
 
 const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent) => {
   // Dedup: skip if a message with the same ID already exists (bypass + userbot race).
