@@ -9,6 +9,7 @@ models:
     # thinking:                      # optional: per-model reasoning budget
     #   type: "enabled"              # 'enabled' (default when present) or 'disabled'
     #   effort: "high"               # 'high' or 'max' (anthropic budget_tokens 5000/10000; openai reasoning_effort; responses output_config.effort)
+    # forceToolCall: false           # optional: force tool_choice=required/any; the model must call a tool (use dismiss_message to stay silent)
   probe:
     apiBaseUrl: ""
     apiKey: ""

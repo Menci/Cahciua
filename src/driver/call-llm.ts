@@ -27,6 +27,7 @@ export interface LlmCallConfig {
   apiFormat?: ProviderFormat;
   timeoutSec?: number;
   thinking?: ThinkingConfig;
+  forceToolCall?: boolean;
 }
 
 export interface ToolSchema {
@@ -100,7 +101,7 @@ export const callLlm = async (
     const response = await responsesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
-      thinking: config.thinking,
+      thinking: config.thinking, forceToolCall: config.forceToolCall,
       log: log!, label, timeoutSec: config.timeoutSec,
     });
     dump(options?.dumpId, 'response', response);
@@ -123,7 +124,7 @@ export const callLlm = async (
     const response = await messagesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
-      thinking: config.thinking,
+      thinking: config.thinking, forceToolCall: config.forceToolCall,
       log: log!, label, timeoutSec: config.timeoutSec,
     });
     dump(options?.dumpId, 'response', response);
@@ -142,7 +143,7 @@ export const callLlm = async (
   const response = await chatCompletions({
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
-    thinking: config.thinking,
+    thinking: config.thinking, forceToolCall: config.forceToolCall,
     log: log!, label, timeoutSec: config.timeoutSec,
   });
   dump(options?.dumpId, 'response', response);

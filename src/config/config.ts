@@ -19,6 +19,7 @@ const llmEndpointEntries = {
     type: v.optional(v.picklist(['enabled', 'disabled'])),
     effort: v.optional(v.picklist(['high', 'max'])),
   })),
+  forceToolCall: v.optional(v.boolean()),
 };
 
 // --- Runtime config schema (top-level, global) ---

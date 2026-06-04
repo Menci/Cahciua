@@ -34,6 +34,7 @@ export const renderSystemPrompt = async (params: {
   chatId: string;
   chatTitle?: string;
   systemFiles?: { filename: string; content: string }[];
+  forceToolCall?: boolean;
 }) => {
   const { rendered } = await renderMarkdownString(systemPromptTemplate, params, basePath);
   return cleanVelinOutput(rendered);
@@ -47,6 +48,7 @@ export const renderLateBindingPrompt = async (params: {
   isReplied?: boolean;
   activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
   isInterrupted?: boolean;
+  forceToolCall?: boolean;
 }) => {
   const { rendered } = await renderMarkdownString(lateBindingTemplate, params, basePath);
   return cleanVelinOutput(rendered);

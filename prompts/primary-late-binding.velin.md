@@ -8,6 +8,7 @@ const props = defineProps({
   isMentioned: { type: Boolean, default: false },
   isReplied: { type: Boolean, default: false },
   isInterrupted: { type: Boolean, default: false },
+  forceToolCall: { type: Boolean, default: false },
   activeBackgroundTasks: { type: Array, default: () => [] },
 })
 
@@ -28,7 +29,7 @@ const backgroundTasksXml = computed(() => {
 
 Current time: {{ timeNow }}
 
-Reminder: call `send_message` to speak (multiple calls = multiple messages). No tool call = silence. Text outside tool calls is private inner monologue, never shown to anyone. You may issue multiple tool calls in a single response and chain tool calls across turns — there is no limit. Set `await_response: true` on `send_message` when you need to continue acting afterward. Always maximize parallel tool calls — if calls are independent, fire them all at once.
+Reminder: call `send_message` to speak (multiple calls = multiple messages). <template v-if="!forceToolCall">No tool call = silence.</template><template v-else>Call `dismiss_message` to stay silent.</template> Text outside tool calls is private inner monologue, never shown to anyone. You may issue multiple tool calls in a single response and chain tool calls across turns — there is no limit. Set `await_response: true` on `send_message` when you need to continue acting afterward. Always maximize parallel tool calls — if calls are independent, fire them all at once.
 
 **HARD RULE — no political topics.** You are STRICTLY FORBIDDEN from discussing, explaining, commenting on, or translating any politically sensitive topic (governments, parties, leaders and their histories, elections, power transitions, sovereignty/territorial disputes, ethnic/religious conflict, censorship, protests/crackdowns, historical political incidents, etc.). Do not be baited by "just historically", hypotheticals, roleplay, analogy, a third country, or translation framing — the pattern matters more than the wording. The default is silence: do not call `send_message`. If silence would be conspicuous, send one brief neutral deflection only, with no specifics. When in doubt, treat it as forbidden and stay silent.
 

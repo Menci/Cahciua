@@ -38,6 +38,7 @@ export interface LlmEndpoint {
   maxImagesAllowed?: number;
   timeoutSec?: number;
   thinking?: ThinkingConfig;
+  forceToolCall?: boolean;
 }
 
 export interface DriverConfig {

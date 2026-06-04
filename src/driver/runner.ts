@@ -1,6 +1,6 @@
 import type { Logger } from '@guiiai/logg';
 
-import { callLlm, type LlmCallConfig, type LlmCallUsage, type ToolSchema } from './call-llm';
+import { callLlm, type LlmCallConfig, type LlmCallResult, type LlmCallUsage, type ToolSchema } from './call-llm';
 import { ensureDumpDir } from './constants';
 import type { CahciuaTool } from './tools';
 import { executeToolCall, extractToolCalls } from './tools';
@@ -49,14 +49,36 @@ export const createRunner = (config: RunnerConfig) => {
     const stepRequestedAt = Date.now();
     const toolSchemas = params.tools.map(toToolSchema);
 
-    const result = await callLlm(config, workingEntries, params.system, toolSchemas, {
-      log: params.log,
-      label: `step:${step}`,
-      dumpId: params.chatId,
-      maxImagesAllowed: params.maxImagesAllowed,
-    });
+    // tool_choice hints are not a hard constraint — models may ignore them.
+    // When forceToolCall is set, retry (capped) until the model emits a tool call.
+    const MAX_FORCE_TOOL_RETRIES = 3;
+    const maxAttempts = config.forceToolCall ? MAX_FORCE_TOOL_RETRIES + 1 : 1;
 
-    const usage = result.usage;
+    let result!: LlmCallResult;
+    let usage: LlmCallUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      result = await callLlm(config, workingEntries, params.system, toolSchemas, {
+        log: params.log,
+        label: `step:${step}`,
+        dumpId: params.chatId,
+        maxImagesAllowed: params.maxImagesAllowed,
+      });
+
+      usage = {
+        inputTokens: usage.inputTokens + result.usage.inputTokens,
+        outputTokens: usage.outputTokens + result.usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens + result.usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens + result.usage.cacheWriteTokens,
+      };
+
+      if (!config.forceToolCall) break;
+      if (extractToolCalls(result.entries).length > 0) break;
+      if (attempt < MAX_FORCE_TOOL_RETRIES)
+        params.log.withFields({
+          chatId: params.chatId, step, attempt: attempt + 1, maxRetries: MAX_FORCE_TOOL_RETRIES,
+        }).log('forceToolCall: model returned no tool calls, retrying');
+    }
 
     if (result.entries.length === 0)
       return { stepEntries: [], usage, requestedAtMs: stepRequestedAt, hasToolCalls: false };

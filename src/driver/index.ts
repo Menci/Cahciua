@@ -82,6 +82,7 @@ export const createDriver = (config: DriverConfig, deps: {
         apiFormat: endpoint.apiFormat ?? 'openai-chat',
         timeoutSec: endpoint.timeoutSec,
         thinking: endpoint.thinking,
+        forceToolCall: endpoint.forceToolCall,
       });
       runners.set(key, runner);
     }
@@ -262,6 +263,7 @@ export const createDriver = (config: DriverConfig, deps: {
               chatId,
               chatTitle: deps.getChatTitle(chatId),
               systemFiles: chatConfig.systemFiles,
+              forceToolCall: chatConfig.primaryModel.forceToolCall,
             });
 
             // --- Compute mention/reply/interrupt state from RC + TRs ---
@@ -276,6 +278,7 @@ export const createDriver = (config: DriverConfig, deps: {
               timeNow: localTimeNow(),
               isMentioned, isReplied,
               isInterrupted,
+              forceToolCall: chatConfig.primaryModel.forceToolCall,
               activeBackgroundTasks: deps.backgroundTask.getActiveTasks(chatId),
             };
 

@@ -73,6 +73,7 @@ export interface MessagesApiParams {
   maxTokens?: number;
   timeoutSec?: number;
   thinking?: ThinkingConfig;
+  forceToolCall?: boolean;
   log: Logger;
   label: string;
 }
@@ -106,6 +107,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
       ...(params.system ? { system: params.system } : {}),
       messages: params.messages,
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+      ...(params.forceToolCall ? { tool_choice: { type: 'any' } } : {}),
       ...(thinkingParam ? { thinking: thinkingParam } : {}),
     });
 
