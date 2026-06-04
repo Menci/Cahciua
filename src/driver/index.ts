@@ -7,9 +7,10 @@ import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, lates
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { collectRecentSendMessageAssessments, renderRecentSendMessageHumanLikenessXml } from './send-message-human-likeness';
-import { createBashTool, createAttachmentDownloader, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createWebSearchTool } from './tools';
+import { createBashTool, createAttachmentDownloader, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createWebFetchTool, createWebSearchTool } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, ProviderFormat, TurnResponseV2 } from './types';
+import { createWebFetcher } from './web-fetch';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
@@ -202,6 +203,8 @@ export const createDriver = (config: DriverConfig, deps: {
               backgroundThresholdSec: chatConfig.tools.bash.backgroundThresholdSec,
             }));
             tools.push(createWebSearchTool(chatConfig.tools.webSearch.tavilyKey));
+            if (chatConfig.tools.webFetch)
+              tools.push(createWebFetchTool(createWebFetcher(chatConfig.tools.webFetch)));
             tools.push(createDownloadFileTool({
               downloadAttachment,
               runtime: deps.runtimeConfig,
