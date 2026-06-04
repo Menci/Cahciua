@@ -145,6 +145,17 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     }
 
     registerEventHandler();
+
+    // Warm the entity cache. gramjs can only resolve a channel's access_hash
+    // (needed by getInputEntity, e.g. the typing poll) after it has seen the
+    // entity; getDialogs caches all the account's dialogs up front so lookups
+    // work before any live update arrives. Best-effort — never blocks startup.
+    try {
+      const dialogs = await client.getDialogs({});
+      log.withFields({ count: dialogs.length }).log('Entity cache warmed via getDialogs');
+    } catch (err) {
+      log.withError(err).warn('Failed to warm entity cache via getDialogs');
+    }
   };
 
   const stop = async () => {

@@ -35,6 +35,10 @@ export const createTypingPollManager = (
 ): TypingPollManager => {
   const log = logger.withContext('typing-poll');
   const polls = new Map<string, PollState>();
+  // Chats whose channel entity couldn't be resolved (userbot not a member, or
+  // not in the warmed dialog cache). Skip silently after warning once — retrying
+  // every debounce window would just spam the same failure.
+  const unresolvable = new Set<string>();
 
   let lastOnlineHeartbeatAt = 0;
   const sendOnlineHeartbeat = async () => {
@@ -88,16 +92,19 @@ export const createTypingPollManager = (
   };
 
   const startPolling = async (chatId: string) => {
-    if (polls.has(chatId)) return;
+    if (polls.has(chatId) || unresolvable.has(chatId)) return;
 
     const channelId = parseSupergroupChannelId(chatId);
     if (!channelId) return;
 
     const entity = await client.getInputEntity(chatId).catch((err: unknown) => {
-      log.withError(err).withFields({ chatId }).warn('Failed to resolve channel peer for typing poll');
+      log.withError(err).withFields({ chatId }).warn('Cannot resolve channel for typing poll (userbot not a member?); skipping');
       return undefined;
     });
-    if (!(entity instanceof Api.InputPeerChannel)) return;
+    if (!(entity instanceof Api.InputPeerChannel)) {
+      unresolvable.add(chatId);
+      return;
+    }
     const accessHash = entity.accessHash;
 
     await sendOnlineHeartbeat();
