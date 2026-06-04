@@ -25,6 +25,11 @@ export interface ProbeResponseV2 {
   createdAt: number;
 }
 
+export interface ThinkingConfig {
+  type?: 'enabled' | 'disabled';
+  effort?: 'high' | 'max';
+}
+
 export interface LlmEndpoint {
   apiBaseUrl: string;
   apiKey: string;
@@ -32,6 +37,7 @@ export interface LlmEndpoint {
   apiFormat?: ProviderFormat;
   maxImagesAllowed?: number;
   timeoutSec?: number;
+  thinking?: ThinkingConfig;
 }
 
 export interface DriverConfig {

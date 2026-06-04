@@ -1,5 +1,6 @@
 import type { Logger } from '@guiiai/logg';
 
+import type { ThinkingConfig } from './types';
 import type {
   MessagesAssistantContentBlock,
   MessagesMessage,
@@ -11,6 +12,15 @@ interface AnthropicTool {
   description?: string;
   input_schema: Record<string, unknown>;
 }
+
+const DEFAULT_MAX_TOKENS = 8192;
+const THINKING_BUDGET_HIGH = 5000;
+const THINKING_BUDGET_MAX = 10000;
+
+const buildThinkingParam = (thinking?: ThinkingConfig): { type: 'enabled'; budget_tokens: number } | undefined => {
+  if (!thinking || thinking.type === 'disabled') return undefined;
+  return { type: 'enabled', budget_tokens: thinking.effort === 'max' ? THINKING_BUDGET_MAX : THINKING_BUDGET_HIGH };
+};
 
 // Anthropic prompt cache TTL. We pick 1h over 5min for both breakpoints:
 // chat history is append-only and reused across many turns, so 1h's 2× write
@@ -62,6 +72,7 @@ export interface MessagesApiParams {
   tools?: AnthropicTool[];
   maxTokens?: number;
   timeoutSec?: number;
+  thinking?: ThinkingConfig;
   log: Logger;
   label: string;
 }
@@ -85,12 +96,17 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
     : undefined;
 
   try {
+    const thinkingParam = buildThinkingParam(params.thinking);
+    const maxTokens = params.maxTokens
+      ?? (thinkingParam ? thinkingParam.budget_tokens + 4096 : DEFAULT_MAX_TOKENS);
+
     const body = JSON.stringify({
       model: params.model,
-      max_tokens: params.maxTokens ?? 8192,
+      max_tokens: maxTokens,
       ...(params.system ? { system: params.system } : {}),
       messages: params.messages,
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+      ...(thinkingParam ? { thinking: thinkingParam } : {}),
     });
 
     const url = `${params.baseURL.replace(/\/$/, '')}/messages`;

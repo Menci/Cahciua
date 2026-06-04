@@ -1,5 +1,6 @@
 import type { Logger } from '@guiiai/logg';
 
+import type { ThinkingConfig } from './types';
 import type { ChatCompletionsAssistantMessage } from '../unified-api/chat-types';
 
 interface ToolSchema {
@@ -20,6 +21,7 @@ export interface ChatCompletionsParams {
   system?: string;
   tools?: ToolSchema[];
   timeoutSec?: number;
+  thinking?: ThinkingConfig;
   log: Logger;
   label: string;
 }
@@ -63,6 +65,8 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
         ...params.messages,
       ],
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+      ...(params.thinking ? { thinking: { type: params.thinking.type ?? 'enabled' } } : {}),
+      ...(params.thinking?.effort ? { reasoning_effort: params.thinking.effort } : {}),
     });
 
     const url = `${params.baseURL.replace(/\/$/, '')}/chat/completions`;

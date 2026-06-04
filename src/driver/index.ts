@@ -8,7 +8,7 @@ import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { createBashTool, createAttachmentDownloader, createDismissMessageTool, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
-import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, ProviderFormat, TurnResponseV2 } from './types';
+import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
@@ -71,7 +71,7 @@ export const createDriver = (config: DriverConfig, deps: {
   // Runner cache: keyed by "apiBaseUrl::model" to reuse runners across chats
   // sharing the same endpoint.
   const runners = new Map<string, ReturnType<typeof createRunner>>();
-  const getOrCreateRunner = (endpoint: { apiBaseUrl: string; apiKey: string; model: string; apiFormat?: ProviderFormat; timeoutSec?: number }) => {
+  const getOrCreateRunner = (endpoint: LlmEndpoint) => {
     const key = `${endpoint.apiBaseUrl}::${endpoint.model}`;
     let runner = runners.get(key);
     if (!runner) {
@@ -81,6 +81,7 @@ export const createDriver = (config: DriverConfig, deps: {
         model: endpoint.model,
         apiFormat: endpoint.apiFormat ?? 'openai-chat',
         timeoutSec: endpoint.timeoutSec,
+        thinking: endpoint.thinking,
       });
       runners.set(key, runner);
     }
@@ -415,6 +416,7 @@ export const createDriver = (config: DriverConfig, deps: {
               model: compactEndpoint.model,
               apiFormat: compactEndpoint.apiFormat,
               timeoutSec: compactEndpoint.timeoutSec,
+              thinking: compactEndpoint.thinking,
               chatId,
               rcWindow: rc().filter(s => s.receivedAtMs >= (cursor ?? 0) && s.receivedAtMs < newCursorMs),
               trsWindow: trs.filter(t => t.requestedAtMs >= (cursor ?? 0) && t.requestedAtMs < newCursorMs),

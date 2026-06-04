@@ -6,6 +6,7 @@ import type {
   ResponseTool,
   ResponsesResult,
 } from './responses-types';
+import type { ThinkingConfig } from './types';
 
 export interface ResponsesApiParams {
   baseURL: string;
@@ -15,6 +16,7 @@ export interface ResponsesApiParams {
   instructions?: string;
   tools?: ResponseTool[];
   timeoutSec?: number;
+  thinking?: ThinkingConfig;
   log: Logger;
   label: string;
 }
@@ -43,6 +45,7 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
       input: params.input,
       ...(params.instructions ? { instructions: params.instructions } : {}),
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+      ...(params.thinking?.effort ? { output_config: { effort: params.thinking.effort } } : {}),
     });
 
     const url = `${params.baseURL.replace(/\/$/, '')}/responses`;
