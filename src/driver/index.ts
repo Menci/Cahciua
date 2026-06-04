@@ -259,6 +259,7 @@ export const createDriver = (config: DriverConfig, deps: {
               modelName: chatConfig.primaryModel.model,
               chatId,
               chatTitle: deps.getChatTitle(chatId),
+              systemFiles: chatConfig.systemFiles,
             });
 
             // --- Compute mention/reply/interrupt state from RC + TRs ---

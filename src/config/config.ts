@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 
 import { merge } from 'es-toolkit';
 import * as v from 'valibot';
@@ -32,6 +33,7 @@ const RuntimeSchema = v.object({
 
 const ChatConfigSchema = v.object({
   model: v.optional(v.string(), 'primary'),
+  systemFiles: v.optional(v.array(v.string()), []),
   compaction: v.optional(v.object({
     maxContextEstTokens: v.optional(v.number(), 200000),
     workingWindowEstTokens: v.optional(v.number(), 8000),
@@ -74,6 +76,7 @@ const ChatConfigSchema = v.object({
 // Per-chat overrides: all fields optional, no defaults
 const ChatOverrideSchema = v.optional(v.partial(v.object({
   model: v.string(),
+  systemFiles: v.array(v.string()),
   compaction: v.partial(v.object({
     maxContextEstTokens: v.number(),
     workingWindowEstTokens: v.number(),
@@ -153,6 +156,7 @@ export interface BackgroundTasksConfig {
 export interface ResolvedChatConfig {
   primaryModel: LlmEndpoint;
   primaryApiFormat: ProviderFormat;
+  systemFiles: { filename: string; content: string }[];
   compaction: CompactionConfig;
   probe: { enabled: boolean; model: LlmEndpoint };
   imageToText: { enabled: boolean; model?: string };
@@ -207,6 +211,10 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
   return {
     primaryModel,
     primaryApiFormat,
+    systemFiles: merged.systemFiles.map(path => ({
+      filename: basename(path),
+      content: readFileSync(path, 'utf-8').trim(),
+    })),
     compaction: {
       ...merged.compaction,
       model: merged.compaction.model ? resolveModel(config, merged.compaction.model) : undefined,

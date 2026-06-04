@@ -36,6 +36,11 @@ runtime:
 chats:
   default:
     model: "primary"            # references a key in models
+    # systemFiles: persona / instruction files appended verbatim to the system
+    # prompt (each rendered as "## <basename>" + file content). Use for the bot's
+    # identity, voice, and standing rules.
+    # systemFiles:
+    #   - "prompts/IDENTITY.md"
     compaction:
       maxContextEstTokens: 512000    # high water mark: trigger compaction when estimated context exceeds this
       workingWindowEstTokens: 8000   # low water mark: how many estimated tokens of raw content to retain after compaction
