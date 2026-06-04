@@ -76,6 +76,7 @@ export interface TelegramMessage {
   entities?: MessageEntity[];
   replyToMessageId?: number;
   replyToTopId?: number;
+  replyQuoteText?: string;
   forwardInfo?: ForwardInfo;
   mediaGroupId?: string;
   viaBotId?: string;

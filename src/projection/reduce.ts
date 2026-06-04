@@ -29,8 +29,15 @@ const findMessageIndex = (nodes: readonly { type: string; messageId?: string }[]
 
 const REPLY_PREVIEW_MAX = 100;
 
-const truncate = (text: string, max: number): string =>
-  text.length <= max ? text : `${text.slice(0, max)}…`;
+const truncate = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  let sliced = text.slice(0, max);
+  // Don't split a surrogate pair — step back if the char before cutAt is a high surrogate. (#1)
+  if (sliced.length > 0 && (sliced.charCodeAt(sliced.length - 1) & 0xFC00) === 0xD800) {
+    sliced = sliced.slice(0, -1);
+  }
+  return `${sliced}…`;
+}
 
 const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent) => {
   // Dedup: skip if a message with the same ID already exists (bypass + userbot race).
@@ -78,6 +85,9 @@ const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent)
     if (targetIdx !== -1) {
       const target = draft.nodes[targetIdx] as ICMessage;
       message.replyToSender = target.sender;
+      if (event.replyQuoteText != null) {
+        message.replyQuoteText = truncate(event.replyQuoteText, REPLY_PREVIEW_MAX);
+      }
       const plain = contentToPlainText(target.content);
       if (plain) message.replyToPreview = truncate(plain, REPLY_PREVIEW_MAX);
       if (target.content.length > 0) message.replyToContent = target.content;
