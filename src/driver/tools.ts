@@ -476,6 +476,18 @@ export const createReadImageTool = (deps: {
   },
 });
 
+export const createDismissMessageTool = (): CahciuaTool => createTool({
+  name: 'dismiss_message',
+  description: 'Explicitly signal that you have decided to stay silent this turn — no message will be sent. Call this when you consciously choose not to respond.',
+  parameters: {
+    type: 'object',
+    properties: {
+      reason: { type: 'string', description: 'Brief internal note on why you are staying silent (not shown to anyone).' },
+    },
+  },
+  execute: () => ({ content: JSON.stringify({ ok: true }), requiresFollowUp: false }),
+});
+
 const SLEEP_MAX_SECONDS = 300;
 
 export const createSleepTool = (): CahciuaTool => createTool({

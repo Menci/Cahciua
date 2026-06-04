@@ -6,7 +6,7 @@ import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createBashTool, createAttachmentDownloader, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
+import { createBashTool, createAttachmentDownloader, createDismissMessageTool, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, ProviderFormat, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
@@ -195,7 +195,7 @@ export const createDriver = (config: DriverConfig, deps: {
               downloadMessageMedia: deps.downloadMessageMedia,
             });
 
-            const tools: CahciuaTool[] = [sendMessageTool];
+            const tools: CahciuaTool[] = [sendMessageTool, createDismissMessageTool()];
             tools.push(createBashTool(deps.runtimeConfig, {
               startTask: deps.backgroundTask.startTask,
               sessionId: chatId,
@@ -301,7 +301,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
                 const hasToolCalls = probeResult.entries.some(
                   e => e.kind === 'message' && e.role === 'assistant'
-                    && e.parts.some(p => p.kind === 'toolCall'),
+                    && e.parts.some(p => p.kind === 'toolCall' && p.name !== 'dismiss_message'),
                 );
 
                 log.withFields({ chatId, hasToolCalls }).log('Probe result');
