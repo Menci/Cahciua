@@ -7,7 +7,6 @@ const props = defineProps({
   isProbing: { type: Boolean, default: false },
   isMentioned: { type: Boolean, default: false },
   isReplied: { type: Boolean, default: false },
-  recentSendMessageHumanLikenessXml: { type: String, default: '' },
   isInterrupted: { type: Boolean, default: false },
   activeBackgroundTasks: { type: Array, default: () => [] },
 })
@@ -51,11 +50,6 @@ You were mentioned — you will likely want to respond.
 <template v-else-if="isReplied">
 
 Someone replied to your message — you will likely want to respond.
-
-</template>
-<template v-if="recentSendMessageHumanLikenessXml">
-
-{{ recentSendMessageHumanLikenessXml }}
 
 </template>
 <template v-if="backgroundTasksXml">

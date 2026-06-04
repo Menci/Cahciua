@@ -6,7 +6,6 @@ import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { collectRecentSendMessageAssessments, renderRecentSendMessageHumanLikenessXml } from './send-message-human-likeness';
 import { createBashTool, createAttachmentDownloader, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createWebFetchTool, createWebSearchTool } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, ProviderFormat, TurnResponseV2 } from './types';
@@ -269,14 +268,10 @@ export const createDriver = (config: DriverConfig, deps: {
               (seg.mentionsMe || seg.repliesToMe || seg.isRuntimeEvent) ? Math.max(max, seg.receivedAtMs) : max, 0);
             const isMentioned = rcVal.some(seg => seg.mentionsMe && seg.receivedAtMs > lastProcessedMs());
             const isReplied = rcVal.some(seg => seg.repliesToMe && seg.receivedAtMs > lastProcessedMs());
-            const recentSendMessageHumanLikenessXml = renderRecentSendMessageHumanLikenessXml(
-              collectRecentSendMessageAssessments(await deps.loadTurnResponses(chatId)),
-            );
 
             const lateBindingParams = {
               timeNow: localTimeNow(),
               isMentioned, isReplied,
-              recentSendMessageHumanLikenessXml,
               isInterrupted,
               activeBackgroundTasks: deps.backgroundTask.getActiveTasks(chatId),
             };

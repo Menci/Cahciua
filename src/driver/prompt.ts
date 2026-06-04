@@ -45,7 +45,6 @@ export const renderLateBindingPrompt = async (params: {
   isProbing?: boolean;
   isMentioned?: boolean;
   isReplied?: boolean;
-  recentSendMessageHumanLikenessXml?: string;
   activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
   isInterrupted?: boolean;
 }) => {

@@ -112,7 +112,6 @@ describe('primary-late-binding.velin.md', () => {
     expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
     expect(rendered).toContain('send_message');
     expect(rendered).not.toContain('decided to act');
-    expect(rendered).not.toContain('<human-likeness');
     expect(rendered).not.toContain('interrupted');
     assertNoVueSyntaxLeak(rendered);
   });
@@ -140,15 +139,6 @@ describe('primary-late-binding.velin.md', () => {
     const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isInterrupted: true });
     expect(rendered).toContain('interrupted by new messages');
     expect(rendered).toContain('continue');
-  });
-
-  it('renders send_message human-likeness feedback', async () => {
-    const rendered = await renderLateBinding({
-      timeNow: '2025-01-01T00:00:00Z',
-      recentSendMessageHumanLikenessXml: '<human-likeness checked-count="2" window-size="5">\n<feature name="newline" count="1">Used a newline. Appeared in 1 of your recent 2 send_message messages.</feature>\n<guidance>If those patterns were intentional, do not follow this rigidly. If you agree with the critique, try to sound a bit more human in your next messages.</guidance>\n</human-likeness>',
-    });
-    expect(rendered).toContain('<human-likeness');
-    expect(rendered).toContain('<guidance>If those patterns were intentional');
   });
 
   it('interrupted does not suppress other states', async () => {
