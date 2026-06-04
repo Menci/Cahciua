@@ -112,7 +112,7 @@ const hasMention = (nodes: ContentNode[], userId: string): boolean =>
 
 // --- ICNode → content pieces ---
 
-const renderMessage = (msg: ICMessage, params: RenderParams): { content: RenderedContentPiece[]; isMyself: boolean; isSelfSent: boolean; mentionsMe: boolean; repliesToMe: boolean } => {
+const renderMessage = (msg: ICMessage, params: RenderParams): { content: RenderedContentPiece[]; senderId?: string; isMyself: boolean; isSelfSent: boolean; mentionsMe: boolean; repliesToMe: boolean } => {
   const isMyself = !!(params.botUserId && msg.sender?.id === params.botUserId);
   const isSelfSent = !!msg.isSelfSent;
   const mentionsMe = !!(params.botUserId && hasMention(msg.content, params.botUserId));
@@ -138,7 +138,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
 
   if (msg.deleted) {
     attrs.push('deleted="true"');
-    return { content: [{ type: 'text', text: `<message ${attrs.join(' ')}/>` }], isMyself, isSelfSent, mentionsMe, repliesToMe };
+    return { content: [{ type: 'text', text: `<message ${attrs.join(' ')}/>` }], senderId: msg.sender?.id, isMyself, isSelfSent, mentionsMe, repliesToMe };
   }
 
   const parts: string[] = [];
@@ -169,7 +169,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
       pieces.push({ type: 'image', image: sharp(Buffer.from(att.thumbnailWebp, 'base64')) });
   }
 
-  return { content: pieces, isMyself, isSelfSent, mentionsMe, repliesToMe };
+  return { content: pieces, senderId: msg.sender?.id, isMyself, isSelfSent, mentionsMe, repliesToMe };
 };
 
 const renderSystemEvent = (event: ICSystemEvent, contactNames?: Map<string, string>): string => {
@@ -243,8 +243,8 @@ export const render = (ic: IntermediateContext, params: RenderParams = {}): Rend
     if (params.compactCursorMs != null && node.receivedAtMs < params.compactCursorMs) continue;
 
     if (node.type === 'message') {
-      const { content, isMyself, isSelfSent, mentionsMe, repliesToMe } = renderMessage(node, params);
-      segments.push({ receivedAtMs: node.receivedAtMs, content, ...(isMyself && { isMyself }), ...(isSelfSent && { isSelfSent }), ...(mentionsMe && { mentionsMe }), ...(repliesToMe && { repliesToMe }) });
+      const { content, senderId, isMyself, isSelfSent, mentionsMe, repliesToMe } = renderMessage(node, params);
+      segments.push({ receivedAtMs: node.receivedAtMs, content, ...(senderId && { senderId }), ...(isMyself && { isMyself }), ...(isSelfSent && { isSelfSent }), ...(mentionsMe && { mentionsMe }), ...(repliesToMe && { repliesToMe }) });
     } else if (node.type === 'runtime_event') {
       const content = [{ type: 'text' as const, text: renderRuntimeEvent(node) }];
       segments.push({ receivedAtMs: node.receivedAtMs, content, isRuntimeEvent: true });

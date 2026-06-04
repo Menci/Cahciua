@@ -1,6 +1,6 @@
 import type { Logger } from '@guiiai/logg';
 import { Api, TelegramClient } from 'telegram';
-import { NewMessage, type NewMessageEvent } from 'telegram/events';
+import { NewMessage, Raw, type NewMessageEvent } from 'telegram/events';
 import { DeletedMessage, type DeletedMessageEvent } from 'telegram/events/DeletedMessage';
 import { EditedMessage, type EditedMessageEvent } from 'telegram/events/EditedMessage';
 import { StringSession } from 'telegram/sessions';
@@ -9,6 +9,11 @@ import { createEventBus } from './event-bus';
 import { createGramjsLogger } from './gramjs-logger';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
 import { fromGramjsAnyMessage, fromGramjsDeletedMessage, fromGramjsEditedMessage, resolveGramjsSender } from './message';
+
+export interface TypingEvent {
+  chatId: string;
+  userId?: string;
+}
 
 export interface UserbotOptions {
   apiId: number;
@@ -22,6 +27,7 @@ export interface UserbotClient {
   onMessage: (handler: (msg: TelegramMessage) => void) => void;
   onMessageEdit: (handler: (edit: TelegramMessageEdit) => void) => void;
   onMessageDelete: (handler: (del: TelegramMessageDelete) => void) => void;
+  onTyping: (handler: (typing: TypingEvent) => void) => void;
   fetchMessages(chatId: string, options: FetchOptions): Promise<TelegramMessage[]>;
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
@@ -47,6 +53,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
   const messageBus = createEventBus<TelegramMessage>('userbot:message', log);
   const editBus = createEventBus<TelegramMessageEdit>('userbot:edit', log);
   const deleteBus = createEventBus<TelegramMessageDelete>('userbot:delete', log);
+  const typingBus = createEventBus<TypingEvent>('userbot:typing', log);
   let eventHandlerRegistered = false;
 
   const registerEventHandler = () => {
@@ -85,6 +92,34 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
       },
       new DeletedMessage({}),
     );
+
+    // Raw typing updates — MTProto sends these ~every 5s while a user types.
+    // Only forward SendMessageTypingAction (text input), not upload/record actions.
+    // Requires new Raw() so gramjs dispatches raw MTProto updates to this handler;
+    // otherwise gramjs only delivers pre-processed NewMessage/EditedMessage events.
+    client.addEventHandler((update: Api.TypeUpdate) => {
+      if (update instanceof Api.UpdateUserTyping) {
+        if (!(update.action instanceof Api.SendMessageTypingAction)) return;
+        typingBus.emit({
+          chatId: String(update.userId.toJSNumber()),
+          userId: String(update.userId.toJSNumber()),
+        });
+      } else if (update instanceof Api.UpdateChatUserTyping) {
+        if (!(update.action instanceof Api.SendMessageTypingAction)) return;
+        typingBus.emit({
+          chatId: `-${update.chatId.toJSNumber()}`,
+          userId: update.fromId instanceof Api.PeerUser ? String(update.fromId.userId.toJSNumber()) : undefined,
+        });
+      } else if (update instanceof Api.UpdateChannelUserTyping) {
+        if (!(update.action instanceof Api.SendMessageTypingAction)) return;
+        typingBus.emit({
+          chatId: `-100${update.channelId.toJSNumber()}`,
+          userId: update.fromId instanceof Api.PeerUser ? String(update.fromId.userId.toJSNumber()) : undefined,
+        });
+      }
+    }, new Raw({
+      types: [Api.UpdateUserTyping, Api.UpdateChatUserTyping, Api.UpdateChannelUserTyping],
+    }));
 
     log.log('Event handlers registered');
   };
@@ -161,6 +196,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     onMessage: messageBus.on,
     onMessageEdit: editBus.on,
     onMessageDelete: deleteBus.on,
+    onTyping: typingBus.on,
     fetchMessages,
     fetchSpecificMessages,
     downloadMessageMedia,

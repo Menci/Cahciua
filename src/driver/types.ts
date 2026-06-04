@@ -52,6 +52,12 @@ export interface CompactionConfig {
   model?: LlmEndpoint;
 }
 
+export interface DebounceConfig {
+  initialDelayMs: number;
+  typingExtendMs: number;
+  maxDelayMs: number;
+}
+
 export interface CompactionSessionMeta {
   oldCursorMs: number;
   newCursorMs: number;

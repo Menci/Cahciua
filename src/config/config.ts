@@ -5,7 +5,7 @@ import { merge } from 'es-toolkit';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
-import type { CompactionConfig, LlmEndpoint, ProviderFormat } from '../driver/types';
+import type { CompactionConfig, DebounceConfig, LlmEndpoint, ProviderFormat } from '../driver/types';
 import type { WebFetchConfig } from '../driver/web-fetch/types';
 
 const llmEndpointEntries = {
@@ -39,6 +39,11 @@ const RuntimeSchema = v.object({
 const ChatConfigSchema = v.object({
   model: v.optional(v.string(), 'primary'),
   systemFiles: v.optional(v.array(v.string()), []),
+  debounce: v.optional(v.object({
+    initialDelayMs: v.optional(v.number(), 1000),
+    typingExtendMs: v.optional(v.number(), 5000),
+    maxDelayMs: v.optional(v.number(), 30000),
+  }), {}),
   compaction: v.optional(v.object({
     maxContextEstTokens: v.optional(v.number(), 200000),
     workingWindowEstTokens: v.optional(v.number(), 8000),
@@ -82,6 +87,11 @@ const ChatConfigSchema = v.object({
 const ChatOverrideSchema = v.optional(v.partial(v.object({
   model: v.string(),
   systemFiles: v.array(v.string()),
+  debounce: v.partial(v.object({
+    initialDelayMs: v.number(),
+    typingExtendMs: v.number(),
+    maxDelayMs: v.number(),
+  })),
   compaction: v.partial(v.object({
     maxContextEstTokens: v.number(),
     workingWindowEstTokens: v.number(),
@@ -162,6 +172,7 @@ export interface ResolvedChatConfig {
   primaryModel: LlmEndpoint;
   primaryApiFormat: ProviderFormat;
   systemFiles: { filename: string; content: string }[];
+  debounce: DebounceConfig;
   compaction: CompactionConfig;
   probe: { enabled: boolean; model: LlmEndpoint };
   imageToText: { enabled: boolean; model?: string };
@@ -220,6 +231,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
       filename: basename(path),
       content: readFileSync(path, 'utf-8').trim(),
     })),
+    debounce: merged.debounce,
     compaction: {
       ...merged.compaction,
       model: merged.compaction.model ? resolveModel(config, merged.compaction.model) : undefined,

@@ -19,6 +19,10 @@ export type RenderedContentPiece =
 export interface RenderedContextSegment {
   receivedAtMs: number;
   content: RenderedContentPiece[];
+  // Sender's user id. Used by the Driver debounce to anchor the wait to the
+  // "trigger sender" (only their further messages extend the window). Absent for
+  // system/runtime-event segments that have no sender.
+  senderId?: string;
   // Sender is this bot account (used by Driver debounce to ignore bot's own messages
   // when deciding whether new external input arrived). True for all messages from this
   // bot regardless of origin — including messages sent by other programs controlling

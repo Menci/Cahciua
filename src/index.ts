@@ -328,6 +328,7 @@ const main = async () => {
     loadTurnResponses: (chatId, afterMs) => loadTurnResponses(db, chatId, afterMs),
     persistTurnResponse: (chatId, tr) => persistTurnResponse(db, chatId, tr),
     persistProbeResponse: (chatId, probe) => persistProbeResponse(db, chatId, probe),
+    sendTypingAction: chatId => telegram.sendChatAction(chatId),
     sendMessage: async (chatId, text, replyToMessageId, attachments) => {
       // --- Text-only message ---
       if (!attachments || attachments.length === 0) {
@@ -485,6 +486,10 @@ const main = async () => {
       const rc = pipeline.pushEvent(event.chatId, event);
       driver.handleEvent(event.chatId, rc);
     }
+  });
+
+  telegram.onTyping(typing => {
+    driver.handleTyping(typing.chatId);
   });
 
   telegram.onMessageDelete(del => {

@@ -3,7 +3,7 @@ import { computed, effect, signal } from 'alien-signals';
 
 import { callLlm, type ToolSchema } from './call-llm';
 import { runCompaction } from './compaction';
-import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, wasToolLoopInterrupted } from './context';
+import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { createBashTool, createAttachmentDownloader, createDismissMessageTool, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
@@ -46,6 +46,7 @@ export const createDriver = (config: DriverConfig, deps: {
   persistTurnResponse: (chatId: string, tr: TurnResponseV2) => Promise<void>;
   persistProbeResponse: (chatId: string, probe: ProbeResponseV2) => Promise<void>;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number, attachments?: SendMessageAttachment[]) => Promise<{ messageId: number; date: number }>;
+  sendTypingAction?: (chatId: string) => Promise<void>;
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
   loadLastProbeTime: (chatId: string) => number;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
@@ -101,6 +102,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
   const chatScopes = new Map<string, {
     rc: ReturnType<typeof signal<RenderedContext>>;
+    lastTypingMs: ReturnType<typeof signal<number>>;
     cleanup: () => void;
   }>();
 
@@ -116,7 +118,12 @@ export const createDriver = (config: DriverConfig, deps: {
     void getLastProcessedTime(chatId).then(v => lastProcessedMs(Math.max(lastProcessedMs(), v)));
     const running = signal(false);
     const failedRc = signal<RenderedContext | null>(null);
+    // Typing signal: written by handleTyping when another user is typing. The reply
+    // effect reads it declaratively to extend the debounce window.
+    const lastTypingMs = signal(0);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Start of the current debounce window — caps total wait at maxDelayMs.
+    let debounceWindowStartMs: number | undefined;
 
     // --- Compaction state as signal ---
     // Initialized from DB on scope creation (cold start). Updated by the
@@ -141,9 +148,18 @@ export const createDriver = (config: DriverConfig, deps: {
     });
 
     // --- Main LLM reply effect ---
-    // Triggers immediately when new external messages arrive (no debounce).
-    // Natural batching: `running` prevents concurrent calls, so messages
-    // arriving during an LLM call accumulate and get picked up on the next run.
+    // Typing-aware debounce: after new external messages arrive, wait
+    // `initialDelayMs` past the latest message from the *trigger sender* (the one
+    // whose message opened the window) before replying, so a burst from that
+    // person is answered once. Only the trigger sender's further messages extend
+    // the wait; other people talking does not. Anyone typing extends the wait by
+    // `typingExtendMs`; total wait is capped at `maxDelayMs` from when the window
+    // opened. Everything is signal-driven — new messages (rc) and typing
+    // (lastTypingMs) re-run the effect, which recomputes the deadline. The
+    // `running` signal still serializes calls, so messages arriving mid-call
+    // accumulate and are picked up on the next window.
+    const { initialDelayMs, typingExtendMs, maxDelayMs } = chatConfig.debounce;
+
     const needsReply = computed(() => {
       const rcVal = rc();
       if (rcVal.length === 0) return false;
@@ -153,13 +169,21 @@ export const createDriver = (config: DriverConfig, deps: {
 
     const disposeReplyEffect = effect(() => {
       const isRunning = running();
+      const typingAt = lastTypingMs();
       if (timer) { clearTimeout(timer); timer = undefined; }
-      if (isRunning) return;
+      if (isRunning || !needsReply()) { debounceWindowStartMs = undefined; return; }
 
-      if (!needsReply()) return;
+      const now = Date.now();
+      debounceWindowStartMs ??= now;
 
-      // setTimeout(0) to exit the synchronous signal graph before starting async work
+      const lastMsgMs = triggerSenderLatestMs(rc(), lastProcessedMs()) ?? now;
+      let fireAtMs = lastMsgMs + initialDelayMs;
+      if (typingAt > 0) fireAtMs = Math.max(fireAtMs, typingAt + typingExtendMs);
+      fireAtMs = Math.min(fireAtMs, debounceWindowStartMs + maxDelayMs);
+
       timer = setTimeout(() => {
+        timer = undefined;
+        debounceWindowStartMs = undefined;
         const rcAtStart = rc();
         running(true);
 
@@ -337,31 +361,46 @@ export const createDriver = (config: DriverConfig, deps: {
             }));
 
             const runner = getOrCreateRunner(chatConfig.primaryModel);
-            await runner.runStepLoop({
-              chatId,
-              entries: ctx.entries,
-              system,
-              tools,
-              maxSteps: MAX_STEPS,
-              maxImagesAllowed: chatConfig.primaryModel.maxImagesAllowed,
-              onStepComplete: async (stepEntries, usage, requestedAtMs) => {
-                await deps.persistTurnResponse(chatId, {
-                  requestedAtMs,
-                  entries: stepEntries,
-                  inputTokens: usage.inputTokens,
-                  outputTokens: usage.outputTokens,
-                  cacheReadTokens: usage.cacheReadTokens,
-                  cacheWriteTokens: usage.cacheWriteTokens,
-                  modelName: chatConfig.primaryModel.model,
-                });
-                lastProcessedMs(requestedAtMs);
-              },
-              checkInterrupt: () => {
-                if (rc() === rcAtStart) return false;
-                return latestExternalEventMs(rc(), lastProcessedMs()) != null;
-              },
-              log,
-            });
+
+            // Show a "typing…" action while the model works, refreshed every 5s
+            // (Telegram clears it after ~5s). Best-effort — failures are ignored.
+            let typingInterval: ReturnType<typeof setInterval> | undefined;
+            if (deps.sendTypingAction) {
+              void deps.sendTypingAction(chatId).catch(() => {});
+              typingInterval = setInterval(() => {
+                void deps.sendTypingAction!(chatId).catch(() => {});
+              }, 5000);
+            }
+
+            try {
+              await runner.runStepLoop({
+                chatId,
+                entries: ctx.entries,
+                system,
+                tools,
+                maxSteps: MAX_STEPS,
+                maxImagesAllowed: chatConfig.primaryModel.maxImagesAllowed,
+                onStepComplete: async (stepEntries, usage, requestedAtMs) => {
+                  await deps.persistTurnResponse(chatId, {
+                    requestedAtMs,
+                    entries: stepEntries,
+                    inputTokens: usage.inputTokens,
+                    outputTokens: usage.outputTokens,
+                    cacheReadTokens: usage.cacheReadTokens,
+                    cacheWriteTokens: usage.cacheWriteTokens,
+                    modelName: chatConfig.primaryModel.model,
+                  });
+                  lastProcessedMs(requestedAtMs);
+                },
+                checkInterrupt: () => {
+                  if (rc() === rcAtStart) return false;
+                  return latestExternalEventMs(rc(), lastProcessedMs()) != null;
+                },
+                log,
+              });
+            } finally {
+              if (typingInterval) clearInterval(typingInterval);
+            }
           } catch (err) {
             // No retry or backoff — a failed call is recorded via failedRc and
             // only re-attempted when new external messages produce a fresh RC.
@@ -371,7 +410,7 @@ export const createDriver = (config: DriverConfig, deps: {
             running(false);
           }
         })();
-      }, 0);
+      }, Math.max(0, fireAtMs - now));
     });
 
     // --- Independent compaction effect ---
@@ -456,7 +495,7 @@ export const createDriver = (config: DriverConfig, deps: {
       disposeCompactionEffect();
     };
 
-    const entry = { rc, cleanup };
+    const entry = { rc, lastTypingMs, cleanup };
     chatScopes.set(chatId, entry);
     return entry;
   };
@@ -466,11 +505,16 @@ export const createDriver = (config: DriverConfig, deps: {
     getOrCreateScope(chatId).rc(newRC);
   };
 
+  const handleTyping = (chatId: string) => {
+    if (!chatIds.has(chatId)) return;
+    getOrCreateScope(chatId).lastTypingMs(Date.now());
+  };
+
   const stop = () => {
     for (const scope of chatScopes.values())
       scope.cleanup();
     chatScopes.clear();
   };
 
-  return { handleEvent, stop };
+  return { handleEvent, handleTyping, stop };
 };

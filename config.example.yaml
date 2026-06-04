@@ -45,6 +45,12 @@ chats:
     # identity, voice, and standing rules.
     # systemFiles:
     #   - "prompts/IDENTITY.md"
+    # debounce: wait before replying so a burst of messages is answered once.
+    # Anyone typing (seen via userbot) extends the wait; capped at maxDelayMs.
+    # debounce:
+    #   initialDelayMs: 1000         # wait this long past the latest message
+    #   typingExtendMs: 5000         # a typing event extends the wait to now + this
+    #   maxDelayMs: 30000            # hard cap on total wait from the first message
     compaction:
       maxContextEstTokens: 512000    # high water mark: trigger compaction when estimated context exceeds this
       workingWindowEstTokens: 8000   # low water mark: how many estimated tokens of raw content to retain after compaction

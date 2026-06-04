@@ -46,6 +46,32 @@ export const latestExternalEventMs = (rc: RenderedContext, afterMs: number): num
   return latest;
 };
 
+// For the debounce: anchor the wait to the "trigger sender" — the sender of the
+// oldest unprocessed external message that opened the window. Returns the latest
+// message time among that sender's unprocessed messages, so only their further
+// messages extend the window (others' messages don't). Returns null when there
+// is no unprocessed external input.
+export const triggerSenderLatestMs = (rc: RenderedContext, afterMs: number): number | null => {
+  let triggerSenderId: string | undefined;
+  let oldestMs: number | null = null;
+  for (const seg of rc) {
+    if (seg.receivedAtMs <= afterMs || seg.isMyself) continue;
+    if (oldestMs == null || seg.receivedAtMs < oldestMs) {
+      oldestMs = seg.receivedAtMs;
+      triggerSenderId = seg.senderId;
+    }
+  }
+  if (oldestMs == null) return null;
+
+  let latest = oldestMs;
+  for (const seg of rc) {
+    if (seg.receivedAtMs <= afterMs || seg.isMyself) continue;
+    if (seg.senderId === triggerSenderId && seg.receivedAtMs > latest)
+      latest = seg.receivedAtMs;
+  }
+  return latest;
+};
+
 const trHasToolCalls = (tr: TurnResponseV2): boolean =>
   tr.entries.some(e => e.kind === 'message' && e.role === 'assistant'
     && e.parts.some(p => p.kind === 'toolCall'));

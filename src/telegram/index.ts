@@ -12,7 +12,7 @@ import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, Attac
 import { normalizeStickerSetMetadata } from './pack-title';
 import { createSessionIngressQueue } from './session-ingress-queue';
 import { canGenerateThumbnail, generateThumbnail } from './thumbnail';
-import type { FetchOptions, UserbotClient } from './userbot';
+import type { FetchOptions, TypingEvent, UserbotClient } from './userbot';
 import { createUserbotClient } from './userbot';
 
 export interface TelegramManagerOptions {
@@ -47,6 +47,8 @@ export interface TelegramManager {
   onMessage: (handler: (msg: TelegramMessage) => void) => void;
   onMessageEdit: (handler: (edit: TelegramMessageEdit) => void) => void;
   onMessageDelete: (handler: (del: TelegramMessageDelete) => void) => void;
+  onTyping: (handler: (typing: TypingEvent) => void) => void;
+  sendChatAction(chatId: string | number): Promise<void>;
   sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage>;
   sendPhoto(chatId: string | number, photo: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
   sendDocument(chatId: string | number, document: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
@@ -84,6 +86,7 @@ export const createTelegramManager = (
   const messageBus = createEventBus<TelegramMessage>('telegram:message', logger);
   const editBus = createEventBus<TelegramMessageEdit>('telegram:edit', logger);
   const deleteBus = createEventBus<TelegramMessageDelete>('telegram:delete', logger);
+  const typingBus = createEventBus<TypingEvent>('telegram:typing', logger);
 
   // Unified download: fileId → Bot API, else → userbot by chatId+messageId
   const downloadAttachmentMedia = async (
@@ -288,6 +291,11 @@ export const createTelegramManager = (
         del: { ...del, chatId, ...captureIngressMeta() },
       });
     });
+
+    userbot.onTyping(typing => {
+      if (!botChats.has(typing.chatId)) return;
+      typingBus.emit(typing);
+    });
   }
 
   const start = async () => {
@@ -310,7 +318,9 @@ export const createTelegramManager = (
     onMessage: messageBus.on,
     onMessageEdit: editBus.on,
     onMessageDelete: deleteBus.on,
+    onTyping: typingBus.on,
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
+    sendChatAction: async chatId => { await bot.raw().api.sendChatAction(chatId, 'typing'); },
     sendPhoto: (chatId, photo, opts) => bot.sendPhoto(chatId, photo, opts),
     sendDocument: (chatId, doc, opts) => bot.sendDocument(chatId, doc, opts),
     sendVideo: (chatId, video, opts) => bot.sendVideo(chatId, video, opts),
