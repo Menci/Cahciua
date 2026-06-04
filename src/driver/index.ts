@@ -47,6 +47,9 @@ export const createDriver = (config: DriverConfig, deps: {
   persistProbeResponse: (chatId: string, probe: ProbeResponseV2) => Promise<void>;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number, attachments?: SendMessageAttachment[]) => Promise<{ messageId: number; date: number }>;
   sendTypingAction?: (chatId: string) => Promise<void>;
+  // Called when a chat enters (true) / leaves (false) its debounce window, so the
+  // host can run an active typing poll for large supergroups only while waiting.
+  onDebounceStateChange?: (chatId: string, isDebouncing: boolean) => void;
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
   loadLastProbeTime: (chatId: string) => number;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
@@ -124,6 +127,14 @@ export const createDriver = (config: DriverConfig, deps: {
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Start of the current debounce window — caps total wait at maxDelayMs.
     let debounceWindowStartMs: number | undefined;
+    // Whether we're currently in a debounce window — drives the typing-poll
+    // lifecycle. Notify the host only on transitions.
+    let isDebouncing = false;
+    const setDebouncing = (v: boolean) => {
+      if (isDebouncing === v) return;
+      isDebouncing = v;
+      deps.onDebounceStateChange?.(chatId, v);
+    };
 
     // --- Compaction state as signal ---
     // Initialized from DB on scope creation (cold start). Updated by the
@@ -171,10 +182,11 @@ export const createDriver = (config: DriverConfig, deps: {
       const isRunning = running();
       const typingAt = lastTypingMs();
       if (timer) { clearTimeout(timer); timer = undefined; }
-      if (isRunning || !needsReply()) { debounceWindowStartMs = undefined; return; }
+      if (isRunning || !needsReply()) { debounceWindowStartMs = undefined; setDebouncing(false); return; }
 
       const now = Date.now();
       debounceWindowStartMs ??= now;
+      setDebouncing(true);
 
       const lastMsgMs = triggerSenderLatestMs(rc(), lastProcessedMs()) ?? now;
       let fireAtMs = lastMsgMs + initialDelayMs;
@@ -184,6 +196,7 @@ export const createDriver = (config: DriverConfig, deps: {
       timer = setTimeout(() => {
         timer = undefined;
         debounceWindowStartMs = undefined;
+        setDebouncing(false);
         const rcAtStart = rc();
         running(true);
 
@@ -490,6 +503,7 @@ export const createDriver = (config: DriverConfig, deps: {
     const cleanup = () => {
       if (timer) clearTimeout(timer);
       if (compactionTimer) clearTimeout(compactionTimer);
+      setDebouncing(false);
       disposeCursorEffect();
       disposeReplyEffect();
       disposeCompactionEffect();

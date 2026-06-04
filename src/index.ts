@@ -329,6 +329,10 @@ const main = async () => {
     persistTurnResponse: (chatId, tr) => persistTurnResponse(db, chatId, tr),
     persistProbeResponse: (chatId, probe) => persistProbeResponse(db, chatId, probe),
     sendTypingAction: chatId => telegram.sendChatAction(chatId),
+    onDebounceStateChange: (chatId, isDebouncing) => {
+      if (isDebouncing) telegram.startTypingPolling(chatId);
+      else telegram.stopTypingPolling(chatId);
+    },
     sendMessage: async (chatId, text, replyToMessageId, attachments) => {
       // --- Text-only message ---
       if (!attachments || attachments.length === 0) {

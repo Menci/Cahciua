@@ -12,6 +12,7 @@ import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, Attac
 import { normalizeStickerSetMetadata } from './pack-title';
 import { createSessionIngressQueue } from './session-ingress-queue';
 import { canGenerateThumbnail, generateThumbnail } from './thumbnail';
+import { createTypingPollManager } from './typing-poll';
 import type { FetchOptions, TypingEvent, UserbotClient } from './userbot';
 import { createUserbotClient } from './userbot';
 
@@ -48,6 +49,8 @@ export interface TelegramManager {
   onMessageEdit: (handler: (edit: TelegramMessageEdit) => void) => void;
   onMessageDelete: (handler: (del: TelegramMessageDelete) => void) => void;
   onTyping: (handler: (typing: TypingEvent) => void) => void;
+  startTypingPolling(chatId: string): void;
+  stopTypingPolling(chatId: string): void;
   sendChatAction(chatId: string | number): Promise<void>;
   sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage>;
   sendPhoto(chatId: string | number, photo: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
@@ -267,6 +270,12 @@ export const createTelegramManager = (
     dispatchMessage(msg);
   });
 
+  // Shared by the userbot's pushed typing events and the active poll.
+  const handleTypingEvent = (typing: TypingEvent) => {
+    if (!botChats.has(typing.chatId)) return;
+    typingBus.emit(typing);
+  };
+
   if (userbot) {
     userbot.onMessage(msg => {
       if (!botChats.has(msg.chatId)) return;
@@ -292,11 +301,16 @@ export const createTelegramManager = (
       });
     });
 
-    userbot.onTyping(typing => {
-      if (!botChats.has(typing.chatId)) return;
-      typingBus.emit(typing);
-    });
+    userbot.onTyping(handleTypingEvent);
   }
+
+  // Active typing poll for large supergroups (where MTProto doesn't push typing
+  // to a passive client). Started/stopped by the driver via the debounce lifecycle.
+  const typingPollManager = userbot
+    ? createTypingPollManager(userbot.raw(), handleTypingEvent, logger)
+    : undefined;
+  const startTypingPolling = (chatId: string) => { void typingPollManager?.startPolling(chatId); };
+  const stopTypingPolling = (chatId: string) => { typingPollManager?.stopPolling(chatId); };
 
   const start = async () => {
     await Promise.all([
@@ -306,6 +320,7 @@ export const createTelegramManager = (
   };
 
   const stop = async () => {
+    typingPollManager?.stopAll();
     await Promise.all([
       bot.stop(),
       userbot?.stop(),
@@ -319,6 +334,8 @@ export const createTelegramManager = (
     onMessageEdit: editBus.on,
     onMessageDelete: deleteBus.on,
     onTyping: typingBus.on,
+    startTypingPolling,
+    stopTypingPolling,
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
     sendChatAction: async chatId => { await bot.raw().api.sendChatAction(chatId, 'typing'); },
     sendPhoto: (chatId, photo, opts) => bot.sendPhoto(chatId, photo, opts),
