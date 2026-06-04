@@ -1,0 +1,13 @@
+diff --git a/src/animation.cc b/src/animation.cc
+index fab05a322b3730dace979495b8079e2254b51d5c..a5fb900b7b64216fe21717f8644170656a677269 100644
+--- a/src/animation.cc
++++ b/src/animation.cc
+@@ -1,7 +1,7 @@
+ #include "animation.h"
+ 
+ std::unique_ptr<rlottie::Animation> load_animation_from_data(const std::string& data) {
+-    return rlottie::Animation::loadFromData(data, "");
++    return rlottie::Animation::loadFromData(data, "", "", false);
+ }
+ 
+ size_t get_total_frames(std::unique_ptr<rlottie::Animation>& animation) {

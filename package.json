@@ -45,6 +45,9 @@
   "pnpm": {
     "overrides": {
       "esbuild": "^0.24.0"
+    },
+    "patchedDependencies": {
+      "lottie-frame": "patches/lottie-frame.patch"
     }
   },
   "devDependencies": {
