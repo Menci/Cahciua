@@ -39,6 +39,7 @@ const RuntimeSchema = v.object({
 const ChatConfigSchema = v.object({
   model: v.optional(v.string(), 'primary'),
   systemFiles: v.optional(v.array(v.string()), []),
+  sendTypingAction: v.optional(v.boolean(), true),
   debounce: v.optional(v.object({
     initialDelayMs: v.optional(v.number(), 1000),
     typingExtendMs: v.optional(v.number(), 5000),
@@ -87,6 +88,7 @@ const ChatConfigSchema = v.object({
 const ChatOverrideSchema = v.optional(v.partial(v.object({
   model: v.string(),
   systemFiles: v.array(v.string()),
+  sendTypingAction: v.boolean(),
   debounce: v.partial(v.object({
     initialDelayMs: v.number(),
     typingExtendMs: v.number(),
@@ -172,6 +174,7 @@ export interface ResolvedChatConfig {
   primaryModel: LlmEndpoint;
   primaryApiFormat: ProviderFormat;
   systemFiles: { filename: string; content: string }[];
+  sendTypingAction: boolean;
   debounce: DebounceConfig;
   compaction: CompactionConfig;
   probe: { enabled: boolean; model: LlmEndpoint };
@@ -232,6 +235,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
       content: readFileSync(path, 'utf-8').trim(),
     })),
     debounce: merged.debounce,
+    sendTypingAction: merged.sendTypingAction,
     compaction: {
       ...merged.compaction,
       model: merged.compaction.model ? resolveModel(config, merged.compaction.model) : undefined,

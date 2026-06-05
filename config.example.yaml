@@ -45,6 +45,7 @@ chats:
     # identity, voice, and standing rules.
     # systemFiles:
     #   - "prompts/IDENTITY.md"
+    # sendTypingAction: true         # show a "typing…" chat action while generating a reply (default true; set false to disable)
     # debounce: wait before replying so a burst of messages is answered once.
     # Anyone typing (seen via userbot) extends the wait; capped at maxDelayMs.
     # debounce:

@@ -378,7 +378,7 @@ export const createDriver = (config: DriverConfig, deps: {
             // Show a "typing…" action while the model works, refreshed every 5s
             // (Telegram clears it after ~5s). Best-effort — failures are ignored.
             let typingInterval: ReturnType<typeof setInterval> | undefined;
-            if (deps.sendTypingAction) {
+            if (deps.sendTypingAction && chatConfig.sendTypingAction) {
               void deps.sendTypingAction(chatId).catch(() => {});
               typingInterval = setInterval(() => {
                 void deps.sendTypingAction!(chatId).catch(() => {});
