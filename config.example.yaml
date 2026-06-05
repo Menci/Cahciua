@@ -78,14 +78,18 @@ chats:
     tools:
       # bash:
       #   backgroundThresholdSec: 10               # timeout threshold above which bash runs as background task
-      webSearch:
-        tavilyKey: ""                              # Tavily API key for web search (required)
-      # webFetch: present = web_fetch tool enabled (omit to disable). Backend is
-      # transparent to the model; the tool only ever takes a `url`.
-      # webFetch:
-      #   provider: "jina"                         # currently only 'jina' (https://r.jina.ai)
-      #   jina:
-      #     apiKey: ""                             # optional; raises rate limit and unlocks proxy pool
+      # Web tools — shared provider credentials, with `search`/`fetch` picking
+      # which provider to use for each role. Omit `search` or `fetch` to disable
+      # the corresponding tool. Only providers used by the active roles need a
+      # filled `apiKey`.
+      web:
+        providers:
+          tavily: { apiKey: "" }                     # https://tavily.com
+          microsoftGrounding: { apiKey: "" }         # https://dashboard.microsoft.ai/keys
+          jina: { apiKey: "" }                       # https://jina.ai (apiKey optional for fetch, required for search)
+          exa: { apiKey: "" }                        # https://exa.ai
+        search: "tavily"                             # tavily | microsoft-grounding | jina | exa (omit to disable web_search)
+        fetch: "jina"                                # currently only `jina` (omit to disable web_fetch)
 
   # Per-chat overrides — uncomment and customize:
   # "751414718":                   # per-chat partial override (deep-merged with default)

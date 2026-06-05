@@ -10,6 +10,7 @@ import { createBashTool, createAttachmentDownloader, createDismissMessageTool, c
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
+import { createWebSearcher } from './web-search';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
@@ -240,7 +241,8 @@ export const createDriver = (config: DriverConfig, deps: {
               sessionId: chatId,
               backgroundThresholdSec: chatConfig.tools.bash.backgroundThresholdSec,
             }));
-            tools.push(createWebSearchTool(chatConfig.tools.webSearch.tavilyKey));
+            if (chatConfig.tools.webSearch)
+              tools.push(createWebSearchTool(createWebSearcher(chatConfig.tools.webSearch)));
             if (chatConfig.tools.webFetch)
               tools.push(createWebFetchTool(createWebFetcher(chatConfig.tools.webFetch)));
             tools.push(createDownloadFileTool({

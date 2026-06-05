@@ -7,6 +7,7 @@ import { parse as parseYaml } from 'yaml';
 
 import type { CompactionConfig, DebounceConfig, LlmEndpoint, ProviderFormat } from '../driver/types';
 import type { WebFetchConfig } from '../driver/web-fetch/types';
+import type { WebSearchConfig } from '../driver/web-search/types';
 
 const llmEndpointEntries = {
   apiBaseUrl: v.string(),
@@ -72,15 +73,16 @@ const ChatConfigSchema = v.object({
     bash: v.optional(v.object({
       backgroundThresholdSec: v.optional(v.number(), 10),
     }), {}),
-    webSearch: v.object({
-      tavilyKey: v.pipe(v.string(), v.minLength(1)),
-    }),
-    webFetch: v.optional(v.object({
-      provider: v.optional(v.picklist(['jina']), 'jina'),
-      jina: v.optional(v.object({
-        apiKey: v.optional(v.string(), ''),
+    web: v.optional(v.object({
+      providers: v.optional(v.object({
+        tavily: v.optional(v.object({ apiKey: v.optional(v.string(), '') }), {}),
+        microsoftGrounding: v.optional(v.object({ apiKey: v.optional(v.string(), '') }), {}),
+        jina: v.optional(v.object({ apiKey: v.optional(v.string(), '') }), {}),
+        exa: v.optional(v.object({ apiKey: v.optional(v.string(), '') }), {}),
       }), {}),
-    })),
+      search: v.optional(v.picklist(['tavily', 'microsoft-grounding', 'jina', 'exa'])),
+      fetch: v.optional(v.picklist(['jina'])),
+    }), {}),
   }),
 });
 
@@ -121,14 +123,15 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
     bash: v.partial(v.object({
       backgroundThresholdSec: v.number(),
     })),
-    webSearch: v.partial(v.object({
-      tavilyKey: v.string(),
-    })),
-    webFetch: v.partial(v.object({
-      provider: v.picklist(['jina']),
-      jina: v.partial(v.object({
-        apiKey: v.string(),
+    web: v.partial(v.object({
+      providers: v.partial(v.object({
+        tavily: v.partial(v.object({ apiKey: v.string() })),
+        microsoftGrounding: v.partial(v.object({ apiKey: v.string() })),
+        jina: v.partial(v.object({ apiKey: v.string() })),
+        exa: v.partial(v.object({ apiKey: v.string() })),
       })),
+      search: v.picklist(['tavily', 'microsoft-grounding', 'jina', 'exa']),
+      fetch: v.picklist(['jina']),
     })),
   })),
 })), {});
@@ -183,7 +186,7 @@ export interface ResolvedChatConfig {
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number };
   tools: {
     bash: { backgroundThresholdSec: number };
-    webSearch: { tavilyKey: string };
+    webSearch?: WebSearchConfig;
     webFetch?: WebFetchConfig;
   };
 }
@@ -227,6 +230,27 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
   const primaryModel = resolveModel(config, merged.model);
   const primaryApiFormat: ProviderFormat = primaryModel.apiFormat ?? 'openai-chat';
 
+  const web = merged.tools.web;
+  const providers = web.providers;
+
+  let webSearch: WebSearchConfig | undefined;
+  if (web.search) {
+    const apiKey = web.search === 'tavily' ? providers.tavily.apiKey
+      : web.search === 'microsoft-grounding' ? providers.microsoftGrounding.apiKey
+        : web.search === 'jina' ? providers.jina.apiKey
+          : providers.exa.apiKey;
+    const providerKey = web.search === 'microsoft-grounding' ? 'microsoftGrounding' : web.search;
+    if (!apiKey)
+      throw new Error(`Chat ${chatId}: tools.web.providers.${providerKey}.apiKey is required for web.search="${web.search}".`);
+    webSearch = { provider: web.search, apiKey };
+  }
+
+  let webFetch: WebFetchConfig | undefined;
+  if (web.fetch === 'jina') {
+    // Jina fetch's apiKey is optional (anonymous tier works); empty string passes through.
+    webFetch = { provider: 'jina', jina: { apiKey: providers.jina.apiKey } };
+  }
+
   return {
     primaryModel,
     primaryApiFormat,
@@ -260,10 +284,8 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     },
     tools: {
       bash: { backgroundThresholdSec: merged.tools.bash.backgroundThresholdSec },
-      webSearch: { tavilyKey: merged.tools.webSearch.tavilyKey },
-      webFetch: merged.tools.webFetch
-        ? { provider: merged.tools.webFetch.provider, jina: { apiKey: merged.tools.webFetch.jina.apiKey } }
-        : undefined,
+      ...(webSearch ? { webSearch } : {}),
+      ...(webFetch ? { webFetch } : {}),
     },
   };
 };
