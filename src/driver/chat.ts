@@ -66,7 +66,7 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
         ...params.messages,
       ],
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-      ...(params.forceToolCall ? { tool_choice: 'required' } : {}),
+      ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: 'required' } : {}),
       ...(params.thinking ? { thinking: { type: params.thinking.type ?? 'enabled' } } : {}),
       ...(params.thinking?.effort ? { reasoning_effort: params.thinking.effort } : {}),
     });

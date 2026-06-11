@@ -107,7 +107,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
       ...(params.system ? { system: params.system } : {}),
       messages: params.messages,
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-      ...(params.forceToolCall ? { tool_choice: { type: 'any' } } : {}),
+      ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: { type: 'any' } } : {}),
       ...(thinkingParam ? { thinking: thinkingParam } : {}),
     });
 

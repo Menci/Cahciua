@@ -20,7 +20,6 @@ const llmEndpointEntries = {
     type: v.optional(v.picklist(['enabled', 'disabled'])),
     effort: v.optional(v.picklist(['high', 'max'])),
   })),
-  forceToolCall: v.optional(v.boolean()),
 };
 
 // --- Runtime config schema (top-level, global) ---
@@ -38,7 +37,10 @@ const RuntimeSchema = v.object({
 // --- Chat-level config schemas ---
 
 const ChatConfigSchema = v.object({
-  model: v.optional(v.string(), 'primary'),
+  primary: v.optional(v.object({
+    model: v.optional(v.string(), 'primary'),
+    forceToolCall: v.optional(v.boolean(), false),
+  }), {}),
   systemFiles: v.optional(v.array(v.string()), []),
   sendTypingAction: v.optional(v.boolean(), true),
   debounce: v.optional(v.object({
@@ -54,6 +56,7 @@ const ChatConfigSchema = v.object({
   probe: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
     model: v.optional(v.string(), ''),
+    forceToolCall: v.optional(v.boolean(), false),
   }), {}),
   imageToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
@@ -88,7 +91,10 @@ const ChatConfigSchema = v.object({
 
 // Per-chat overrides: all fields optional, no defaults
 const ChatOverrideSchema = v.optional(v.partial(v.object({
-  model: v.string(),
+  primary: v.partial(v.object({
+    model: v.string(),
+    forceToolCall: v.boolean(),
+  })),
   systemFiles: v.array(v.string()),
   sendTypingAction: v.boolean(),
   debounce: v.partial(v.object({
@@ -104,6 +110,7 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   probe: v.partial(v.object({
     enabled: v.boolean(),
     model: v.string(),
+    forceToolCall: v.boolean(),
   })),
   imageToText: v.partial(v.object({
     enabled: v.boolean(),
@@ -174,13 +181,12 @@ export interface BackgroundTasksConfig {
 }
 
 export interface ResolvedChatConfig {
-  primaryModel: LlmEndpoint;
-  primaryApiFormat: ProviderFormat;
+  primary: { model: LlmEndpoint; apiFormat: ProviderFormat; forceToolCall: boolean };
   systemFiles: { filename: string; content: string }[];
   sendTypingAction: boolean;
   debounce: DebounceConfig;
   compaction: CompactionConfig;
-  probe: { enabled: boolean; model: LlmEndpoint };
+  probe: { enabled: boolean; model: LlmEndpoint; forceToolCall: boolean };
   imageToText: { enabled: boolean; model?: string };
   animationToText: { enabled: boolean; model?: string; maxFrames: number };
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number };
@@ -227,7 +233,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
   const override = config.chats[chatId] ?? {};
   const merged: ChatConfig = merge(structuredClone(config.chats.default), override);
 
-  const primaryModel = resolveModel(config, merged.model);
+  const primaryModel = resolveModel(config, merged.primary.model);
   const primaryApiFormat: ProviderFormat = primaryModel.apiFormat ?? 'openai-chat';
 
   const web = merged.tools.web;
@@ -252,8 +258,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
   }
 
   return {
-    primaryModel,
-    primaryApiFormat,
+    primary: { model: primaryModel, apiFormat: primaryApiFormat, forceToolCall: merged.primary.forceToolCall },
     systemFiles: merged.systemFiles.map(path => ({
       filename: basename(path),
       content: readFileSync(path, 'utf-8').trim(),
@@ -267,6 +272,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     probe: {
       enabled: merged.probe.enabled,
       model: merged.probe.model ? resolveModel(config, merged.probe.model) : primaryModel,
+      forceToolCall: merged.probe.forceToolCall,
     },
     imageToText: {
       enabled: merged.imageToText.enabled,

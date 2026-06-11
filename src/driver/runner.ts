@@ -11,7 +11,11 @@ import type {
 
 ensureDumpDir();
 
-export interface RunnerConfig extends LlmCallConfig {}
+// RunnerConfig is the per-endpoint identity used as the runner cache key.
+// Per-call concerns like forceToolCall live on StepLoopParams so two chats
+// using the same endpoint with different forceToolCall settings can share
+// a runner instance.
+export interface RunnerConfig extends Omit<LlmCallConfig, 'forceToolCall'> {}
 
 interface StepLoopParams {
   chatId: string;
@@ -20,6 +24,7 @@ interface StepLoopParams {
   tools: CahciuaTool[];
   maxSteps: number;
   maxImagesAllowed?: number;
+  forceToolCall?: boolean;
   onStepComplete: (
     stepEntries: ConversationEntry[],
     usage: LlmCallUsage,
@@ -52,13 +57,13 @@ export const createRunner = (config: RunnerConfig) => {
     // tool_choice hints are not a hard constraint — models may ignore them.
     // When forceToolCall is set, retry (capped) until the model emits a tool call.
     const MAX_FORCE_TOOL_RETRIES = 3;
-    const maxAttempts = config.forceToolCall ? MAX_FORCE_TOOL_RETRIES + 1 : 1;
+    const maxAttempts = params.forceToolCall ? MAX_FORCE_TOOL_RETRIES + 1 : 1;
 
     let result!: LlmCallResult;
     let usage: LlmCallUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      result = await callLlm(config, workingEntries, params.system, toolSchemas, {
+      result = await callLlm({ ...config, forceToolCall: params.forceToolCall }, workingEntries, params.system, toolSchemas, {
         log: params.log,
         label: `step:${step}`,
         dumpId: params.chatId,
@@ -72,7 +77,7 @@ export const createRunner = (config: RunnerConfig) => {
         cacheWriteTokens: usage.cacheWriteTokens + result.usage.cacheWriteTokens,
       };
 
-      if (!config.forceToolCall) break;
+      if (!params.forceToolCall) break;
       if (extractToolCalls(result.entries).length > 0) break;
       if (attempt < MAX_FORCE_TOOL_RETRIES)
         params.log.withFields({

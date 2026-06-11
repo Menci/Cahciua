@@ -46,7 +46,7 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
       input: params.input,
       ...(params.instructions ? { instructions: params.instructions } : {}),
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-      ...(params.forceToolCall ? { tool_choice: 'required' } : {}),
+      ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: 'required' } : {}),
       ...(params.thinking?.effort ? { output_config: { effort: params.thinking.effort } } : {}),
     });
 

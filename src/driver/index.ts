@@ -87,7 +87,6 @@ export const createDriver = (config: DriverConfig, deps: {
         apiFormat: endpoint.apiFormat ?? 'openai-chat',
         timeoutSec: endpoint.timeoutSec,
         thinking: endpoint.thinking,
-        forceToolCall: endpoint.forceToolCall,
       });
       runners.set(key, runner);
     }
@@ -208,7 +207,7 @@ export const createDriver = (config: DriverConfig, deps: {
             const sum = summary();
 
             const trs = await loadTRs(chatId, cursor);
-            const ctx = composeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, chatConfig.primaryModel.model, sum);
+            const ctx = composeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, chatConfig.primary.model.model, sum);
             if (!ctx) return;
 
             log.withFields({
@@ -298,11 +297,11 @@ export const createDriver = (config: DriverConfig, deps: {
 
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
-              modelName: chatConfig.primaryModel.model,
+              modelName: chatConfig.primary.model.model,
               chatId,
               chatTitle: deps.getChatTitle(chatId),
               systemFiles: chatConfig.systemFiles,
-              forceToolCall: chatConfig.primaryModel.forceToolCall,
+              forceToolCall: chatConfig.primary.forceToolCall,
             });
 
             // --- Compute mention/reply/interrupt state from RC + TRs ---
@@ -317,7 +316,7 @@ export const createDriver = (config: DriverConfig, deps: {
               timeNow: localTimeNow(),
               isMentioned, isReplied,
               isInterrupted,
-              forceToolCall: chatConfig.primaryModel.forceToolCall,
+              forceToolCall: chatConfig.primary.forceToolCall,
               activeBackgroundTasks: deps.backgroundTask.getActiveTasks(chatId),
             };
 
@@ -330,14 +329,30 @@ export const createDriver = (config: DriverConfig, deps: {
               if (needsProbe) {
                 log.withFields({ chatId, lastMentionedAtMs, lastProcessedMs: lastProcessedMs() }).log('Running probe');
 
+                // If probe's forceToolCall differs from primary's, render its own
+                // system + late-binding so the silence-mechanism prompt matches the
+                // tool_choice the wire will send. Otherwise share for KV-cache hits.
+                const probeSystem = chatConfig.probe.forceToolCall === chatConfig.primary.forceToolCall
+                  ? system
+                  : await renderSystemPrompt({
+                    currentChannel: 'telegram',
+                    modelName: chatConfig.probe.model.model,
+                    chatId,
+                    chatTitle: deps.getChatTitle(chatId),
+                    systemFiles: chatConfig.systemFiles,
+                    forceToolCall: chatConfig.probe.forceToolCall,
+                  });
+
                 const probeEntries = [...ctx.entries];
                 injectLateBindingPrompt(probeEntries, await renderLateBindingPrompt({
                   ...lateBindingParams, isProbeEnabled: true, isProbing: true,
+                  forceToolCall: chatConfig.probe.forceToolCall,
                 }));
 
                 const probeRequestedAt = Date.now();
                 const probeResult = await callLlm(
-                  chatConfig.probe.model, probeEntries, system,
+                  { ...chatConfig.probe.model, forceToolCall: chatConfig.probe.forceToolCall },
+                  probeEntries, probeSystem,
                   tools.map(toToolSchema),
                   { log, label: `probe:${chatId}`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
                 );
@@ -375,7 +390,7 @@ export const createDriver = (config: DriverConfig, deps: {
               ...lateBindingParams, isProbeEnabled: chatConfig.probe.enabled, isProbing: false,
             }));
 
-            const runner = getOrCreateRunner(chatConfig.primaryModel);
+            const runner = getOrCreateRunner(chatConfig.primary.model);
 
             // Show a "typing…" action while the model works, refreshed every 5s
             // (Telegram clears it after ~5s). Best-effort — failures are ignored.
@@ -394,7 +409,8 @@ export const createDriver = (config: DriverConfig, deps: {
                 system,
                 tools,
                 maxSteps: MAX_STEPS,
-                maxImagesAllowed: chatConfig.primaryModel.maxImagesAllowed,
+                maxImagesAllowed: chatConfig.primary.model.maxImagesAllowed,
+                forceToolCall: chatConfig.primary.forceToolCall,
                 onStepComplete: async (stepEntries, usage, requestedAtMs) => {
                   await deps.persistTurnResponse(chatId, {
                     requestedAtMs,
@@ -403,7 +419,7 @@ export const createDriver = (config: DriverConfig, deps: {
                     outputTokens: usage.outputTokens,
                     cacheReadTokens: usage.cacheReadTokens,
                     cacheWriteTokens: usage.cacheWriteTokens,
-                    modelName: chatConfig.primaryModel.model,
+                    modelName: chatConfig.primary.model.model,
                   });
                   lastProcessedMs(requestedAtMs);
                 },
@@ -449,7 +465,7 @@ export const createDriver = (config: DriverConfig, deps: {
           try {
             const cursor = cursorMs();
             const sum = summary();
-            const compactEndpoint = chatConfig.compaction.model ?? chatConfig.primaryModel;
+            const compactEndpoint = chatConfig.compaction.model ?? chatConfig.primary.model;
 
             const trs = await loadTRs(chatId, cursor);
             const ctx = composeContext(rc(), trs, chatConfig.compaction.maxContextEstTokens, compactEndpoint.model);
