@@ -96,12 +96,12 @@ export const callLlm = async (
   if (apiFormat === 'responses') {
     const input = await toResponsesInput(prepared);
     const wireTools = optionalTools(tools?.map(toResponsesToolSchema));
-    dump(options?.dumpId, 'request', { model: config.model, instructions: system, input, tools: wireTools });
 
     const response = await responsesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
       thinking: config.thinking, forceToolCall: config.forceToolCall,
+      onRequestBody: body => dump(options?.dumpId, 'request', body),
       log: log!, label, timeoutSec: config.timeoutSec,
     });
     dump(options?.dumpId, 'response', response);
@@ -119,12 +119,12 @@ export const callLlm = async (
     const effectiveSystem = sysFromEntries ?? system;
     const wireTools = optionalTools(tools?.map(toAnthropicToolSchema));
     const tagged = applyAnthropicCachePoints(effectiveSystem, messages);
-    dump(options?.dumpId, 'request', { model: config.model, system: tagged.system, messages: tagged.messages, tools: wireTools });
 
     const response = await messagesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
       thinking: config.thinking, forceToolCall: config.forceToolCall,
+      onRequestBody: body => dump(options?.dumpId, 'request', body),
       log: log!, label, timeoutSec: config.timeoutSec,
     });
     dump(options?.dumpId, 'response', response);
@@ -138,12 +138,12 @@ export const callLlm = async (
   // openai-chat (default)
   const chatMessages = await toChatCompletionsInput(prepared);
   const wireTools = optionalTools(tools?.map(toChatToolSchema));
-  dump(options?.dumpId, 'request', { model: config.model, system, messages: chatMessages, tools: wireTools });
 
   const response = await chatCompletions({
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
     thinking: config.thinking, forceToolCall: config.forceToolCall,
+    onRequestBody: body => dump(options?.dumpId, 'request', body),
     log: log!, label, timeoutSec: config.timeoutSec,
   });
   dump(options?.dumpId, 'response', response);

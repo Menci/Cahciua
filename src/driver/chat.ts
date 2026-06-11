@@ -23,6 +23,7 @@ export interface ChatCompletionsParams {
   timeoutSec?: number;
   thinking?: ThinkingConfig;
   forceToolCall?: boolean;
+  onRequestBody?: (body: unknown) => void;
   log: Logger;
   label: string;
 }
@@ -59,7 +60,7 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
     : undefined;
 
   try {
-    const body = JSON.stringify({
+    const requestBody = {
       model: params.model,
       messages: [
         ...(params.system ? [{ role: 'system', content: params.system }] : []),
@@ -74,7 +75,9 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
       ...(params.thinking && params.thinking.type !== 'disabled' && params.thinking.effort
         ? { reasoning_effort: params.thinking.effort }
         : {}),
-    });
+    };
+    params.onRequestBody?.(requestBody);
+    const body = JSON.stringify(requestBody);
 
     const url = `${params.baseURL.replace(/\/$/, '')}/chat/completions`;
     const res = await fetch(url, {

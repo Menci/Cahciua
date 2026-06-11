@@ -74,6 +74,7 @@ export interface MessagesApiParams {
   timeoutSec?: number;
   thinking?: ThinkingConfig;
   forceToolCall?: boolean;
+  onRequestBody?: (body: unknown) => void;
   log: Logger;
   label: string;
 }
@@ -101,7 +102,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
     const maxTokens = params.maxTokens
       ?? (thinkingParam ? thinkingParam.budget_tokens + 4096 : DEFAULT_MAX_TOKENS);
 
-    const body = JSON.stringify({
+    const requestBody = {
       model: params.model,
       max_tokens: maxTokens,
       ...(params.system ? { system: params.system } : {}),
@@ -109,7 +110,9 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
       ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: { type: 'any' } } : {}),
       ...(thinkingParam ? { thinking: thinkingParam } : {}),
-    });
+    };
+    params.onRequestBody?.(requestBody);
+    const body = JSON.stringify(requestBody);
 
     const url = `${params.baseURL.replace(/\/$/, '')}/messages`;
     const res = await fetch(url, {
