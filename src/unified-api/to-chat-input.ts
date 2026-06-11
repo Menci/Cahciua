@@ -32,18 +32,30 @@ type OutgoingEntry = ChatCompletionsEntry | ChatCompletionsSystemOrUserMessage;
  * (system / user / assistant / toolResult).
  *
  * OpenAI Chat Completions does not accept image parts inside `role:'tool'`
- * content — so when a ToolResult carries images, we emit the tool message with
- * a text-only placeholder and hoist the actual images into an immediately
- * following `role:'user'` message.
+ * content — when a ToolResult carries images, we emit the tool message with a
+ * text-only placeholder and hoist the actual images into a `role:'user'`
+ * message. Hoisted user messages must be emitted *after* every tool message
+ * for the same assistant turn: gateways that translate Chat Completions to
+ * turn-based protocols (Gemini function_call/function_response, Anthropic
+ * tool_use/tool_result) treat any non-tool message as the start of a new
+ * turn, so an interleaved hoist breaks the "N calls → N responses" contract
+ * for parallel tool calls and triggers `invalid_tool_call_format` upstream.
  */
 export const toChatCompletionsInput = async (entries: ConversationEntry[]): Promise<OutgoingEntry[]> => {
   const out: OutgoingEntry[] = [];
+  let pendingHoists: ChatCompletionsSystemOrUserMessage[] = [];
+  const flushHoists = (): void => {
+    if (pendingHoists.length === 0) return;
+    out.push(...pendingHoists);
+    pendingHoists = [];
+  };
+
   for (const entry of entries) {
     if (entry.kind === 'toolResult') {
       const { toolMsg, hoistedImages } = await toolResultToToolMessage(entry);
       out.push(toolMsg);
       if (hoistedImages.length > 0) {
-        out.push({
+        pendingHoists.push({
           role: 'user',
           content: [
             { type: 'text', text: `(Images from tool result ${entry.callId}:)` },
@@ -52,11 +64,14 @@ export const toChatCompletionsInput = async (entries: ConversationEntry[]): Prom
         });
       }
     } else if (entry.role === 'assistant') {
+      flushHoists();
       out.push(await messageToAssistant(entry));
     } else {
+      flushHoists();
       out.push(await inputMessageToEntry(entry));
     }
   }
+  flushHoists();
   return out;
 };
 

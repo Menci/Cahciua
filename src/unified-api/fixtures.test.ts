@@ -60,39 +60,60 @@ const normalize = (val: unknown): unknown => {
 /**
  * Reverse the tool-result → user-message image hoist that toChatCompletionsInput
  * applies for Chat Completions wire compliance. Fixtures are legacy rows that
- * stored images inline in `role:'tool'` — after round-trip they come back split
- * into (tool w/ text-only content) + (user w/ "(Images from tool result ...)"
- * prefix). Collapse that pair back into the single tool message so structural
+ * stored images inline in `role:'tool'` — after round-trip they come back as a
+ * contiguous run of (tool w/ text-only content) messages followed by (user w/
+ * "(Images from tool result <id>:)" prefix) messages, one per call. Collapse
+ * each hoist user back into its matching tool by `tool_call_id` so structural
  * equality with the original fixture holds.
  */
 const unhoistToolImages = (entries: unknown[]): unknown[] => {
   const out: unknown[] = [];
-  for (let i = 0; i < entries.length; i++) {
+  let i = 0;
+  while (i < entries.length) {
     const cur = entries[i] as Record<string, unknown> | null;
-    const next = entries[i + 1] as Record<string, unknown> | undefined;
-    const nextContent = Array.isArray(next?.content) ? next!.content as unknown[] : null;
-    const isHoistUser = next?.role === 'user' && nextContent !== null
-      && nextContent.length >= 1
-      && typeof (nextContent[0] as { text?: unknown }).text === 'string'
-      && ((nextContent[0] as { text: string }).text).startsWith('(Images from tool result');
-    if (cur?.role === 'tool' && isHoistUser) {
-      const imageParts = (nextContent ?? []).slice(1);
-      const toolContent = cur.content;
-      const callId = cur.tool_call_id as string | undefined;
+    if (cur?.role !== 'tool') {
+      out.push(cur);
+      i++;
+      continue;
+    }
+
+    // Collect contiguous tool messages, then contiguous hoist-user messages.
+    const toolStart = i;
+    while (i < entries.length && (entries[i] as Record<string, unknown> | null)?.role === 'tool') i++;
+    const toolEnd = i;
+    const hoistByCallId = new Map<string, unknown[]>();
+    while (i < entries.length) {
+      const n = entries[i] as Record<string, unknown> | null;
+      const c = Array.isArray(n?.content) ? n!.content as unknown[] : null;
+      if (n?.role !== 'user' || c === null || c.length < 1) break;
+      const head = (c[0] as { text?: unknown }).text;
+      if (typeof head !== 'string' || !head.startsWith('(Images from tool result ')) break;
+      const m = head.match(/^\(Images from tool result (.+):\)$/);
+      if (!m) break;
+      hoistByCallId.set(m[1]!, c.slice(1));
+      i++;
+    }
+
+    for (let j = toolStart; j < toolEnd; j++) {
+      const tool = entries[j] as Record<string, unknown>;
+      const callId = tool.tool_call_id as string | undefined;
+      const imageParts = (callId !== undefined && hoistByCallId.get(callId)) || [];
+      if (imageParts.length === 0) {
+        out.push(tool);
+        continue;
+      }
       const placeholder = callId !== undefined
         ? `[Refer to the image below for tool result ${callId}]`
         : undefined;
-      const isPlaceholder = (s: string) => placeholder !== undefined && s === placeholder;
+      const isPlaceholder = (s: string): boolean => placeholder !== undefined && s === placeholder;
+      const toolContent = tool.content;
       const merged = typeof toolContent === 'string'
         ? (toolContent === '' || isPlaceholder(toolContent)
             ? imageParts
             : [{ type: 'text', text: toolContent }, ...imageParts])
         : Array.isArray(toolContent) ? [...toolContent, ...imageParts] : imageParts;
-      out.push({ ...cur, content: merged });
-      i += 1;
-      continue;
+      out.push({ ...tool, content: merged });
     }
-    out.push(cur);
   }
   return out;
 };
