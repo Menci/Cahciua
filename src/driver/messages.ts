@@ -136,7 +136,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
       else if (block.type === 'thinking')
         log.withFields({ label, reasoning: block.thinking }).log('reasoning');
       else if (block.type === 'tool_use')
-        log.withFields({ label, tool: block.name }).log('tool call');
+        log.withFields({ label, tool: block.name, args: block.input }).log('tool call');
     }
 
     if (json.usage.cache_creation_input_tokens || json.usage.cache_read_input_tokens) {

@@ -76,7 +76,9 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
             log.withFields({ label, text: block.text }).log('content');
         }
       } else if (item.type === 'function_call') {
-        log.withFields({ label, tool: item.name }).log('tool call');
+        let args: unknown = item.arguments;
+        try { args = JSON.parse(item.arguments); } catch { /* keep raw string */ }
+        log.withFields({ label, tool: item.name, args }).log('tool call');
       }
     }
 

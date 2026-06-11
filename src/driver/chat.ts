@@ -97,8 +97,11 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
       if (reasoning)
         log.withFields({ label, reasoning }).log('reasoning');
       if (choice.message.tool_calls) {
-        for (const tc of choice.message.tool_calls)
-          log.withFields({ label, tool: tc.function.name }).log('tool call');
+        for (const tc of choice.message.tool_calls) {
+          let args: unknown = tc.function.arguments;
+          try { args = JSON.parse(tc.function.arguments); } catch { /* keep raw string */ }
+          log.withFields({ label, tool: tc.function.name, args }).log('tool call');
+        }
       }
     }
 
