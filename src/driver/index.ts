@@ -354,7 +354,7 @@ export const createDriver = (config: DriverConfig, deps: {
                   { ...chatConfig.probe.model, forceToolCall: chatConfig.probe.forceToolCall },
                   probeEntries, probeSystem,
                   tools.map(toToolSchema),
-                  { log, label: `probe:${chatId}`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
+                  { log, label: `probe:${chatId}`, dumpId: `${chatId}.probe`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
                 );
 
                 const hasToolCalls = probeResult.entries.some(
@@ -435,7 +435,7 @@ export const createDriver = (config: DriverConfig, deps: {
           } catch (err) {
             // No retry or backoff — a failed call is recorded via failedRc and
             // only re-attempted when new external messages produce a fresh RC.
-            log.withError(err).error('LLM call failed');
+            log.withError(err).withFields({ chatId }).error('LLM call failed');
             failedRc(rcAtStart);
           } finally {
             running(false);
@@ -510,7 +510,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
             compactionMeta(newMeta);
           } catch (err) {
-            log.withError(err).error('Compaction failed');
+            log.withError(err).withFields({ chatId }).error('Compaction failed');
           } finally {
             compactionRunning = false;
           }
