@@ -1,14 +1,13 @@
 import type { Logger } from '@guiiai/logg';
 
 import type { AnimationToTextResolver } from './animation-to-text';
-import type { BotClient, MediaGroupItem, MediaSendOptions, SendOptions, SentMessage } from './bot';
+import type { BotClient, CustomEmojiInfo, MediaGroupItem, MediaSendOptions, SendOptions, SentMessage } from './bot';
 import { createBotClient } from './bot';
 import type { CustomEmojiToTextResolver } from './custom-emoji-to-text';
 import { createEventBus } from './event-bus';
 import { canExtractFrames, extractFrames } from './frame-extractor';
 import type { ImageToTextResolver } from './image-to-text';
-import { createMessageDedup, mergeTelegramMessageData } from './message';
-import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, Attachment, MessageEntity } from './message';
+import type { Attachment, MessageEntity, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
 import { normalizeStickerSetMetadata } from './pack-title';
 import { createSessionIngressQueue } from './session-ingress-queue';
 import { canGenerateThumbnail, generateThumbnail } from './thumbnail';
@@ -17,9 +16,9 @@ import type { FetchOptions, TypingEvent, UserbotClient } from './userbot';
 import { createUserbotClient } from './userbot';
 
 export interface TelegramManagerOptions {
+  apiId: number;
+  apiHash: string;
   botToken: string;
-  apiId?: number;
-  apiHash?: string;
   session?: string;
   initialChatIds?: string[];
   resolveChatId?: (messageIds: number[]) => string | undefined;
@@ -63,6 +62,8 @@ export interface TelegramManager {
   sendMediaGroup(chatId: string | number, media: MediaGroupItem[], options?: SendOptions): Promise<SentMessage[]>;
   fetchMessages(chatId: string, options: FetchOptions): Promise<TelegramMessage[]>;
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
+  downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
+  getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
   resolvePackTitle(setName: string): Promise<string>;
   botUserId: string;
   bot: BotClient;
@@ -74,33 +75,31 @@ export const createTelegramManager = (
   logger: Logger,
 ): TelegramManager => {
   const log = logger.withContext('telegram:manager');
-  const bot = createBotClient({ token: options.botToken }, logger);
-  const userbot = (options.apiId != null && options.apiHash != null)
-    ? createUserbotClient({
-        apiId: options.apiId,
-        apiHash: options.apiHash,
-        session: options.session ?? '',
-      }, logger)
+  const bot = createBotClient({ apiId: options.apiId, apiHash: options.apiHash, token: options.botToken }, logger);
+  const userbot = options.session
+    ? createUserbotClient({ apiId: options.apiId, apiHash: options.apiHash, session: options.session }, logger)
     : undefined;
 
-  const dedup = createMessageDedup();
+  // Single-source ingress: prefer userbot when present (full visibility), fall
+  // back to bot client otherwise (limited by Telegram's bot privacy rules).
+  // Whichever is unselected still receives updates over its own MTProto stream
+  // — we silently ignore them at the handler level.
+  const ingressFromUserbot = userbot != null;
+
   const botChats = new Set<string>(options.initialChatIds);
-  const inflight = new Map<string, TelegramMessage>();
   const messageBus = createEventBus<TelegramMessage>('telegram:message', logger);
   const editBus = createEventBus<TelegramMessageEdit>('telegram:edit', logger);
   const deleteBus = createEventBus<TelegramMessageDelete>('telegram:delete', logger);
   const typingBus = createEventBus<TypingEvent>('telegram:typing', logger);
 
-  // Unified download: fileId → Bot API, else → userbot by chatId+messageId
-  const downloadAttachmentMedia = async (
-    chatId: string,
-    messageId: number,
-    att: Attachment,
-  ): Promise<Buffer | undefined> => {
-    if (att.fileId) {
-      return await bot.downloadFile(att.fileId);
+  // Unified download by (chatId, messageId): prefers userbot for full visibility,
+  // falls back to bot's own MTProto session.
+  const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
+    if (userbot) {
+      const buf = await userbot.downloadMessageMedia(chatId, messageId);
+      if (buf) return buf;
     }
-    return await userbot?.downloadMessageMedia(chatId, messageId);
+    return await bot.downloadMessageMedia(chatId, messageId);
   };
 
   const imageToText = options.imageToText;
@@ -122,9 +121,9 @@ export const createTelegramManager = (
 
     const task = (async () => {
       try {
-        const stickerSet = await bot.raw().api.getStickerSet(setName);
-        packTitleCache.set(setName, stickerSet.title);
-        return stickerSet.title;
+        const title = await bot.getStickerSetTitle(setName);
+        packTitleCache.set(setName, title);
+        return title;
       } catch (err) {
         log.withError(err).withFields({ setName }).warn('Failed to resolve pack title');
         return setName;
@@ -154,7 +153,7 @@ export const createTelegramManager = (
       await Promise.all(attachments.map(async att => {
         if (att.thumbnailWebp || !canGenerateThumbnail(att)) return;
         try {
-          const buffer = await downloadAttachmentMedia(chatId, messageId, att);
+          const buffer = await downloadMessageMedia(chatId, messageId);
           if (buffer) {
             originalBuffers.set(att, buffer);
             att.thumbnailWebp = await generateThumbnail(buffer);
@@ -180,7 +179,7 @@ export const createTelegramManager = (
         await Promise.all(attachments.map(async att => {
           if (!canExtractFrames(att)) return;
           try {
-            const buffer = await downloadAttachmentMedia(chatId, messageId, att);
+            const buffer = await downloadMessageMedia(chatId, messageId);
             if (!buffer) return;
             const { frames, cacheKey, frameTimestamps } = await extractFrames(buffer, att, animationMaxFrames);
             att.animationHash = cacheKey;
@@ -234,7 +233,6 @@ export const createTelegramManager = (
     commit: event => {
       switch (event.kind) {
       case 'message':
-        inflight.delete(`${event.chatId}:${event.message.messageId}`);
         messageBus.emit(event.message);
         break;
       case 'edit':
@@ -247,28 +245,11 @@ export const createTelegramManager = (
     },
   });
 
-  const dispatchMessage = (msg: TelegramMessage) => {
-    const key = `${msg.chatId}:${msg.messageId}`;
-
-    if (!dedup.tryAdd(msg.chatId, msg.messageId)) {
-      // Second arrival — if bot version, merge richer Bot API metadata into
-      // the in-flight userbot message while preserving any userbot-only fields.
-      if (msg.source === 'bot') {
-        const existing = inflight.get(key);
-        if (existing) mergeTelegramMessageData(existing, msg);
-      }
-      return;
-    }
-
+  const ingestMessage = (msg: TelegramMessage) => {
+    botChats.add(msg.chatId);
     const enriched = { ...msg, ...captureIngressMeta() };
-    inflight.set(key, enriched);
     ingressQueue.enqueue({ kind: 'message', chatId: enriched.chatId, message: enriched });
   };
-
-  bot.onMessage(msg => {
-    botChats.add(msg.chatId);
-    dispatchMessage(msg);
-  });
 
   // Shared by the userbot's pushed typing events and the active poll.
   const handleTypingEvent = (typing: TypingEvent) => {
@@ -277,11 +258,8 @@ export const createTelegramManager = (
     typingBus.emit(typing);
   };
 
-  if (userbot) {
-    userbot.onMessage(msg => {
-      if (!botChats.has(msg.chatId)) return;
-      dispatchMessage(msg);
-    });
+  if (ingressFromUserbot && userbot) {
+    userbot.onMessage(ingestMessage);
 
     userbot.onMessageEdit(edit => {
       if (!botChats.has(edit.chatId)) return;
@@ -303,6 +281,11 @@ export const createTelegramManager = (
     });
 
     userbot.onTyping(handleTypingEvent);
+  } else {
+    // Fallback ingress via bot — limited visibility (privacy mode rules apply,
+    // edit/delete/typing largely unavailable). Acceptable for deployments
+    // running without a userbot session.
+    bot.onMessage(ingestMessage);
   }
 
   // Active typing poll for large supergroups (where MTProto doesn't push typing
@@ -338,7 +321,7 @@ export const createTelegramManager = (
     startTypingPolling,
     stopTypingPolling,
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
-    sendChatAction: async chatId => { await bot.raw().api.sendChatAction(chatId, 'typing'); },
+    sendChatAction: chatId => bot.sendChatAction(chatId),
     sendPhoto: (chatId, photo, opts) => bot.sendPhoto(chatId, photo, opts),
     sendDocument: (chatId, doc, opts) => bot.sendDocument(chatId, doc, opts),
     sendVideo: (chatId, video, opts) => bot.sendVideo(chatId, video, opts),
@@ -349,6 +332,8 @@ export const createTelegramManager = (
     sendMediaGroup: (chatId, media, opts) => bot.sendMediaGroup(chatId, media, opts),
     fetchMessages: (chatId, opts) => userbot?.fetchMessages(chatId, opts) ?? Promise.resolve([]),
     fetchSpecificMessages: (chatId, ids) => userbot?.fetchSpecificMessages(chatId, ids) ?? Promise.resolve([]),
+    downloadMessageMedia,
+    getCustomEmojiInfo: ids => bot.getCustomEmojiInfo(ids),
     resolvePackTitle,
     botUserId: bot.botUserId(),
     bot,

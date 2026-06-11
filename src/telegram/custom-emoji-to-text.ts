@@ -1,6 +1,7 @@
 import type { Logger } from '@guiiai/logg';
 import sharp from 'sharp';
 
+import type { CustomEmojiInfo } from './bot';
 import { renderCustomEmojiToTextSystemPrompt } from './custom-emoji-to-text-prompt';
 import { deduplicateFrames, extractFrames } from './frame-extractor';
 import type { ImageAltTextRecord } from './image-to-text';
@@ -12,9 +13,7 @@ import type { LlmEndpoint } from '../driver/types';
 const EMOJI_MAX_EDGE = 512;
 
 export interface CustomEmojiToTextResolver {
-  /** Resolve descriptions for a batch of custom emoji IDs. */
   resolve(emojiIds: Map<string, string>): Promise<void>;
-  /** Get error message for a failed custom emoji ID, if any. */
   getError(customEmojiId: string): string | undefined;
 }
 
@@ -48,14 +47,7 @@ export const createCustomEmojiToTextResolver = (params: {
   logger: Logger;
   lookupByHash: (hash: string) => ImageAltTextRecord | null;
   persist: (record: ImageAltTextRecord) => void;
-  getCustomEmojiStickers: (customEmojiIds: string[]) => Promise<Array<{
-    file_id: string;
-    is_animated: boolean;
-    is_video: boolean;
-    custom_emoji_id?: string;
-    set_name?: string;
-  }>>;
-  downloadFile: (fileId: string) => Promise<Buffer>;
+  getCustomEmojiInfo: (customEmojiIds: string[]) => Promise<CustomEmojiInfo[]>;
   resolvePackTitle: (setName: string) => Promise<string>;
 }): CustomEmojiToTextResolver => {
   const log = params.logger.withContext('telegram:custom-emoji-to-text');
@@ -66,7 +58,7 @@ export const createCustomEmojiToTextResolver = (params: {
   const resolveOne = (
     customEmojiId: string,
     fallbackEmoji: string,
-    sticker: { file_id: string; is_animated: boolean; is_video: boolean; set_name?: string },
+    info: CustomEmojiInfo,
   ): Promise<void> => {
     const cacheKey = emojiCacheKey(customEmojiId);
 
@@ -85,10 +77,10 @@ export const createCustomEmojiToTextResolver = (params: {
         const model = params.model;
         if (!model) throw new Error('customEmojiToText.model is required when customEmojiToText.enabled=true');
 
-        const buffer = await params.downloadFile(sticker.file_id);
-        let isAnimated = sticker.is_animated || sticker.is_video;
+        const buffer = await info.download();
+        let isAnimated = info.isAnimated || info.isVideo;
 
-        const packMetadata = await resolveStickerSetMetadata({ stickerSetId: sticker.set_name }, params.resolvePackTitle);
+        const packMetadata = await resolveStickerSetMetadata({ stickerSetId: info.setName }, params.resolvePackTitle);
         const packTitle = packMetadata.stickerSetName;
 
         let images: Array<{ url: string }>;
@@ -98,8 +90,8 @@ export const createCustomEmojiToTextResolver = (params: {
         if (isAnimated) {
           const syntheticAtt: Attachment = {
             type: 'sticker',
-            isAnimatedSticker: sticker.is_animated,
-            isVideoSticker: sticker.is_video,
+            isAnimatedSticker: info.isAnimated,
+            isVideoSticker: info.isVideo,
           };
           const extractionResult = await extractFrames(buffer, syntheticAtt, params.maxFrames);
           const uniqueFrames = deduplicateFrames(extractionResult.frames);
@@ -153,7 +145,6 @@ export const createCustomEmojiToTextResolver = (params: {
     async resolve(emojiIds) {
       if (!params.enabled || emojiIds.size === 0) return;
 
-      // Filter out already-cached IDs
       const uncached = new Map<string, string>();
       for (const [id, fallback] of emojiIds) {
         if (!params.lookupByHash(emojiCacheKey(id)))
@@ -164,37 +155,27 @@ export const createCustomEmojiToTextResolver = (params: {
       const ids = [...uncached.keys()];
       log.withFields({ count: ids.length }).log('Resolving custom emoji stickers');
 
-      // Bot API: at most 200 per call
-      let stickers: Array<{
-        file_id: string;
-        is_animated: boolean;
-        is_video: boolean;
-        custom_emoji_id?: string;
-        set_name?: string;
-      }>;
+      let infos: CustomEmojiInfo[];
       try {
-        stickers = await params.getCustomEmojiStickers(ids);
+        infos = await params.getCustomEmojiInfo(ids);
       } catch (err) {
-        log.withError(err).warn('Failed to getCustomEmojiStickers');
+        log.withError(err).warn('Failed to getCustomEmojiInfo');
         return;
       }
 
-      // Build map: customEmojiId → sticker metadata
-      const stickerMap = new Map<string, typeof stickers[0]>();
-      for (const s of stickers) {
-        if (s.custom_emoji_id) stickerMap.set(s.custom_emoji_id, s);
-      }
+      const infoMap = new Map<string, CustomEmojiInfo>();
+      for (const info of infos) infoMap.set(info.customEmojiId, info);
 
       const tasks: Promise<void>[] = [];
       for (const [id, fallback] of uncached) {
-        const sticker = stickerMap.get(id);
-        if (!sticker) {
+        const info = infoMap.get(id);
+        if (!info) {
           log.withFields({ customEmojiId: id }).warn('Sticker not found for custom emoji');
           errors.set(id, 'sticker not found');
           continue;
         }
         tasks.push(
-          resolveOne(id, fallback, sticker).catch(err => {
+          resolveOne(id, fallback, info).catch(err => {
             log.withError(err).withFields({ customEmojiId: id }).warn('Failed to resolve custom emoji');
             errors.set(id, err instanceof Error ? err.message : String(err));
           }),

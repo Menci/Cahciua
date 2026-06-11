@@ -21,7 +21,7 @@ See `docs/dcp-design.md` for architecture rationale.
 
 ## Tech Stack
 
-Node ≥22, TypeScript, pnpm. Telegram: grammY (Bot API) + gramjs (MTProto). DB: better-sqlite3 + Drizzle. State: Immer. Reactivity: alien-signals. Validation: Valibot. Prompts: `@velin-dev/core` (all in `prompts/*.velin.md` — never hardcode prompt strings). Logging: `@guiiai/logg`. Tests: Vitest. Media: sharp, ffmpeg-static + ffprobe-static, lottie-frame (needs system `libpng-dev` + `librlottie-dev`).
+Node ≥22, TypeScript, pnpm. Telegram: gramjs (MTProto) for both bot and userbot — no Bot API HTTP layer. DB: better-sqlite3 + Drizzle. State: Immer. Reactivity: alien-signals. Validation: Valibot. Prompts: `@velin-dev/core` (all in `prompts/*.velin.md` — never hardcode prompt strings). Logging: `@guiiai/logg`. Tests: Vitest. Media: sharp, ffmpeg-static + ffprobe-static, lottie-frame (needs system `libpng-dev` + `librlottie-dev`).
 
 ## Commands
 
@@ -72,11 +72,15 @@ Every `CanonicalIMEvent` carries:
 
 Per-chat ordered commit queue (`src/telegram/session-ingress-queue.ts`). Later events may transform speculatively, but only the contiguous ready prefix commits into Adaptation. Fail-closed: blocked head ⇒ `nextCommitSeq` does not advance.
 
-### Dual Telegram client
+### Two Telegram clients, single ingress source
 
-grammY (Bot API) handles user messages and replies. gramjs (User API) handles history, reply-to resolution, edit/delete events, and seeing other bots' messages. Dedup by `(chatId, messageId)`. Userbot events are filtered to bot-joined chats (`botChats` seeded from events table). When bot version arrives second, its `fileId` is merged in for download preference.
+Both bot and userbot are gramjs `TelegramClient` instances over MTProto. The bot is sender-only by default; the userbot, when configured, owns ingress (messages, edits, deletes, typing, history, reply-to resolution) because bots have server-enforced visibility limits regardless of protocol — privacy mode hides most group messages, edit/delete updates are unreliable, history is restricted, and other bots' messages are invisible. Without a userbot session the bot client takes over ingress on its own (with all those limitations).
 
-**Edits/deletes come exclusively from userbot.** Phantom MTProto edits (no `editDate` — link previews, reactions, keyboard updates) are skipped.
+The unselected client still receives MTProto updates over its own stream; the manager simply doesn't subscribe to them. `apiId`/`apiHash` are unconditionally required (the bot also needs MTProto credentials); the userbot session is the optional knob.
+
+Downloads go through `telegramManager.downloadMessageMedia(chatId, messageId)` — prefers userbot for full visibility, falls back to bot. `(chatId, messageId)` is the only stable handle: MTProto file references include `access_hash` and `file_reference`, which expire, so re-fetching the message is the correct download path.
+
+**Edit/delete come from the active ingress source.** Phantom MTProto edits (no `editDate` — link previews resolved, reactions in some channels, inline keyboard refresh, pin state changes) are still filtered in `userbot.ts`; this is intrinsic to the MTProto stream, unrelated to the old dual-source dedup.
 
 ### Configured chat residency
 
@@ -124,7 +128,7 @@ Downstream code treats the shape uniformly. See `docs/dcp-design.md` for the cos
 - Mechanically trim oversized (`text >512 chars` or non-`low` image) tool results beyond the latest 5.
 - Sanitize empty assistant content for Anthropic (delete empty `content`, drop empty-shell messages).
 
-`isSelfSent` is set at creation (synthetic event bypass in `src/index.ts`), not derived from sender ID — bot may change accounts.
+`isSelfSent` is set at ingress time based on the current bot user ID. Historical events keep their tag from the time of ingress, so changing the bot account doesn't retroactively invalidate them.
 
 ### Final send prep
 
@@ -151,7 +155,7 @@ Three blocking ingress transforms (image / animation / custom-emoji), all sharin
 
 - **Image**: cache key = sha256 of the deterministic thumbnail WebP. LLM input = PNG resized to ≤512px long edge. Rendering emits `<image>alt</image>` when alt is present.
 - **Animation** (GIF/MP4, video sticker WEBM, animated sticker TGS): cache key = sha256 of file bytes (`animationHash` persisted on the attachment). Frame selection is count-based (≤maxFrames → all; > → equidistant including first/last). TGS detected by gzip magic bytes (don't rely on attachment flags — they may be missing during backfill). Files >20MB skipped. Rendering tags: `<animation type="...">` / `<sticker pack="...">`.
-- **Custom emoji**: cache key = `emoji:${customEmojiId}`. Resolved via `bot.api.getCustomEmojiStickers` batch. Alt text set transiently on `ContentNode.altText` — never persisted to `events`. Rendering tag: `<custom-emoji pack="...">`. Without alt: render fallback emoji char.
+- **Custom emoji**: cache key = `emoji:${customEmojiId}`. Resolved via gramjs `messages.GetCustomEmojiDocuments` batch through the bot client. Alt text set transiently on `ContentNode.altText` — never persisted to `events`. Rendering tag: `<custom-emoji pack="...">`. Without alt: render fallback emoji char.
 
 Alt text is **always** queried transiently from `image_alt_texts` — never stored in `events`. Cold start: sync lookup for cached, async backfill for missing.
 

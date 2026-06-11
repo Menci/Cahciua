@@ -158,8 +158,8 @@ const ConfigSchema = v.object({
   models: v.record(v.string(), v.object(llmEndpointEntries)),
   telegram: v.object({
     botToken: v.string(),
-    apiId: v.optional(v.number()),
-    apiHash: v.optional(v.string()),
+    apiId: v.number(),
+    apiHash: v.string(),
     session: v.optional(v.string(), ''),
   }),
   database: v.optional(v.object({

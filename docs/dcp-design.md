@@ -130,7 +130,7 @@ When Projection processes edit or delete events:
 - If the target message is NOT in current IC (already GC'd) → silently ignore. (NOTE: with IC GC not yet implemented, this path is rarely hit — only when a message was never in IC to begin with.)
 - Mirrors real IM behavior: edits and deletes modify the original position, not new timeline entries
 
-Edit and delete events come exclusively from the userbot (gramjs / MTProto). Bot API does not push edit or delete notifications. Without the userbot client, the system would not need to handle edits or deletes at all.
+Edit and delete events come from the active ingress source (userbot when configured, bot otherwise). Bots have server-side limits that make their edit/delete coverage unreliable, so deployments without a userbot inevitably miss some edits and deletes — degraded but operational.
 
 ### User State Change Detection (MetaReducer pattern)
 Reducer compares `event.sender` against `ic.users` on each message. If displayName or username changed, inserts an `ICSystemEvent` at the current position. Old messages retain their original `sender` — Rendering uses `node.sender` (the name at message time), not the latest from `ic.users`. Gives the LLM temporal awareness of identity changes without dedicated platform events. Core MetaReducer idea — a step within the reducer, not a separate abstraction.

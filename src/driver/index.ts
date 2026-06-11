@@ -58,8 +58,7 @@ export const createDriver = (config: DriverConfig, deps: {
   getChatTitle: (chatId: string) => string | undefined;
   runtimeConfig: RuntimeConfig;
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
-  downloadFile: (fileId: string) => Promise<Buffer>;
-  downloadMessageMedia?: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
+  downloadMessageMedia: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
   resolveModel: (name: string) => LlmEndpoint;
   backgroundTask: {
     startTask: (typeName: string, sessionId: string, params: unknown, intention: string | undefined, timeoutMs: number) => number;
@@ -230,7 +229,6 @@ export const createDriver = (config: DriverConfig, deps: {
             const downloadAttachment = createAttachmentDownloader({
               chatId,
               loadMessageAttachments: deps.loadMessageAttachments,
-              downloadFile: deps.downloadFile,
               downloadMessageMedia: deps.downloadMessageMedia,
             });
 

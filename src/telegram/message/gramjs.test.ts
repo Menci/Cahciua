@@ -3,8 +3,6 @@ import { Api } from 'telegram';
 import { describe, expect, it } from 'vitest';
 
 import { fromGramjsAnyMessage, fromGramjsServiceMessage } from './gramjs';
-import { mergeTelegramMessageData } from './index';
-import type { TelegramMessage } from './types';
 
 const createServiceMessage = (options: {
   action: Api.TypeMessageAction;
@@ -90,37 +88,5 @@ describe('fromGramjsAnyMessage', () => {
       newChatTitle: 'Renamed',
       sender: { id: '99', firstName: 'Admin' },
     });
-  });
-});
-
-describe('mergeTelegramMessageData', () => {
-  it('fills userbot service message metadata from the bot copy', () => {
-    const target: TelegramMessage = {
-      messageId: 1,
-      chatId: '-100123',
-      date: 1_700_000_000,
-      text: '',
-      source: 'userbot',
-      sender: { id: '99', firstName: '', isBot: false, isPremium: false },
-      newChatMembers: [{ id: '1', firstName: '', isBot: false, isPremium: false }],
-      attachments: [{ type: 'photo' }],
-    };
-
-    const source: TelegramMessage = {
-      messageId: 1,
-      chatId: '-100123',
-      date: 1_700_000_000,
-      text: '',
-      source: 'bot',
-      sender: { id: '99', firstName: 'Admin', username: 'admin', isBot: false, isPremium: false },
-      newChatMembers: [{ id: '1', firstName: 'Alice', username: 'alice', isBot: false, isPremium: false }],
-      attachments: [{ type: 'photo', fileId: 'file-1', fileUniqueId: 'unique-1' }],
-    };
-
-    mergeTelegramMessageData(target, source);
-
-    expect(target.sender).toMatchObject({ firstName: 'Admin', username: 'admin' });
-    expect(target.newChatMembers?.[0]).toMatchObject({ firstName: 'Alice', username: 'alice' });
-    expect(target.attachments?.[0]).toMatchObject({ fileId: 'file-1', fileUniqueId: 'unique-1' });
   });
 });

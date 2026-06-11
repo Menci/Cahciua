@@ -251,12 +251,10 @@ export const createWebFetchTool = (fetcher: WebFetcher): CahciuaTool => createTo
 
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 
-/** Shared file_id → Buffer logic used by download_file and read_image tools. */
 export const createAttachmentDownloader = (deps: {
   chatId: string;
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
-  downloadFile: (fileId: string) => Promise<Buffer>;
-  downloadMessageMedia?: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
+  downloadMessageMedia: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
 }): (fileId: string) => Promise<Buffer> =>
   async (fileId: string): Promise<Buffer> => {
     const colonIdx = fileId.lastIndexOf(':');
@@ -273,14 +271,7 @@ export const createAttachmentDownloader = (deps: {
     if (attachmentIndex >= attachments.length)
       throw new Error(`Attachment index ${attachmentIndex} out of range (message has ${attachments.length} attachments).`);
 
-    const att = attachments[attachmentIndex]!;
-
-    let buffer: Buffer | undefined;
-    if (att.fileId) {
-      try { buffer = await deps.downloadFile(att.fileId); } catch { /* fall through to userbot */ }
-    }
-    if (!buffer && deps.downloadMessageMedia)
-      buffer = await deps.downloadMessageMedia(deps.chatId, messageId);
+    const buffer = await deps.downloadMessageMedia(deps.chatId, messageId);
     if (!buffer)
       throw new Error('Failed to download file from Telegram.');
 

@@ -332,7 +332,7 @@ describe('adaptMessage', () => {
         type: 'photo',
         width: 800,
         height: 600,
-        fileId: 'abc',
+        mediaId: 'abc',
         thumbnailWebp: 'base64data',
       }],
     }));

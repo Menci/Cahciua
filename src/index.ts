@@ -7,7 +7,7 @@ import { shellTaskFactory } from './background-task/shell';
 import { getChatIds, loadConfig, resolveBackgroundTasks, resolveChatConfig, resolveModel, resolveRuntime } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
-import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadMessageFileId, loadTurnResponses, lookupChatId, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadTurnResponses, lookupChatId, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { PipelineEvent } from './pipeline';
@@ -92,7 +92,7 @@ const main = async () => {
   });
 
   // Custom-emoji-to-text resolver — resolves custom emoji sticker images/animations to descriptions.
-  // Bot API functions are bound lazily via closure over `ref` (telegram manager is created after resolver).
+  // gramjs API access is bound lazily via closure over `ref` (telegram manager is created after resolver).
   const ref: { telegram?: ReturnType<typeof createTelegramManager> } = {};
   const customEmojiToTextResolver = createCustomEmojiToTextResolver({
     enabled: customEmojiToTextChatIds.size > 0,
@@ -102,16 +102,8 @@ const main = async () => {
     logger,
     lookupByHash: hash => loadImageAltTextByHash(db, hash),
     persist: record => persistImageAltText(db, record),
-    getCustomEmojiStickers: async ids => {
-      const bot = ref.telegram!.bot.raw();
-      return await bot.api.getCustomEmojiStickers(ids);
-    },
-    downloadFile: async fileId => {
-      return await ref.telegram!.bot.downloadFile(fileId);
-    },
-    resolvePackTitle: async setName => {
-      return await ref.telegram!.resolvePackTitle(setName);
-    },
+    getCustomEmojiInfo: ids => ref.telegram!.getCustomEmojiInfo(ids),
+    resolvePackTitle: setName => ref.telegram!.resolvePackTitle(setName),
   });
 
   // Sync hydration: after persistEvent, set altText transiently on canonical
@@ -124,17 +116,13 @@ const main = async () => {
     }
   };
 
-  const hasUserbot = config.telegram.apiId != null && config.telegram.apiHash != null;
-
   const knownChatIds = loadKnownChatIds(db);
 
   const telegram = createTelegramManager({
+    apiId: config.telegram.apiId,
+    apiHash: config.telegram.apiHash,
     botToken: config.telegram.botToken,
-    ...(hasUserbot ? {
-      apiId: config.telegram.apiId,
-      apiHash: config.telegram.apiHash,
-      session: loadSession(config.telegram.session ?? ''),
-    } : {}),
+    session: loadSession(config.telegram.session),
     initialChatIds: knownChatIds,
     resolveChatId: messageIds => lookupChatId(db, messageIds),
     imageToText: imageToTextChatIds.size > 0 ? imageToTextResolver : undefined,
@@ -274,38 +262,6 @@ const main = async () => {
     }
   };
 
-  // Helper: create a synthetic event for a bot-sent message and inject into pipeline.
-  const injectSyntheticEvent = (chatId: string, sent: { messageId: number; date: number; text: string; entities?: import('./telegram/message/types').MessageEntity[] }, replyToMessageId?: number) => {
-    const botInfo = telegram.bot.botInfo();
-    const syntheticMsg = {
-      messageId: sent.messageId,
-      chatId,
-      sender: {
-        id: botUserId,
-        firstName: botInfo?.firstName ?? 'Bot',
-        username: botInfo?.username,
-        isBot: true,
-        isPremium: false,
-      },
-      date: sent.date,
-      text: sent.text,
-      entities: sent.entities,
-      replyToMessageId,
-      source: 'bot' as const,
-    };
-    const event = adaptMessage(syntheticMsg);
-    event.isSelfSent = true;
-
-    const ic = pipeline.getIC(chatId);
-    if (ic?.nodes.some(n => n.type === 'message' && n.messageId === event.messageId))
-      logger.withFields({ chatId, messageId: event.messageId }).warn('Synthetic bypass: userbot arrived first (isSelfSent merged via dedup)');
-
-    persistEvent(db, event);
-    hydrateAltTextFromCache(event);
-    if (isConfiguredChat(configuredChatIds, chatId))
-      pipeline.pushEvent(chatId, event);
-  };
-
   // Background task manager — created before driver, wired via lazy ref.
   const driverRef: { handleEvent?: (chatId: string, rc: import('./rendering/types').RenderedContext) => void } = {};
   const backgroundTaskManager = createBackgroundTaskManager({
@@ -339,9 +295,7 @@ const main = async () => {
     sendMessage: async (chatId, text, replyToMessageId, attachments) => {
       // --- Text-only message ---
       if (!attachments || attachments.length === 0) {
-        const sent = await telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined);
-        injectSyntheticEvent(chatId, sent, replyToMessageId);
-        return sent;
+        return await telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined);
       }
 
       // --- Message with attachments ---
@@ -355,9 +309,7 @@ const main = async () => {
       if (attachments.length === 1) {
         // Single attachment — use type-specific send method
         const att = attachments[0]!;
-        const sent = await sendSingleMedia(chatId, att.type, buffers[0]!, htmlCaption, replyToMessageId, att.file_name);
-        injectSyntheticEvent(chatId, sent, replyToMessageId);
-        return sent;
+        return await sendSingleMedia(chatId, att.type, buffers[0]!, htmlCaption, replyToMessageId, att.file_name);
       }
 
       // Multiple attachments — use sendMediaGroup
@@ -373,12 +325,8 @@ const main = async () => {
 
       const sentMessages = await telegram.sendMediaGroup(chatId, media, replyToMessageId ? { replyToMessageId } : undefined);
 
-      // Inject synthetic events for each sent message in the group
-      for (const sent of sentMessages) {
-        injectSyntheticEvent(chatId, sent, replyToMessageId);
-      }
-
-      // Return the first message's info
+      // Return the first message's info — the rest will appear in IC via the
+      // ingress source naturally and get filtered by isSelfSent at compose time.
       return sentMessages[0]!;
     },
     loadCompaction: chatId => loadCompaction(db, chatId),
@@ -388,10 +336,7 @@ const main = async () => {
     getChatTitle: chatId => pipeline.getIC(chatId)?.chatTitle,
     runtimeConfig,
     loadMessageAttachments: (chatId, messageId) => loadMessageAttachments(db, chatId, messageId),
-    downloadFile: fileId => telegram.bot.downloadFile(fileId),
-    downloadMessageMedia: telegram.userbot
-      ? (chatId, messageId) => telegram.userbot!.downloadMessageMedia(chatId, messageId)
-      : undefined,
+    downloadMessageMedia: (chatId, messageId) => telegram.downloadMessageMedia(chatId, messageId),
     resolveModel: name => resolveModel(config, name),
     backgroundTask: {
       startTask: (typeName, sessionId, params, intention, timeoutMs) =>
@@ -554,12 +499,8 @@ const main = async () => {
               const messageId = parseInt(event.messageId, 10);
               if (isNaN(messageId)) return;
 
-              // Try userbot first (works for all media), then Bot API via fileId from messages table
-              let buffer = await telegram.userbot?.downloadMessageMedia(chatId, messageId);
-              if (!buffer) {
-                const fileId = loadMessageFileId(db, chatId, messageId);
-                if (fileId) buffer = await telegram.bot.downloadFile(fileId);
-              }
+              // Single download path (manager picks userbot or bot).
+              const buffer = await telegram.downloadMessageMedia(chatId, messageId);
               if (!buffer) {
                 backfillLog.withFields({ chatId, messageId }).warn('Backfill skipped: download failed');
                 return;

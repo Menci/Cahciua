@@ -468,16 +468,6 @@ export const loadEventsWithId = (db: DB, chatId: string, afterMs?: number): Even
   return rows.map(row => ({ id: row.id, event: reconstructEvent(row) }));
 };
 
-/** Look up a file ID from the messages table for backfill download. */
-export const loadMessageFileId = (db: DB, chatId: string, messageId: number): string | undefined => {
-  const row = db.select({ attachments: messages.attachments })
-    .from(messages)
-    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
-    .limit(1)
-    .get();
-  return row?.attachments?.[0]?.fileId;
-};
-
 /** Load all attachments for a message (used by download_file tool). */
 export const loadMessageAttachments = (db: DB, chatId: string, messageId: number): Attachment[] | undefined => {
   const row = db.select({ attachments: messages.attachments })
