@@ -67,8 +67,13 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
       ],
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
       ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: 'required' } : {}),
-      ...(params.thinking ? { thinking: { type: params.thinking.type ?? 'enabled' } } : {}),
-      ...(params.thinking?.effort ? { reasoning_effort: params.thinking.effort } : {}),
+      // Chat Completions takes the flat `reasoning_effort` field. type === 'disabled' or
+      // no thinking config → omit the field entirely; standard OpenAI rejects 'none', and
+      // unknown values like 'disabled' get silently ignored (still activating thinking),
+      // so the safe off switch is to not send the field at all.
+      ...(params.thinking && params.thinking.type !== 'disabled' && params.thinking.effort
+        ? { reasoning_effort: params.thinking.effort }
+        : {}),
     });
 
     const url = `${params.baseURL.replace(/\/$/, '')}/chat/completions`;

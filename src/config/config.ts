@@ -18,7 +18,7 @@ const llmEndpointEntries = {
   timeoutSec: v.optional(v.number()),
   thinking: v.optional(v.object({
     type: v.optional(v.picklist(['enabled', 'disabled'])),
-    effort: v.optional(v.picklist(['high', 'max'])),
+    effort: v.optional(v.string()),
   })),
 };
 

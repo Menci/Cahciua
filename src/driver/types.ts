@@ -27,7 +27,7 @@ export interface ProbeResponseV2 {
 
 export interface ThinkingConfig {
   type?: 'enabled' | 'disabled';
-  effort?: 'high' | 'max';
+  effort?: string;
 }
 
 export interface LlmEndpoint {
