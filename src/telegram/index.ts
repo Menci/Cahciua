@@ -273,6 +273,7 @@ export const createTelegramManager = (
   // Shared by the userbot's pushed typing events and the active poll.
   const handleTypingEvent = (typing: TypingEvent) => {
     if (!botChats.has(typing.chatId)) return;
+    logger.withFields({ chatId: typing.chatId, userId: typing.userId }).debug('Telegram typing event received');
     typingBus.emit(typing);
   };
 
