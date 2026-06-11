@@ -320,7 +320,7 @@ export const createTelegramManager = (
   };
 
   const stop = async () => {
-    typingPollManager?.stopAll();
+    await typingPollManager?.stopAll();
     await Promise.all([
       bot.stop(),
       userbot?.stop(),
