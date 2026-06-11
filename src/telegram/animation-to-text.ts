@@ -22,13 +22,13 @@ export interface AnimationToTextResolver {
 export const createAnimationToTextResolver = (params: {
   enabled: boolean;
   model?: LlmEndpoint;
-  maxConcurrency?: number;
+  maxConcurrency: number;
   logger: Logger;
   lookupByHash: (hash: string) => ImageAltTextRecord | null;
   persist: (record: ImageAltTextRecord) => void;
 }): AnimationToTextResolver => {
   const log = params.logger.withContext('telegram:animation-to-text');
-  const semaphore = createSemaphore(params.maxConcurrency ?? 3);
+  const semaphore = createSemaphore(params.maxConcurrency);
   const inflightByHash = new Map<string, Promise<ImageAltTextRecord>>();
 
   const resolveByHash = (

@@ -68,14 +68,17 @@ chats:
     imageToText:
       enabled: false
       model: "primary"            # references a key in models
+      maxConcurrency: 3           # max parallel LLM calls for image-to-text
     animationToText:
       enabled: false
       model: "primary"            # references a key in models
       # maxFrames: 5              # max equidistant frames to extract (default 5)
+      maxConcurrency: 3           # max parallel LLM calls for animation-to-text
     customEmojiToText:
       enabled: false
       model: "primary"            # references a key in models
       # maxFrames: 5              # max equidistant frames for animated custom emoji (default 5)
+      maxConcurrency: 3           # max parallel LLM calls for custom-emoji-to-text
     # Tools: configuration for enabled tools.
     tools:
       # bash:

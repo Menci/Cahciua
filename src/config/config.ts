@@ -61,16 +61,19 @@ const ChatConfigSchema = v.object({
   imageToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
     model: v.optional(v.string(), ''),
+    maxConcurrency: v.optional(v.number(), 3),
   }), {}),
   animationToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
     model: v.optional(v.string(), ''),
     maxFrames: v.optional(v.number(), 5),
+    maxConcurrency: v.optional(v.number(), 3),
   }), {}),
   customEmojiToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
     model: v.optional(v.string(), ''),
     maxFrames: v.optional(v.number(), 5),
+    maxConcurrency: v.optional(v.number(), 3),
   }), {}),
   tools: v.object({
     bash: v.optional(v.object({
@@ -115,16 +118,19 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   imageToText: v.partial(v.object({
     enabled: v.boolean(),
     model: v.string(),
+    maxConcurrency: v.number(),
   })),
   animationToText: v.partial(v.object({
     enabled: v.boolean(),
     model: v.string(),
     maxFrames: v.number(),
+    maxConcurrency: v.number(),
   })),
   customEmojiToText: v.partial(v.object({
     enabled: v.boolean(),
     model: v.string(),
     maxFrames: v.number(),
+    maxConcurrency: v.number(),
   })),
   tools: v.partial(v.object({
     bash: v.partial(v.object({
@@ -187,9 +193,9 @@ export interface ResolvedChatConfig {
   debounce: DebounceConfig;
   compaction: CompactionConfig;
   probe: { enabled: boolean; model: LlmEndpoint; forceToolCall: boolean };
-  imageToText: { enabled: boolean; model?: string };
-  animationToText: { enabled: boolean; model?: string; maxFrames: number };
-  customEmojiToText: { enabled: boolean; model?: string; maxFrames: number };
+  imageToText: { enabled: boolean; model?: string; maxConcurrency: number };
+  animationToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
+  customEmojiToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
   tools: {
     bash: { backgroundThresholdSec: number };
     webSearch?: WebSearchConfig;
@@ -277,16 +283,19 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     imageToText: {
       enabled: merged.imageToText.enabled,
       model: merged.imageToText.model || undefined,
+      maxConcurrency: merged.imageToText.maxConcurrency,
     },
     animationToText: {
       enabled: merged.animationToText.enabled,
       model: merged.animationToText.model || undefined,
       maxFrames: merged.animationToText.maxFrames,
+      maxConcurrency: merged.animationToText.maxConcurrency,
     },
     customEmojiToText: {
       enabled: merged.customEmojiToText.enabled,
       model: merged.customEmojiToText.model || undefined,
       maxFrames: merged.customEmojiToText.maxFrames,
+      maxConcurrency: merged.customEmojiToText.maxConcurrency,
     },
     tools: {
       bash: { backgroundThresholdSec: merged.tools.bash.backgroundThresholdSec },

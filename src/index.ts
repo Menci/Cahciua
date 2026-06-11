@@ -75,6 +75,7 @@ const main = async () => {
   const imageToTextResolver = createImageToTextResolver({
     enabled: imageToTextChatIds.size > 0,
     model: defaultChatConfig.imageToText.model ? resolveModel(config, defaultChatConfig.imageToText.model) : undefined,
+    maxConcurrency: defaultChatConfig.imageToText.maxConcurrency,
     logger,
     lookupByHash: imageHash => loadImageAltTextByHash(db, imageHash),
     persist: record => persistImageAltText(db, record),
@@ -84,6 +85,7 @@ const main = async () => {
   const animationToTextResolver = createAnimationToTextResolver({
     enabled: animationToTextChatIds.size > 0,
     model: defaultChatConfig.animationToText.model ? resolveModel(config, defaultChatConfig.animationToText.model) : undefined,
+    maxConcurrency: defaultChatConfig.animationToText.maxConcurrency,
     logger,
     lookupByHash: hash => loadImageAltTextByHash(db, hash),
     persist: record => persistImageAltText(db, record),
@@ -96,6 +98,7 @@ const main = async () => {
     enabled: customEmojiToTextChatIds.size > 0,
     model: defaultChatConfig.customEmojiToText.model ? resolveModel(config, defaultChatConfig.customEmojiToText.model) : undefined,
     maxFrames: defaultChatConfig.customEmojiToText.maxFrames,
+    maxConcurrency: defaultChatConfig.customEmojiToText.maxConcurrency,
     logger,
     lookupByHash: hash => loadImageAltTextByHash(db, hash),
     persist: record => persistImageAltText(db, record),
