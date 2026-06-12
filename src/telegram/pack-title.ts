@@ -10,6 +10,13 @@ export const resolveStickerSetMetadata = async (
   const stickerSetId = metadata?.stickerSetId ?? metadata?.stickerSetName;
   if (!stickerSetId) return {};
 
+  // Already resolved: stickerSetName populated and distinct from the raw id —
+  // skip the network round-trip. Avoids spamming TDLib's getStickerSet on cold
+  // start when DB-stored events already carry resolved titles.
+  if (metadata?.stickerSetName && metadata.stickerSetName !== stickerSetId) {
+    return { stickerSetId, stickerSetName: metadata.stickerSetName };
+  }
+
   return {
     stickerSetId,
     stickerSetName: await resolvePackTitle(stickerSetId),
