@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
 
+import * as tdl from 'tdl';
+
 import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage } from './adaptation';
 import type { ContentNode } from './adaptation/types';
 import { createBackgroundTaskManager } from './background-task';
@@ -21,11 +23,15 @@ import { computeThumbnailHash, createImageToTextResolver } from './telegram/imag
 import { renderMarkdownToTelegramHTML } from './telegram/markdown';
 import type { Attachment } from './telegram/message/types';
 import { normalizeStickerSetMetadata } from './telegram/pack-title';
-import { loadSession } from './telegram/session';
+import { resolveBotDataDir, resolveUserbotDataDir } from './telegram/tdlib-paths';
+import { resolveTdjson } from './telegram/tdjson';
 
 setupLogger();
 
 const logger = useLogger('cahciua');
+
+// Initialize tdl with the resolved libtdjson (vendor build if present, else prebuilt-tdlib).
+tdl.configure({ tdjson: resolveTdjson() });
 
 const main = async () => {
   const config = loadConfig();
@@ -122,7 +128,9 @@ const main = async () => {
     apiId: config.telegram.apiId,
     apiHash: config.telegram.apiHash,
     botToken: config.telegram.botToken,
-    session: loadSession(config.telegram.session),
+    userbotEnabled: config.telegram.userbotEnabled,
+    botDataDir: resolveBotDataDir(config),
+    userbotDataDir: resolveUserbotDataDir(config),
     initialChatIds: knownChatIds,
     resolveChatId: messageIds => lookupChatId(db, messageIds),
     imageToText: imageToTextChatIds.size > 0 ? imageToTextResolver : undefined,

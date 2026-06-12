@@ -9,11 +9,8 @@ export type {
 } from './types';
 
 export {
-  fromGramjsAnyMessage,
-  fromGramjsDeletedMessage,
-  fromGramjsEditedMessage,
-  fromGramjsMessage,
-  fromGramjsServiceMessage,
-  resolveGramjsChatId,
-  resolveGramjsSender,
-} from './gramjs';
+  chatIdToString,
+  fromTdMessage,
+  fromTdMessageEdited,
+  fromTdDeletedMessages,
+} from './tdlib';

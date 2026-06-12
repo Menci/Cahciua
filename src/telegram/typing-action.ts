@@ -1,17 +1,17 @@
-import type { Api } from 'telegram';
+import type * as Td from 'tdlib-types';
 
 const TYPING_LIKE_ACTIONS = new Set<string>([
-  'SendMessageTypingAction',
-  'SendMessageRecordVideoAction',
-  'SendMessageUploadVideoAction',
-  'SendMessageRecordAudioAction',
-  'SendMessageUploadAudioAction',
-  'SendMessageUploadPhotoAction',
-  'SendMessageUploadDocumentAction',
-  'SendMessageRecordRoundAction',
-  'SendMessageUploadRoundAction',
-  'SendMessageChooseStickerAction',
+  'chatActionTyping',
+  'chatActionRecordingVideo',
+  'chatActionUploadingVideo',
+  'chatActionRecordingVoiceNote',
+  'chatActionUploadingVoiceNote',
+  'chatActionUploadingPhoto',
+  'chatActionUploadingDocument',
+  'chatActionRecordingVideoNote',
+  'chatActionUploadingVideoNote',
+  'chatActionChoosingSticker',
 ]);
 
-export const isTypingLikeAction = (action: Api.TypeSendMessageAction): boolean =>
-  TYPING_LIKE_ACTIONS.has(action.className);
+export const isTypingLikeAction = (action: Td.ChatAction): boolean =>
+  TYPING_LIKE_ACTIONS.has(action._);

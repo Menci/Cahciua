@@ -147,3 +147,13 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Locally-built TDLib (escape hatch when prebuilt-tdlib lags behind master).
+# Populated by scripts/build-tdlib.sh.
+vendor/
+.tdlib-build/
+
+# Generated TDLib TypeScript types. Auto-populated on `pnpm install` from
+# whichever libtdjson is currently active (vendor build or prebuilt-tdlib),
+# so committing the file would couple the repo to one specific TDLib commit.
+types/

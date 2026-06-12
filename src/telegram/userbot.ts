@@ -1,21 +1,19 @@
 import type { Logger } from '@guiiai/logg';
-import { Api, TelegramClient } from 'telegram';
-import { NewMessage, type NewMessageEvent } from 'telegram/events';
-import { Raw } from 'telegram/events';
-import { DeletedMessage, type DeletedMessageEvent } from 'telegram/events/DeletedMessage';
-import { EditedMessage, type EditedMessageEvent } from 'telegram/events/EditedMessage';
-import { StringSession } from 'telegram/sessions';
+import * as tdl from 'tdl';
+import type * as Td from 'tdlib-types';
 
+import type { EntityCache } from './entity-cache';
+import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
-import { createGramjsLogger } from './gramjs-logger';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
-import { fromGramjsAnyMessage, fromGramjsDeletedMessage, fromGramjsEditedMessage, resolveGramjsSender } from './message';
+import { fromTdMessage, fromTdMessageEdited } from './message/tdlib';
 import { isTypingLikeAction } from './typing-action';
 
 export interface UserbotOptions {
   apiId: number;
   apiHash: string;
-  session: string;
+  databaseDirectory: string;
+  filesDirectory: string;
 }
 
 export interface TypingEvent {
@@ -33,8 +31,10 @@ export interface UserbotClient {
   fetchMessages(chatId: string, options: FetchOptions): Promise<TelegramMessage[]>;
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
-  raw(): TelegramClient;
-  getSessionString(): string;
+  openChat(chatId: string): Promise<void>;
+  closeChat(chatId: string): Promise<void>;
+  raw(): tdl.Client;
+  entityCache(): EntityCache;
 }
 
 export interface FetchOptions {
@@ -44,153 +44,172 @@ export interface FetchOptions {
   offsetId?: number;
 }
 
+const findFileInContent = (content: Td.MessageContent): Td.file | undefined => {
+  switch (content._) {
+  case 'messagePhoto': {
+    const sizes = content.photo.sizes;
+    return [...sizes].sort((a, b) => b.width * b.height - a.width * a.height)[0]?.photo;
+  }
+  case 'messageDocument': return content.document.document;
+  case 'messageVideo': return content.video.video;
+  case 'messageAudio': return content.audio.audio;
+  case 'messageVoiceNote': return content.voice_note.voice;
+  case 'messageVideoNote': return content.video_note.video;
+  case 'messageAnimation': return content.animation.animation;
+  case 'messageSticker': return content.sticker.sticker;
+  default: return undefined;
+  }
+};
+
 export const createUserbotClient = (options: UserbotOptions, logger: Logger): UserbotClient => {
   const log = logger.withContext('telegram:userbot');
-  const session = new StringSession(options.session);
-  const client = new TelegramClient(session, options.apiId, options.apiHash, {
-    connectionRetries: 3,
-    baseLogger: createGramjsLogger(log),
+  const cache = createEntityCache();
+
+  const client = tdl.createClient({
+    apiId: options.apiId,
+    apiHash: options.apiHash,
+    databaseDirectory: options.databaseDirectory,
+    filesDirectory: options.filesDirectory,
+    tdlibParameters: {
+      device_model: 'Cahciua userbot',
+      application_version: '1.0',
+      use_message_database: true,
+      use_chat_info_database: true,
+      use_secret_chats: false,
+    },
   });
+
+  client.on('error', err => { log.withError(err).error('tdl client error'); });
 
   const messageBus = createEventBus<TelegramMessage>('userbot:message', log);
   const editBus = createEventBus<TelegramMessageEdit>('userbot:edit', log);
   const deleteBus = createEventBus<TelegramMessageDelete>('userbot:delete', log);
   const typingBus = createEventBus<TypingEvent>('userbot:typing', log);
-  let eventHandlerRegistered = false;
 
-  const registerEventHandler = () => {
-    if (eventHandlerRegistered) return;
-    eventHandlerRegistered = true;
-
-    client.addEventHandler(
-      (event: NewMessageEvent) => {
-        if (!event.message || event.message instanceof Api.MessageEmpty) return;
-        const msg = fromGramjsAnyMessage(event.message);
-        if (msg) messageBus.emit(msg);
-      },
-      new NewMessage({}),
-    );
-
-    client.addEventHandler(
-      (event: EditedMessageEvent) => {
-        if (!event.message || event.message instanceof Api.MessageEmpty) return;
-        // MTProto fires updateEditMessage for metadata-only changes (link preview
-        // loading, first reaction in large supergroups, inline keyboard updates,
-        // edit_hide corrections). These "phantom edits" have no editDate.
-        // Skip them here — if we later need reactions, subscribe to
-        // updateMessageReactions separately instead of relying on edit events.
-        if (!event.message.editDate) return;
-        const msg = event.message;
-        const sender = resolveGramjsSender(msg);
-        editBus.emit(fromGramjsEditedMessage(msg, sender));
-      },
-      new EditedMessage({}),
-    );
-
-    client.addEventHandler(
-      (event: DeletedMessageEvent) => {
-        const peer = event.peer instanceof Api.PeerChannel ? event.peer : undefined;
-        deleteBus.emit(fromGramjsDeletedMessage(event.deletedIds, peer));
-      },
-      new DeletedMessage({}),
-    );
-
-    client.addEventHandler(
-      (update: Api.TypeUpdate) => {
-        let chatId: string | undefined;
-        let userId: string | undefined;
-
-        if (update instanceof Api.UpdateChannelUserTyping) {
-          chatId = `-100${update.channelId.toJSNumber()}`;
-          if (update.fromId instanceof Api.PeerUser)
-            userId = `${update.fromId.userId.toJSNumber()}`;
-          if (isTypingLikeAction(update.action) && chatId && userId)
-            typingBus.emit({ chatId, userId });
-        } else if (update instanceof Api.UpdateChatUserTyping) {
-          chatId = `-${update.chatId.toJSNumber()}`;
-          if (update.fromId instanceof Api.PeerUser)
-            userId = `${update.fromId.userId.toJSNumber()}`;
-          if (isTypingLikeAction(update.action) && chatId && userId)
-            typingBus.emit({ chatId, userId });
+  client.on('update', (update: Td.Update) => {
+    switch (update._) {
+    case 'updateUser':
+      cache.putUser(update.user);
+      return;
+    case 'updateNewChat':
+      cache.putChat(update.chat);
+      return;
+    case 'updateNewMessage': {
+      const msg = fromTdMessage(cache, update.message);
+      if (msg) messageBus.emit(msg);
+      return;
+    }
+    case 'updateMessageEdited': {
+      // Edit fires updateMessageEdited (with new edit_date) AND updateMessageContent.
+      // We re-fetch the message to get the full updated state and emit a single edit.
+      // Phantom edits (link preview load, etc.) do not fire updateMessageEdited — only
+      // updateMessageContent — so this gating is exactly what we want.
+      void (async () => {
+        try {
+          const msg = await client.invoke({ _: 'getMessage', chat_id: update.chat_id, message_id: update.message_id }) as Td.message;
+          const edit = fromTdMessageEdited(cache, msg);
+          if (edit) editBus.emit(edit);
+        } catch (err) {
+          log.withError(err).withFields({ chatId: update.chat_id, messageId: update.message_id }).warn('Failed to fetch edited message');
         }
-      },
-      new Raw({ types: [Api.UpdateChannelUserTyping, Api.UpdateChatUserTyping] }),
-    );
-
-    log.log('Event handlers registered');
-  };
+      })();
+      return;
+    }
+    case 'updateDeleteMessages': {
+      if (!update.is_permanent) return;
+      deleteBus.emit({ messageIds: [...update.message_ids], chatId: String(update.chat_id) });
+      return;
+    }
+    case 'updateChatAction': {
+      if (update.sender_id._ !== 'messageSenderUser') return;
+      if (!isTypingLikeAction(update.action)) return;
+      typingBus.emit({ chatId: String(update.chat_id), userId: String(update.sender_id.user_id) });
+      return;
+    }
+    }
+  });
 
   const start = async () => {
     log.log('Connecting...');
-    await client.connect();
-
-    const authorized = await client.isUserAuthorized();
-    if (!authorized) {
-      throw new Error(
-        'Userbot session is not authorized. Run `pnpm login` to create a session first.',
-      );
-    }
-
-    const me = await client.getMe();
-    if (me instanceof Api.User) {
-      log.withFields({
-        id: me.id.toJSNumber(),
-        username: me.username,
-        name: [me.firstName, me.lastName].filter(Boolean).join(' '),
-      }).log('Authenticated');
-    }
-
-    registerEventHandler();
-    // Warm entity cache so getInputEntity can resolve channels before live updates arrive
+    await client.login(); // Interactive prompt: phone → code → 2FA. Use `pnpm login` to do this once.
+    const me = await client.invoke({ _: 'getMe' }) as Td.user;
+    log.withFields({
+      id: me.id,
+      username: me.usernames?.editable_username || me.usernames?.active_usernames?.[0],
+      name: [me.first_name, me.last_name].filter(Boolean).join(' '),
+    }).log('Authenticated');
+    // Warm chat cache so updates can resolve sender info before we see them.
     try {
-      const dialogs = await client.getDialogs({});
-      log.withFields({ count: dialogs.length }).log('Entity cache warmed via getDialogs');
+      await client.invoke({ _: 'loadChats', chat_list: { _: 'chatListMain' }, limit: 500 });
     } catch (err) {
-      log.withError(err).warn('Failed to warm entity cache via getDialogs');
+      log.withError(err).debug('loadChats returned (often expected: no more chats)');
     }
   };
 
   const stop = async () => {
     log.log('Disconnecting...');
-    await client.destroy();
+    await client.close();
     log.log('Disconnected');
   };
 
   const fetchMessages = async (chatId: string, opts: FetchOptions): Promise<TelegramMessage[]> => {
-    const messages = await client.getMessages(chatId, {
-      limit: opts.limit ?? 100,
-      minId: opts.minId,
-      maxId: opts.maxId,
-      offsetId: opts.offsetId,
+    const limit = opts.limit ?? 100;
+    const result = await client.invoke({
+      _: 'getChatHistory',
+      chat_id: Number(chatId),
+      from_message_id: opts.offsetId ?? 0,
+      offset: 0,
+      limit,
+      only_local: false,
+    }) as Td.messages;
+    return result.messages.flatMap((m): TelegramMessage[] => {
+      if (!m) return [];
+      if (opts.minId !== undefined && m.id <= opts.minId) return [];
+      if (opts.maxId !== undefined && m.id >= opts.maxId) return [];
+      const conv = fromTdMessage(cache, m);
+      return conv ? [conv] : [];
     });
-
-    return messages
-      .filter(m => !(m instanceof Api.MessageEmpty))
-      .flatMap(m => {
-        const result = fromGramjsAnyMessage(m);
-        return result ? [result] : [];
-      });
   };
 
   const fetchSpecificMessages = async (chatId: string, messageIds: number[]): Promise<TelegramMessage[]> => {
     if (messageIds.length === 0) return [];
+    const result = await client.invoke({
+      _: 'getMessages',
+      chat_id: Number(chatId),
+      message_ids: messageIds,
+    }) as Td.messages;
+    return result.messages.flatMap((m): TelegramMessage[] => {
+      if (!m) return [];
+      const conv = fromTdMessage(cache, m);
+      return conv ? [conv] : [];
+    });
+  };
 
-    const messages = await client.getMessages(chatId, { ids: messageIds });
-
-    return messages
-      .filter(m => !(m instanceof Api.MessageEmpty))
-      .flatMap(m => {
-        const result = fromGramjsAnyMessage(m);
-        return result ? [result] : [];
-      });
+  const waitForFileDownload = async (fileId: number, timeoutMs = 60000): Promise<Td.file> => {
+    const result = await Promise.race([
+      client.invoke({ _: 'downloadFile', file_id: fileId, priority: 1, offset: 0, limit: 0, synchronous: true }) as Promise<Td.file>,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Download timeout')), timeoutMs)),
+    ]);
+    if (!result.local.is_downloading_completed)
+      throw new Error(`File ${fileId} did not finish downloading`);
+    return result;
   };
 
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
-    const msgs = await client.getMessages(chatId, { ids: [messageId] });
-    const msg = msgs[0];
-    if (!msg || msg instanceof Api.MessageEmpty || !msg.media) return undefined;
-    const result = await client.downloadMedia(msg, {});
-    return Buffer.isBuffer(result) ? result : undefined;
+    const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: messageId }) as Td.message;
+    const file = findFileInContent(msg.content);
+    if (!file) return undefined;
+    const downloaded = await waitForFileDownload(file.id);
+    const fs = await import('node:fs/promises');
+    return await fs.readFile(downloaded.local.path);
+  };
+
+  const openChat = async (chatId: string) => {
+    await client.invoke({ _: 'openChat', chat_id: Number(chatId) });
+  };
+
+  const closeChat = async (chatId: string) => {
+    await client.invoke({ _: 'closeChat', chat_id: Number(chatId) });
   };
 
   return {
@@ -203,7 +222,9 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     fetchMessages,
     fetchSpecificMessages,
     downloadMessageMedia,
+    openChat,
+    closeChat,
     raw: () => client,
-    getSessionString: () => String(client.session.save()),
+    entityCache: () => cache,
   };
 };

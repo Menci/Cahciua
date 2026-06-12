@@ -160,7 +160,12 @@ const ConfigSchema = v.object({
     botToken: v.string(),
     apiId: v.number(),
     apiHash: v.string(),
-    session: v.optional(v.string(), ''),
+    /** Whether to enable userbot. Requires running `pnpm login` once to populate the tdlib state dir. */
+    userbotEnabled: v.optional(v.boolean(), false),
+    /** Override the default tdlib state directory for the bot client (defaults to data/tdlib-bot). */
+    botDataDir: v.optional(v.string()),
+    /** Override the default tdlib state directory for the userbot client (defaults to data/tdlib-userbot). */
+    userbotDataDir: v.optional(v.string()),
   }),
   database: v.optional(v.object({
     path: v.optional(v.string(), './data/cahciua.db'),

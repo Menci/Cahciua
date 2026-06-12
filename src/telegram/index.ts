@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+
 import type { Logger } from '@guiiai/logg';
 
 import type { AnimationToTextResolver } from './animation-to-text';
@@ -11,7 +13,6 @@ import type { Attachment, MessageEntity, TelegramMessage, TelegramMessageDelete,
 import { normalizeStickerSetMetadata } from './pack-title';
 import { createSessionIngressQueue } from './session-ingress-queue';
 import { canGenerateThumbnail, generateThumbnail } from './thumbnail';
-import { createTypingPollManager } from './typing-poll';
 import type { FetchOptions, TypingEvent, UserbotClient } from './userbot';
 import { createUserbotClient } from './userbot';
 
@@ -19,7 +20,11 @@ export interface TelegramManagerOptions {
   apiId: number;
   apiHash: string;
   botToken: string;
-  session?: string;
+  /** Whether to enable userbot (requires interactive login via `pnpm login`). */
+  userbotEnabled: boolean;
+  /** Per-client tdlib state directories (database + files). */
+  botDataDir: string;
+  userbotDataDir: string;
   initialChatIds?: string[];
   resolveChatId?: (messageIds: number[]) => string | undefined;
   imageToText?: ImageToTextResolver;
@@ -64,7 +69,7 @@ export interface TelegramManager {
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
   getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
-  resolvePackTitle(setName: string): Promise<string>;
+  resolvePackTitle(setIdOrName: string): Promise<string>;
   botUserId: string;
   bot: BotClient;
   userbot?: UserbotClient;
@@ -75,15 +80,29 @@ export const createTelegramManager = (
   logger: Logger,
 ): TelegramManager => {
   const log = logger.withContext('telegram:manager');
-  const bot = createBotClient({ apiId: options.apiId, apiHash: options.apiHash, token: options.botToken }, logger);
-  const userbot = options.session
-    ? createUserbotClient({ apiId: options.apiId, apiHash: options.apiHash, session: options.session }, logger)
+
+  mkdirSync(options.botDataDir, { recursive: true });
+  if (options.userbotEnabled) mkdirSync(options.userbotDataDir, { recursive: true });
+
+  const bot = createBotClient({
+    apiId: options.apiId,
+    apiHash: options.apiHash,
+    token: options.botToken,
+    databaseDirectory: `${options.botDataDir}/db`,
+    filesDirectory: `${options.botDataDir}/files`,
+  }, logger);
+
+  const userbot = options.userbotEnabled
+    ? createUserbotClient({
+        apiId: options.apiId,
+        apiHash: options.apiHash,
+        databaseDirectory: `${options.userbotDataDir}/db`,
+        filesDirectory: `${options.userbotDataDir}/files`,
+      }, logger)
     : undefined;
 
   // Single-source ingress: prefer userbot when present (full visibility), fall
   // back to bot client otherwise (limited by Telegram's bot privacy rules).
-  // Whichever is unselected still receives updates over its own MTProto stream
-  // — we silently ignore them at the handler level.
   const ingressFromUserbot = userbot != null;
 
   const botChats = new Set<string>(options.initialChatIds);
@@ -92,8 +111,6 @@ export const createTelegramManager = (
   const deleteBus = createEventBus<TelegramMessageDelete>('telegram:delete', logger);
   const typingBus = createEventBus<TypingEvent>('telegram:typing', logger);
 
-  // Unified download by (chatId, messageId): prefers userbot for full visibility,
-  // falls back to bot's own MTProto session.
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
     if (userbot) {
       const buf = await userbot.downloadMessageMedia(chatId, messageId);
@@ -110,29 +127,28 @@ export const createTelegramManager = (
   const customEmojiToText = options.customEmojiToText;
   const customEmojiToTextChatIds = options.customEmojiToTextChatIds;
 
-  // Pack title cache: set_name → display title (in-process, never changes)
   const packTitleCache = new Map<string, string>();
   const packTitleInflight = new Map<string, Promise<string>>();
-  const resolvePackTitle = async (setName: string): Promise<string> => {
-    const cached = packTitleCache.get(setName);
+  const resolvePackTitle = async (setIdOrName: string): Promise<string> => {
+    const cached = packTitleCache.get(setIdOrName);
     if (cached) return cached;
-    const inflight = packTitleInflight.get(setName);
+    const inflight = packTitleInflight.get(setIdOrName);
     if (inflight) return await inflight;
 
     const task = (async () => {
       try {
-        const title = await bot.getStickerSetTitle(setName);
-        packTitleCache.set(setName, title);
+        const title = await bot.getStickerSetTitle(setIdOrName);
+        packTitleCache.set(setIdOrName, title);
         return title;
       } catch (err) {
-        log.withError(err).withFields({ setName }).warn('Failed to resolve pack title');
-        return setName;
+        log.withError(err).withFields({ setIdOrName }).warn('Failed to resolve pack title');
+        return setIdOrName;
       } finally {
-        packTitleInflight.delete(setName);
+        packTitleInflight.delete(setIdOrName);
       }
     })();
 
-    packTitleInflight.set(setName, task);
+    packTitleInflight.set(setIdOrName, task);
     return await task;
   };
 
@@ -144,11 +160,8 @@ export const createTelegramManager = (
     entities?: MessageEntity[],
   ) => {
     if (attachments) {
-      // Phase 0: Normalize sticker pack metadata once: raw set_name -> display title.
       await normalizeStickerSetMetadata(attachments, resolvePackTitle);
 
-      // Phase 1: Download media + generate thumbnails for eligible attachments.
-      // Keep original buffers for high-res LLM input later.
       const originalBuffers = new Map<Attachment, Buffer>();
       await Promise.all(attachments.map(async att => {
         if (att.thumbnailWebp || !canGenerateThumbnail(att)) return;
@@ -163,7 +176,6 @@ export const createTelegramManager = (
         }
       }));
 
-      // Phase 2: Call image-to-text resolver for each attachment with a thumbnail.
       if (imageToText && (!imageToTextChatIds || imageToTextChatIds.has(chatId))) {
         await Promise.all(attachments.map(async att => {
           if (!att.thumbnailWebp) return;
@@ -173,8 +185,6 @@ export const createTelegramManager = (
         }));
       }
 
-      // Phase 3: Download animation media, extract frames, call animation-to-text resolver.
-      // Sets animationHash on the Attachment so it propagates through adaptation and persists in events.
       if (animationToText && (!animationToTextChatIds || animationToTextChatIds.has(chatId))) {
         await Promise.all(attachments.map(async att => {
           if (!canExtractFrames(att)) return;
@@ -200,12 +210,10 @@ export const createTelegramManager = (
       }
     }
 
-    // Phase 4: Resolve custom emoji descriptions from entities.
     if (customEmojiToText && (!customEmojiToTextChatIds || customEmojiToTextChatIds.has(chatId)) && entities) {
       const emojiIds = new Map<string, string>();
       for (const ent of entities) {
         if (ent.type === 'custom_emoji' && ent.customEmojiId) {
-          // Extract fallback emoji text from the message text using entity offset/length
           const fallback = text.substring(ent.offset, ent.offset + ent.length);
           emojiIds.set(ent.customEmojiId, fallback);
         }
@@ -251,7 +259,6 @@ export const createTelegramManager = (
     ingressQueue.enqueue({ kind: 'message', chatId: enriched.chatId, message: enriched });
   };
 
-  // Shared by the userbot's pushed typing events and the active poll.
   const handleTypingEvent = (typing: TypingEvent) => {
     if (!botChats.has(typing.chatId)) return;
     logger.withFields({ chatId: typing.chatId, userId: typing.userId }).debug('Telegram typing event received');
@@ -282,19 +289,20 @@ export const createTelegramManager = (
 
     userbot.onTyping(handleTypingEvent);
   } else {
-    // Fallback ingress via bot — limited visibility (privacy mode rules apply,
-    // edit/delete/typing largely unavailable). Acceptable for deployments
-    // running without a userbot session.
     bot.onMessage(ingestMessage);
   }
 
-  // Active typing poll for large supergroups (where MTProto doesn't push typing
-  // to a passive client). Started/stopped by the driver via the debounce lifecycle.
-  const typingPollManager = userbot
-    ? createTypingPollManager(userbot.raw(), handleTypingEvent, logger)
-    : undefined;
-  const startTypingPolling = (chatId: string) => { void typingPollManager?.startPolling(chatId); };
-  const stopTypingPolling = (chatId: string) => { typingPollManager?.stopPolling(chatId); };
+  // Active typing observation: openChat tells tdlib we're "viewing" a chat,
+  // which makes it deliver updateChatAction for that chat reliably even in
+  // large supergroups. closeChat reverses it. Replaces the gramjs typing-poll.
+  const startTypingPolling = (chatId: string) => {
+    if (!userbot) return;
+    void userbot.openChat(chatId).catch(err => log.withError(err).withFields({ chatId }).warn('openChat failed'));
+  };
+  const stopTypingPolling = (chatId: string) => {
+    if (!userbot) return;
+    void userbot.closeChat(chatId).catch(err => log.withError(err).withFields({ chatId }).warn('closeChat failed'));
+  };
 
   const start = async () => {
     await Promise.all([
@@ -304,7 +312,6 @@ export const createTelegramManager = (
   };
 
   const stop = async () => {
-    await typingPollManager?.stopAll();
     await Promise.all([
       bot.stop(),
       userbot?.stop(),

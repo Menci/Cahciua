@@ -22,10 +22,8 @@ export interface ForwardInfo {
 export interface Attachment {
   type: 'photo' | 'sticker' | 'document' | 'video' | 'audio' | 'voice' | 'video_note' | 'animation';
 
-  // gramjs document/photo numeric ID, used to remember which item this is.
-  // Re-downloading is keyed off (chatId, messageId), not this field — MTProto
-  // file references include access_hash + file_reference which expire.
-  mediaId?: string;
+  // Display metadata only. Re-downloading is keyed off (chatId, messageId) —
+  // tdlib's local file ids are ephemeral and stable references aren't kept here.
   fileName?: string;
   mimeType?: string;
   fileSize?: number;

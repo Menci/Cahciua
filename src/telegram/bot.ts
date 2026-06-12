@@ -1,20 +1,23 @@
-import type { Logger } from '@guiiai/logg';
-import bigInt from 'big-integer';
-import { Api, TelegramClient } from 'telegram';
-import { CustomFile } from 'telegram/client/uploads';
-import { NewMessage, type NewMessageEvent } from 'telegram/events';
-import { StringSession } from 'telegram/sessions';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import type { Logger } from '@guiiai/logg';
+import * as tdl from 'tdl';
+import type * as Td from 'tdlib-types';
+
+import type { EntityCache } from './entity-cache';
+import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
-import { createGramjsLogger } from './gramjs-logger';
-import { renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
-import { fromGramjsAnyMessage } from './message';
+import { fromTdMessage } from './message/tdlib';
 
 export interface BotClientOptions {
   apiId: number;
   apiHash: string;
   token: string;
+  databaseDirectory: string;
+  filesDirectory: string;
 }
 
 export interface BotInfo {
@@ -53,6 +56,7 @@ export interface CustomEmojiInfo {
   isAnimated: boolean;
   isVideo: boolean;
   setName?: string;
+  setTitle?: string;
   download: () => Promise<Buffer>;
 }
 
@@ -71,103 +75,128 @@ export interface BotClient {
   sendMediaGroup(chatId: string | number, media: MediaGroupItem[], options?: SendOptions): Promise<SentMessage[]>;
   sendChatAction(chatId: string | number, action?: 'typing'): Promise<void>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
-  getStickerSetTitle(setName: string): Promise<string>;
+  getStickerSetTitle(setIdOrName: string): Promise<string>;
   getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
-  raw(): TelegramClient;
+  raw(): tdl.Client;
+  entityCache(): EntityCache;
   botUserId(): string;
   botInfo(): BotInfo | undefined;
 }
 
-const toCaption = (caption: string | undefined, mode: 'HTML' | 'MarkdownV2' | undefined): string | undefined => {
-  if (!caption) return undefined;
-  if (mode === 'HTML') return caption;
-  return caption;
+const parseMode = (mode: 'HTML' | 'MarkdownV2' | undefined): Td.TextParseMode$Input => {
+  if (mode === 'MarkdownV2') return { _: 'textParseModeMarkdown', version: 2 };
+  return { _: 'textParseModeHTML' };
 };
 
-const buildAttributes = (kind: MediaGroupItem['type'] | 'voice' | 'video_note' | 'animation', fileName?: string): Api.TypeDocumentAttribute[] => {
-  const attrs: Api.TypeDocumentAttribute[] = [];
-  if (fileName) attrs.push(new Api.DocumentAttributeFilename({ fileName }));
-  if (kind === 'voice') {
-    attrs.push(new Api.DocumentAttributeAudio({ voice: true, duration: 0 }));
-  } else if (kind === 'video_note') {
-    attrs.push(new Api.DocumentAttributeVideo({ roundMessage: true, supportsStreaming: false, duration: 0, w: 0, h: 0 }));
-  } else if (kind === 'animation') {
-    attrs.push(new Api.DocumentAttributeAnimated());
+const formattedFromHtml = (text: string, mode: 'HTML' | 'MarkdownV2' = 'HTML'): Td.formattedText$Input => {
+  if (!text) return { _: 'formattedText', text: '', entities: [] };
+  const result = tdl.execute({ _: 'parseTextEntities', text, parse_mode: parseMode(mode) });
+  if (result && result._ === 'formattedText') {
+    return { _: 'formattedText', text: result.text, entities: result.entities };
   }
-  return attrs;
+  // parseTextEntities returned an error — fall back to plain text without entities.
+  return { _: 'formattedText', text, entities: [] };
+};
+
+const writeTempBuffer = async (workDir: string, buffer: Buffer, fileName: string): Promise<string> => {
+  const safeName = fileName.replace(/[^A-Za-z0-9._-]/g, '_');
+  const path = join(workDir, safeName);
+  await writeFile(path, buffer);
+  return path;
+};
+
+const findFileInContent = (content: Td.MessageContent): Td.file | undefined => {
+  switch (content._) {
+  case 'messagePhoto': {
+    const sizes = content.photo.sizes;
+    return [...sizes].sort((a, b) => b.width * b.height - a.width * a.height)[0]?.photo;
+  }
+  case 'messageDocument': return content.document.document;
+  case 'messageVideo': return content.video.video;
+  case 'messageAudio': return content.audio.audio;
+  case 'messageVoiceNote': return content.voice_note.voice;
+  case 'messageVideoNote': return content.video_note.video;
+  case 'messageAnimation': return content.animation.animation;
+  case 'messageSticker': return content.sticker.sticker;
+  default: return undefined;
+  }
 };
 
 export const createBotClient = (options: BotClientOptions, logger: Logger): BotClient => {
   const log = logger.withContext('telegram:bot');
-  const session = new StringSession('');
-  const client = new TelegramClient(session, options.apiId, options.apiHash, {
-    connectionRetries: 3,
-    baseLogger: createGramjsLogger(log),
+  const cache = createEntityCache();
+
+  const client = tdl.createClient({
+    apiId: options.apiId,
+    apiHash: options.apiHash,
+    databaseDirectory: options.databaseDirectory,
+    filesDirectory: options.filesDirectory,
+    tdlibParameters: {
+      device_model: 'Cahciua bot',
+      application_version: '1.0',
+      use_message_database: false,
+      use_chat_info_database: true,
+      use_secret_chats: false,
+    },
   });
+
+  client.on('error', err => { log.withError(err).error('tdl client error'); });
 
   const messageBus = createEventBus<TelegramMessage>('bot:message', log);
 
   const userId = options.token.split(':')[0]!;
   let info: BotInfo | undefined;
 
+  client.on('update', (update: Td.Update) => {
+    switch (update._) {
+    case 'updateUser':
+      cache.putUser(update.user);
+      break;
+    case 'updateNewChat':
+      cache.putChat(update.chat);
+      break;
+    case 'updateNewMessage': {
+      const msg = fromTdMessage(cache, update.message);
+      if (msg) messageBus.emit({ ...msg, source: 'bot' });
+      break;
+    }
+    }
+  });
+
   const start = async () => {
     log.log('Starting bot...');
-    await client.start({
-      botAuthToken: options.token,
-      onError: err => { log.withError(err).error('Bot login error'); },
-    });
-
-    const me = await client.getMe();
-    if (me instanceof Api.User) {
-      info = {
-        id: me.id.toJSNumber(),
-        firstName: me.firstName ?? 'Bot',
-        username: me.username,
-      };
-      log.withFields({
-        id: info.id,
-        username: info.username,
-        name: [me.firstName, me.lastName].filter(Boolean).join(' '),
-      }).log('Bot authenticated');
-    }
-
-    client.addEventHandler(
-      (event: NewMessageEvent) => {
-        if (!event.message || event.message instanceof Api.MessageEmpty) return;
-        const msg = fromGramjsAnyMessage(event.message);
-        if (msg) {
-          // Stamp source so downstream identifies bot-side ingress (used only when
-          // userbot is absent — see TelegramManager).
-          messageBus.emit({ ...msg, source: 'bot' });
-        }
-      },
-      new NewMessage({}),
-    );
+    await client.loginAsBot(options.token);
+    const me = await client.invoke({ _: 'getMe' }) as Td.user;
+    info = {
+      id: me.id,
+      firstName: me.first_name,
+      username: me.usernames?.editable_username || me.usernames?.active_usernames?.[0],
+    };
+    log.withFields({ id: info.id, username: info.username, name: [me.first_name, me.last_name].filter(Boolean).join(' ') }).log('Bot authenticated');
   };
 
   const stop = async () => {
     log.log('Stopping bot...');
-    await client.destroy();
+    await client.close();
     log.log('Bot stopped');
   };
 
-  const renderForSend = (text: string, parseMode: 'HTML' | 'MarkdownV2' | undefined): { content: string; parseMode: 'html' | 'md' | undefined } => {
-    if (parseMode === 'MarkdownV2') return { content: text, parseMode: 'md' };
-    return { content: renderMarkdownToTelegramHTML(text), parseMode: 'html' };
-  };
-
   const sendMessage = async (chatId: string | number, text: string, opts?: SendOptions): Promise<SentMessage> => {
-    const { content, parseMode } = renderForSend(text, opts?.parseMode ?? 'HTML');
-    const sent = await client.sendMessage(String(chatId), {
-      message: content,
-      parseMode,
-      replyTo: opts?.replyToMessageId,
-    });
-    return {
-      messageId: sent.id,
-      date: sent.date,
-      text: sent.message ?? '',
-    };
+    const formatted = formattedFromHtml(text, opts?.parseMode ?? 'HTML');
+    const sent = await client.invoke({
+      _: 'sendMessage',
+      chat_id: Number(chatId),
+      reply_to: opts?.replyToMessageId
+        ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
+        : undefined,
+      input_message_content: {
+        _: 'inputMessageText',
+        text: formatted,
+        clear_draft: true,
+      },
+    }) as Td.message;
+    const content = sent.content._ === 'messageText' ? sent.content.text.text : '';
+    return { messageId: sent.id, date: sent.date, text: content };
   };
 
   const sendFileGeneric = async (
@@ -176,116 +205,154 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     kind: 'photo' | 'video' | 'audio' | 'voice' | 'animation' | 'video_note' | 'document',
     opts?: MediaSendOptions,
   ): Promise<SentMessage> => {
-    const captionMode = opts?.captionParseMode;
-    const file = new CustomFile(opts?.fileName ?? `${kind}.bin`, buffer.length, '', buffer);
-    const sent = await client.sendFile(String(chatId), {
-      file,
-      caption: toCaption(opts?.caption, captionMode),
-      parseMode: captionMode === 'MarkdownV2' ? 'md' : 'html',
-      replyTo: opts?.replyToMessageId,
-      forceDocument: kind === 'document',
-      voiceNote: kind === 'voice',
-      videoNote: kind === 'video_note',
-      attributes: buildAttributes(kind, opts?.fileName),
-    });
-    return {
-      messageId: sent.id,
-      date: sent.date,
-      text: sent.message ?? '',
-    };
+    const workDir = await mkdtemp(join(tmpdir(), 'cahciua-tdl-'));
+    try {
+      const fileName = opts?.fileName ?? `${kind}.bin`;
+      const path = await writeTempBuffer(workDir, buffer, fileName);
+      const inputFile: Td.InputFile$Input = { _: 'inputFileLocal', path };
+      const caption = opts?.caption ? formattedFromHtml(opts.caption, opts.captionParseMode ?? 'HTML') : { _: 'formattedText' as const, text: '', entities: [] };
+
+      let content: Td.InputMessageContent$Input;
+      switch (kind) {
+      case 'photo':
+        content = { _: 'inputMessagePhoto', photo: inputFile, width: 0, height: 0, caption };
+        break;
+      case 'video':
+        content = { _: 'inputMessageVideo', video: inputFile, duration: 0, width: 0, height: 0, supports_streaming: true, caption };
+        break;
+      case 'audio':
+        content = { _: 'inputMessageAudio', audio: inputFile, duration: 0, caption };
+        break;
+      case 'voice':
+        content = { _: 'inputMessageVoiceNote', voice_note: inputFile, duration: 0, caption };
+        break;
+      case 'animation':
+        content = { _: 'inputMessageAnimation', animation: inputFile, duration: 0, width: 0, height: 0, caption };
+        break;
+      case 'video_note':
+        content = { _: 'inputMessageVideoNote', video_note: inputFile, duration: 0, length: 240 };
+        break;
+      case 'document':
+      default:
+        content = { _: 'inputMessageDocument', document: inputFile, disable_content_type_detection: false, caption };
+        break;
+      }
+
+      const sent = await client.invoke({
+        _: 'sendMessage',
+        chat_id: Number(chatId),
+        reply_to: opts?.replyToMessageId
+          ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
+          : undefined,
+        input_message_content: content,
+      }) as Td.message;
+      const captionText = 'caption' in sent.content && sent.content.caption ? sent.content.caption.text : '';
+      return { messageId: sent.id, date: sent.date, text: captionText };
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
   };
 
-  const sendPhoto = (chatId: string | number, photo: Buffer, opts?: MediaSendOptions) =>
-    sendFileGeneric(chatId, photo, 'photo', opts);
-  const sendDocument = (chatId: string | number, document: Buffer, opts?: MediaSendOptions) =>
-    sendFileGeneric(chatId, document, 'document', opts);
-  const sendVideo = (chatId: string | number, video: Buffer, opts?: MediaSendOptions) =>
-    sendFileGeneric(chatId, video, 'video', opts);
-  const sendAudio = (chatId: string | number, audio: Buffer, opts?: MediaSendOptions) =>
-    sendFileGeneric(chatId, audio, 'audio', opts);
-  const sendVoice = (chatId: string | number, voice: Buffer, opts?: MediaSendOptions) =>
-    sendFileGeneric(chatId, voice, 'voice', opts);
-  const sendAnimation = (chatId: string | number, animation: Buffer, opts?: MediaSendOptions) =>
-    sendFileGeneric(chatId, animation, 'animation', opts);
-  const sendVideoNote = (chatId: string | number, videoNote: Buffer, opts?: MediaSendOptions) =>
-    sendFileGeneric(chatId, videoNote, 'video_note', opts);
+  const sendPhoto = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'photo', o);
+  const sendDocument = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'document', o);
+  const sendVideo = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'video', o);
+  const sendAudio = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'audio', o);
+  const sendVoice = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'voice', o);
+  const sendAnimation = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'animation', o);
+  const sendVideoNote = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'video_note', o);
 
   const sendMediaGroup = async (chatId: string | number, media: MediaGroupItem[], opts?: SendOptions): Promise<SentMessage[]> => {
-    const files = media.map(m => new CustomFile(m.fileName ?? `${m.type}.bin`, m.buffer.length, '', m.buffer));
-    const captions = media.map(m => toCaption(m.caption, m.captionParseMode) ?? '');
-    const sent = await client.sendFile(String(chatId), {
-      file: files,
-      caption: captions,
-      parseMode: media[0]?.captionParseMode === 'MarkdownV2' ? 'md' : 'html',
-      replyTo: opts?.replyToMessageId,
-    });
-    const arr = Array.isArray(sent) ? sent : [sent];
-    return arr.map(msg => ({
-      messageId: msg.id,
-      date: msg.date,
-      text: msg.message ?? '',
-    }));
+    const workDir = await mkdtemp(join(tmpdir(), 'cahciua-tdl-'));
+    try {
+      const contents = await Promise.all(media.map(async (m, i): Promise<Td.InputMessageContent$Input> => {
+        const fileName = m.fileName ?? `${m.type}-${i}.bin`;
+        const path = await writeTempBuffer(workDir, m.buffer, fileName);
+        const inputFile: Td.InputFile$Input = { _: 'inputFileLocal', path };
+        const caption = m.caption ? formattedFromHtml(m.caption, m.captionParseMode ?? 'HTML') : { _: 'formattedText' as const, text: '', entities: [] };
+        switch (m.type) {
+        case 'photo': return { _: 'inputMessagePhoto', photo: inputFile, width: 0, height: 0, caption };
+        case 'video': return { _: 'inputMessageVideo', video: inputFile, duration: 0, width: 0, height: 0, supports_streaming: true, caption };
+        case 'audio': return { _: 'inputMessageAudio', audio: inputFile, duration: 0, caption };
+        case 'document':
+        default: return { _: 'inputMessageDocument', document: inputFile, disable_content_type_detection: false, caption };
+        }
+      }));
+
+      const result = await client.invoke({
+        _: 'sendMessageAlbum',
+        chat_id: Number(chatId),
+        reply_to: opts?.replyToMessageId
+          ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
+          : undefined,
+        input_message_contents: contents,
+      }) as Td.messages;
+      return result.messages.flatMap((m): SentMessage[] => m ? [{ messageId: m.id, date: m.date, text: 'caption' in m.content && m.content.caption ? m.content.caption.text : '' }] : []);
+    } finally {
+      await rm(workDir, { recursive: true, force: true });
+    }
   };
 
   const sendChatAction = async (chatId: string | number, action: 'typing' = 'typing') => {
-    const peer = await client.getInputEntity(String(chatId));
-    await client.invoke(new Api.messages.SetTyping({
-      peer,
-      action: action === 'typing'
-        ? new Api.SendMessageTypingAction()
-        : new Api.SendMessageTypingAction(),
-    }));
+    void action;
+    await client.invoke({
+      _: 'sendChatAction',
+      chat_id: Number(chatId),
+      action: { _: 'chatActionTyping' },
+    });
+  };
+
+  const waitForFileDownload = async (fileId: number, timeoutMs = 60000): Promise<Td.file> => {
+    // tdlib's `synchronous: true` flag returns once the download succeeds, fails, or
+    // is canceled; that's what we want for our blocking download API.
+    const result = await Promise.race([
+      client.invoke({ _: 'downloadFile', file_id: fileId, priority: 1, offset: 0, limit: 0, synchronous: true }) as Promise<Td.file>,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Download timeout')), timeoutMs)),
+    ]);
+    if (!result.local.is_downloading_completed)
+      throw new Error(`File ${fileId} did not finish downloading`);
+    return result;
   };
 
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
-    const msgs = await client.getMessages(String(chatId), { ids: [messageId] });
-    const msg = msgs[0];
-    if (!msg || msg instanceof Api.MessageEmpty || !msg.media) return undefined;
-    const result = await client.downloadMedia(msg, {});
-    return Buffer.isBuffer(result) ? result : undefined;
+    const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: messageId }) as Td.message;
+    const file = findFileInContent(msg.content);
+    if (!file) return undefined;
+    const downloaded = await waitForFileDownload(file.id);
+    const fs = await import('node:fs/promises');
+    return await fs.readFile(downloaded.local.path);
   };
 
-  const getStickerSetTitle = async (setName: string): Promise<string> => {
-    const result = await client.invoke(new Api.messages.GetStickerSet({
-      stickerset: new Api.InputStickerSetShortName({ shortName: setName }),
-      hash: 0,
-    }));
-    if (result instanceof Api.messages.StickerSet) return result.set.title;
-    throw new Error(`Unexpected sticker set response for "${setName}"`);
+  const getStickerSetTitle = async (setIdOrName: string): Promise<string> => {
+    if (/^-?\d+$/.test(setIdOrName)) {
+      const set = await client.invoke({ _: 'getStickerSet', set_id: setIdOrName }) as Td.stickerSet;
+      return set.title;
+    }
+    const set = await client.invoke({ _: 'searchStickerSet', name: setIdOrName }) as Td.stickerSet;
+    return set.title;
   };
 
   const getCustomEmojiInfo = async (customEmojiIds: string[]): Promise<CustomEmojiInfo[]> => {
     if (customEmojiIds.length === 0) return [];
-    const documentIds = customEmojiIds.map(id => bigInt(id));
-    const result = await client.invoke(new Api.messages.GetCustomEmojiDocuments({ documentId: documentIds }));
-    const out: CustomEmojiInfo[] = [];
-    for (const doc of result) {
-      if (!(doc instanceof Api.Document)) continue;
-      const stickerAttr = doc.attributes.find(
-        (a): a is Api.DocumentAttributeSticker => a instanceof Api.DocumentAttributeSticker,
-      );
-      const videoAttr = doc.attributes.find(a => a instanceof Api.DocumentAttributeVideo);
-      const isAnimated = doc.mimeType === 'application/x-tgsticker';
-      const isVideo = videoAttr != null;
-      const setName = stickerAttr?.stickerset instanceof Api.InputStickerSetShortName
-        ? stickerAttr.stickerset.shortName
-        : undefined;
-      const documentRef = doc;
-      out.push({
-        customEmojiId: doc.id.toString(),
-        isAnimated,
-        isVideo,
-        setName,
+    const stickers = await client.invoke({
+      _: 'getCustomEmojiStickers',
+      custom_emoji_ids: customEmojiIds,
+    }) as Td.stickers;
+    return stickers.stickers.flatMap((s): CustomEmojiInfo[] => {
+      if (s.full_type._ !== 'stickerFullTypeCustomEmoji') return [];
+      const setIdStr = String(s.set_id);
+      const stickerFile = s.sticker;
+      return [{
+        customEmojiId: String(s.id),
+        isAnimated: s.format._ === 'stickerFormatTgs',
+        isVideo: s.format._ === 'stickerFormatWebm',
+        setName: setIdStr !== '0' ? setIdStr : undefined,
         download: async () => {
-          // gramjs's downloadMedia accepts a MessageMedia wrapper around the document.
-          const media = new Api.MessageMediaDocument({ document: documentRef });
-          const buf = await client.downloadMedia(media, {});
-          if (!Buffer.isBuffer(buf)) throw new Error(`Failed to download custom emoji document ${doc.id.toString()}`);
-          return buf;
+          const downloaded = await waitForFileDownload(stickerFile.id);
+          const fs = await import('node:fs/promises');
+          return await fs.readFile(downloaded.local.path);
         },
-      });
-    }
-    return out;
+      }];
+    });
   };
 
   return {
@@ -306,6 +373,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     getStickerSetTitle,
     getCustomEmojiInfo,
     raw: () => client,
+    entityCache: () => cache,
     botUserId: () => userId,
     botInfo: () => info,
   };

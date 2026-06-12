@@ -21,11 +21,11 @@ See `docs/dcp-design.md` for architecture rationale.
 
 ## Tech Stack
 
-Node ≥22, TypeScript, pnpm. Telegram: gramjs (MTProto) for both bot and userbot — no Bot API HTTP layer. DB: better-sqlite3 + Drizzle. State: Immer. Reactivity: alien-signals. Validation: Valibot. Prompts: `@velin-dev/core` (all in `prompts/*.velin.md` — never hardcode prompt strings). Logging: `@guiiai/logg`. Tests: Vitest. Media: sharp, ffmpeg-static + ffprobe-static, lottie-frame (needs system `libpng-dev` + `librlottie-dev`).
+Node ≥22, TypeScript, pnpm. Telegram: tdl + libtdjson (TDLib) for both bot and userbot — no MTProto-level library, no Bot API HTTP. `prebuilt-tdlib` ships the libtdjson shared library. DB: better-sqlite3 + Drizzle. State: Immer. Reactivity: alien-signals. Validation: Valibot. Prompts: `@velin-dev/core` (all in `prompts/*.velin.md` — never hardcode prompt strings). Logging: `@guiiai/logg`. Tests: Vitest. Media: sharp, ffmpeg-static + ffprobe-static, lottie-frame (needs system `libpng-dev` + `librlottie-dev`).
 
 ## Commands
 
-`pnpm dev` (watch) / `pnpm start` / `pnpm build` / `pnpm typecheck` / `pnpm lint[:fix]` / `pnpm test[:run]` / `pnpm login` (MTProto) / `pnpm db:generate` (Drizzle migration).
+`pnpm dev` (watch) / `pnpm start` / `pnpm build` / `pnpm typecheck` / `pnpm lint[:fix]` / `pnpm test[:run]` / `pnpm login` (interactive userbot tdlib login) / `pnpm db:generate` (Drizzle migration) / `pnpm tdlib:build` (escape hatch: build libtdjson from TDLib master into `vendor/` when prebuilt-tdlib lags) / `pnpm tdlib:types` (regenerate TS types from vendor libtdjson).
 
 ## Layout
 
@@ -72,15 +72,39 @@ Every `CanonicalIMEvent` carries:
 
 Per-chat ordered commit queue (`src/telegram/session-ingress-queue.ts`). Later events may transform speculatively, but only the contiguous ready prefix commits into Adaptation. Fail-closed: blocked head ⇒ `nextCommitSeq` does not advance.
 
+### libtdjson + types resolution
+
+Three pieces work together:
+
+- **`vendor/libtdjson.so`** (gitignored) — locally built TDLib master. Optional; populated by `pnpm tdlib:build`.
+- **`prebuilt-tdlib`** (npm dep) — pinned TDLib version, used when no vendor build exists.
+- **`types/tdlib-types.d.ts`** (gitignored) — TypeScript types matching whichever libtdjson is active.
+
+Runtime: `src/telegram/tdjson.ts:resolveTdjson()` returns the vendor `.so` if present, else `prebuilt-tdlib`'s. Used by main app, login script, and probe.
+
+Build / types lifecycle (single-responsibility, idempotent):
+
+| Command | Effect |
+|---|---|
+| `pnpm tdlib:build` | (1) git clone + cmake build of TDLib master → `vendor/libtdjson.so`. (2) Chains into `pnpm tdlib:types`. |
+| `pnpm tdlib:types` | Generates `types/tdlib-types.d.ts` from whichever libtdjson `resolveTdjson()` would pick (vendor → prebuilt fallback). Idempotent. |
+| `postinstall` (auto) | `pnpm tdlib:types`. Ensures types match runtime after any `pnpm install`. |
+
+Day-1 flow for a new TDLib feature: `pnpm tdlib:build` → restart app. Day-1 flow for someone using prebuilt only: wait for `prebuilt-tdlib` to publish a newer version + `pnpm install`.
+
 ### Two Telegram clients, single ingress source
 
-Both bot and userbot are gramjs `TelegramClient` instances over MTProto. The bot is sender-only by default; the userbot, when configured, owns ingress (messages, edits, deletes, typing, history, reply-to resolution) because bots have server-enforced visibility limits regardless of protocol — privacy mode hides most group messages, edit/delete updates are unreliable, history is restricted, and other bots' messages are invisible. Without a userbot session the bot client takes over ingress on its own (with all those limitations).
+Both bot and userbot are tdl `Client` instances over libtdjson (TDLib). The bot is sender-only by default; the userbot, when configured, owns ingress (messages, edits, deletes, typing, history, reply-to resolution) because bots have server-enforced visibility limits regardless of protocol — privacy mode hides most group messages, edit/delete updates are unreliable, history is restricted, and other bots' messages are invisible. Without a userbot session the bot client takes over ingress on its own (with all those limitations).
 
-The unselected client still receives MTProto updates over its own stream; the manager simply doesn't subscribe to them. `apiId`/`apiHash` are unconditionally required (the bot also needs MTProto credentials); the userbot session is the optional knob.
+`apiId`/`apiHash` are unconditionally required (the bot also needs MTProto credentials via TDLib); `userbotEnabled` is the flag deciding whether to instantiate a second tdl Client. Each client gets its own tdlib state directory (`botDataDir` / `userbotDataDir`, defaulting to `data/tdlib-bot` and `data/tdlib-userbot`). Bot login is automatic from the token; userbot login is interactive — `pnpm login` writes auth state into the userbot data dir, then the main app reuses that dir.
 
-Downloads go through `telegramManager.downloadMessageMedia(chatId, messageId)` — prefers userbot for full visibility, falls back to bot. `(chatId, messageId)` is the only stable handle: MTProto file references include `access_hash` and `file_reference`, which expire, so re-fetching the message is the correct download path.
+Downloads go through `telegramManager.downloadMessageMedia(chatId, messageId)` — prefers userbot for full visibility, falls back to bot. tdlib-local file ids are ephemeral; we never store them. Re-fetching is keyed off `(chatId, messageId)`: tdlib's `getMessage` returns the current state with fresh file references, then `downloadFile({ synchronous: true })` blocks until the file lands at `local.path`, which we read into a Buffer.
 
-**Edit/delete come from the active ingress source.** Phantom MTProto edits (no `editDate` — link previews resolved, reactions in some channels, inline keyboard refresh, pin state changes) are still filtered in `userbot.ts`; this is intrinsic to the MTProto stream, unrelated to the old dual-source dedup.
+**Edit/delete come from the active ingress source.** TDLib splits edits into `updateMessageEdited` (edit_date arrived — proves it's a real user edit, not a phantom from link previews / reactions / keyboard refreshes) and `updateMessageContent` (content payload). We listen for `updateMessageEdited` and re-fetch via `getMessage` to get the full new state — the `updateMessageEdited` gating naturally excludes phantoms.
+
+### Markdown → entities
+
+Bot output goes Markdown → Telegram-supported HTML (via `markdown-it` in `src/telegram/markdown.ts`) → `formattedText` (via `tdl.execute({_:'parseTextEntities', parse_mode: textParseModeHTML})`) → `sendMessage`. The HTML→entity conversion is delegated to TDLib's canonical parser, the same one telegram-bot-api uses. Supported subset: `b strong i em u ins s strike del tg-spoiler tg-emoji tg-time span(class=tg-spoiler) pre code blockquote a`. We never hand-roll entity arrays.
 
 ### Configured chat residency
 
@@ -95,7 +119,7 @@ Rule: metadata changes about entities → append-only; content changes to specif
 
 ### Sticker pack title
 
-Raw slug stays in `stickerSetId`; resolved human title goes in `stickerSetName`. Cold-start replay normalizes legacy events that stored the slug in `stickerSetName` and writes back to `events`.
+`stickerSetId` carries the canonical pack identifier — under TDLib this is the numeric `set_id` (string-encoded for safety against int53 overflow), historically the slug under the gramjs era. `stickerSetName` carries the resolved human title. `resolvePackTitle` accepts either form: numeric strings go through `getStickerSet({set_id})`, alphanumeric ones through `searchStickerSet({name})`. Cold-start replay normalizes legacy events that stored the slug in `stickerSetName` and writes the resolved title back to `events`.
 
 ### RC × TR merge
 
@@ -155,7 +179,7 @@ Three blocking ingress transforms (image / animation / custom-emoji), all sharin
 
 - **Image**: cache key = sha256 of the deterministic thumbnail WebP. LLM input = PNG resized to ≤512px long edge. Rendering emits `<image>alt</image>` when alt is present.
 - **Animation** (GIF/MP4, video sticker WEBM, animated sticker TGS): cache key = sha256 of file bytes (`animationHash` persisted on the attachment). Frame selection is count-based (≤maxFrames → all; > → equidistant including first/last). TGS detected by gzip magic bytes (don't rely on attachment flags — they may be missing during backfill). Files >20MB skipped. Rendering tags: `<animation type="...">` / `<sticker pack="...">`.
-- **Custom emoji**: cache key = `emoji:${customEmojiId}`. Resolved via gramjs `messages.GetCustomEmojiDocuments` batch through the bot client. Alt text set transiently on `ContentNode.altText` — never persisted to `events`. Rendering tag: `<custom-emoji pack="...">`. Without alt: render fallback emoji char.
+- **Custom emoji**: cache key = `emoji:${customEmojiId}`. Resolved via TDLib `getCustomEmojiStickers` through the bot client. Alt text set transiently on `ContentNode.altText` — never persisted to `events`. Rendering tag: `<custom-emoji pack="...">`. Without alt: render fallback emoji char.
 
 Alt text is **always** queried transiently from `image_alt_texts` — never stored in `events`. Cold start: sync lookup for cached, async backfill for missing.
 
