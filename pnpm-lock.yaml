@@ -58,6 +58,9 @@ importers:
       markdown-it:
         specifier: ^14.1.1
         version: 14.1.1
+      markdown-it-math-loose:
+        specifier: ^4.1.1
+        version: 4.1.1
       prebuilt-tdlib:
         specifier: ^0.1008064.0
         version: 0.1008064.0
@@ -1360,6 +1363,10 @@ packages:
     resolution: {integrity: sha512-BNoCY6SXXPQ7gF2opIP4GBE+Xw7U+pHMYKuzjgCN3GwiaIR09UUeKfheyIry77QtrCBlC0KK0q5/TER/tYh3PQ==}
     engines: {node: '>= 0.4'}
 
+  ascii2mathml@0.6.2:
+    resolution: {integrity: sha512-tkPONh2Y7ZpuGQw6AiRnExX/CSYf5C2T/rF+UMJq5n0Us7+QjL8VY5ZE16xo9wcXhdqPkl/F7lzEzU9HX0YKng==}
+    hasBin: true
+
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
@@ -2352,6 +2359,9 @@ packages:
   make-fetch-happen@15.0.5:
     resolution: {integrity: sha512-uCbIa8jWWmQZt4dSnEStkVC6gdakiinAm4PiGsywIkguF0eWMdcjDz0ECYhUolFU3pFLOev9VNPCEygydXnddg==}
     engines: {node: ^20.17.0 || >=22.9.0}
+
+  markdown-it-math-loose@4.1.1:
+    resolution: {integrity: sha512-eupBgBp/N7b6/kiFKB7fNip+YgyYEGohm7k/JJAPu39olb/bd2LTF7KuAKUt6S7uy5bxpagneF6Z6I4eWrQyXQ==}
 
   markdown-it@14.1.1:
     resolution: {integrity: sha512-BuU2qnTti9YKgK5N+IeMubp14ZUKUUw7yeJbkjtosvHiP0AZ5c8IAgEMk79D0eC8F23r4Ac/q8cAIFdm2FtyoA==}
@@ -4318,6 +4328,11 @@ snapshots:
       get-intrinsic: 1.3.0
       is-array-buffer: 3.0.5
 
+  ascii2mathml@0.6.2:
+    dependencies:
+      minimist: 1.2.8
+    optional: true
+
   assertion-error@2.0.1: {}
 
   async-function@1.0.0: {}
@@ -5407,6 +5422,10 @@ snapshots:
       ssri: 13.0.1
     transitivePeerDependencies:
       - supports-color
+
+  markdown-it-math-loose@4.1.1:
+    optionalDependencies:
+      ascii2mathml: 0.6.2
 
   markdown-it@14.1.1:
     dependencies:

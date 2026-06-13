@@ -1,4 +1,7 @@
 import MarkdownIt from 'markdown-it';
+// markdown-it-math-loose is a CommonJS plugin without bundled types.
+// @ts-expect-error - no types published
+import MarkdownItMath from 'markdown-it-math-loose';
 import type StateInline from 'markdown-it/lib/rules_inline/state_inline.mjs';
 
 const md = new MarkdownIt({ linkify: true });
@@ -90,6 +93,21 @@ function isTerminatorChar(ch: number): boolean {
 
 md.use(spoilerPlugin);
 
+// --- Math plugin: `$inline$` and `$$block$$` → <tg-math> / <tg-math-block> ---
+// Output tags are Telegram Rich Message tags (only valid in richMessageSourceHtml).
+// When the rendered HTML contains them, the caller must route the message through
+// inputMessageRichMessage instead of inputMessageText. The detection is a simple
+// substring scan on the output — see hasRichOnlyMarkup().
+
+md.use(MarkdownItMath, {
+  inlineOpen: '$',
+  inlineClose: '$',
+  blockOpen: '$$',
+  blockClose: '$$',
+  inlineRenderer: (code: string) => `<tg-math>${md.utils.escapeHtml(code)}</tg-math>`,
+  blockRenderer: (code: string) => `<tg-math-block>${md.utils.escapeHtml(code)}</tg-math-block>`,
+});
+
 // --- Mutable state for list nesting (safe: render() is synchronous) ---
 
 let listDepth = 0;
@@ -102,34 +120,39 @@ md.renderer.rules.em_open = () => '<i>';
 md.renderer.rules.em_close = () => '</i>';
 md.renderer.rules.hardbreak = () => '\n';
 
-// --- Blocks: strip unsupported tags, degrade gracefully ---
+// --- Blocks: emit Rich-Message-supported HTML tags. Headings, lists, tables,
+// hr and math are rich-only — their presence in the rendered HTML automatically
+// promotes the message to inputMessageRichMessage (see hasRichOnlyMarkup).
+// Plain-only sinks (inputMessageText) reject these tags, so the send path must
+// dispatch based on the rich-only detection.
 
 md.renderer.rules.paragraph_open = () => '';
 md.renderer.rules.paragraph_close = (tokens, idx) =>
   tokens[idx]!.hidden ? '' : '\n';
 
-md.renderer.rules.heading_open = () => '<b>';
-md.renderer.rules.heading_close = () => '</b>\n';
+md.renderer.rules.heading_open = (tokens, idx) => `<${tokens[idx]!.tag}>`;
+md.renderer.rules.heading_close = (tokens, idx) => `</${tokens[idx]!.tag}>\n`;
 
 md.renderer.rules.blockquote_open = () => '<blockquote>';
 md.renderer.rules.blockquote_close = () => '</blockquote>\n';
 
-md.renderer.rules.bullet_list_open = () => { const nested = listDepth > 0; listDepth++; return nested ? '\n' : ''; };
-md.renderer.rules.bullet_list_close = () => { listDepth--; return ''; };
-md.renderer.rules.ordered_list_open = () => { const nested = listDepth > 0; listDepth++; return nested ? '\n' : ''; };
-md.renderer.rules.ordered_list_close = () => { listDepth--; return ''; };
+md.renderer.rules.bullet_list_open = () => { listDepth++; return '<ul>'; };
+md.renderer.rules.bullet_list_close = () => { listDepth--; return '</ul>\n'; };
+md.renderer.rules.ordered_list_open = (tokens, idx) => {
+  listDepth++;
+  const start = tokens[idx]!.attrGet('start');
+  return start ? `<ol start="${md.utils.escapeHtml(start)}">` : '<ol>';
+};
+md.renderer.rules.ordered_list_close = () => { listDepth--; return '</ol>\n'; };
 
 md.renderer.rules.list_item_open = (tokens, idx) => {
-  const indent = '  '.repeat(listDepth - 1);
   const token = tokens[idx]!;
-  // ordered list: token.info holds the item number (e.g. "1", "2")
-  return token.info
-    ? `${indent}${token.info}. `
-    : `${indent}• `;
+  const value = token.attrGet('value');
+  return value ? `<li value="${md.utils.escapeHtml(value)}">` : '<li>';
 };
-md.renderer.rules.list_item_close = () => '\n';
+md.renderer.rules.list_item_close = () => '</li>';
 
-md.renderer.rules.hr = () => '———\n';
+md.renderer.rules.hr = () => '<hr/>\n';
 
 // --- Code blocks ---
 
@@ -155,20 +178,26 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
     : md.utils.escapeHtml(src);
 };
 
-// --- Tables: degrade to pipe-separated text ---
+// --- Tables: emit rich-message HTML <table>/<tr>/<th>/<td>. Rich-only. ---
 
-md.renderer.rules.table_open = () => '';
-md.renderer.rules.table_close = () => '';
+md.renderer.rules.table_open = () => '<table>';
+md.renderer.rules.table_close = () => '</table>\n';
 md.renderer.rules.thead_open = () => '';
 md.renderer.rules.thead_close = () => '';
 md.renderer.rules.tbody_open = () => '';
 md.renderer.rules.tbody_close = () => '';
-md.renderer.rules.tr_open = () => '';
-md.renderer.rules.tr_close = () => '\n';
-md.renderer.rules.th_open = () => '<b>';
-md.renderer.rules.th_close = () => '</b> | ';
-md.renderer.rules.td_open = () => '';
-md.renderer.rules.td_close = () => ' | ';
+md.renderer.rules.tr_open = () => '<tr>';
+md.renderer.rules.tr_close = () => '</tr>';
+md.renderer.rules.th_open = (tokens, idx) => {
+  const align = tokens[idx]!.attrGet('style')?.match(/text-align:\s*(\w+)/)?.[1];
+  return align ? `<th align="${md.utils.escapeHtml(align)}">` : '<th>';
+};
+md.renderer.rules.th_close = () => '</th>';
+md.renderer.rules.td_open = (tokens, idx) => {
+  const align = tokens[idx]!.attrGet('style')?.match(/text-align:\s*(\w+)/)?.[1];
+  return align ? `<td align="${md.utils.escapeHtml(align)}">` : '<td>';
+};
+md.renderer.rules.td_close = () => '</td>';
 
 // --- Public API ---
 
@@ -179,3 +208,13 @@ export const renderMarkdownToTelegramHTML = (markdown: string): string => {
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\n+$/, '');
 };
+
+// Tags that exist only in Telegram's Rich Message HTML grammar
+// (richMessageSourceHtml) and are rejected by the plain entity grammar
+// (parseTextEntities). When the rendered HTML contains any of these, the
+// caller must dispatch through inputMessageRichMessage; otherwise the
+// rendered HTML is a subset that parseTextEntities accepts.
+const RICH_ONLY_TAGS = /<(?:tg-math|tg-math-block|h[1-6]|ul|ol|table|hr|p\b|mark|sub|sup|details|footer|aside|figure|img|video|audio)\b/;
+
+export const hasRichOnlyMarkup = (html: string): boolean =>
+  RICH_ONLY_TAGS.test(html);

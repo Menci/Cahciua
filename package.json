@@ -40,6 +40,7 @@
     "immer": "^10.1.1",
     "lottie-frame": "^1.1.0",
     "markdown-it": "^14.1.1",
+    "markdown-it-math-loose": "^4.1.1",
     "prebuilt-tdlib": "^0.1008064.0",
     "sharp": "^0.34.5",
     "tdl": "^8.1.0",

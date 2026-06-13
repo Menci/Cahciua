@@ -188,12 +188,137 @@ const convertContent = (content: Td.MessageContent): ContentResult | null => {
   case 'messageAnimatedEmoji':
     // Telegram's animated emoji (single emoji rendered as sticker). Render as plain emoji.
     return { text: content.emoji };
+  case 'messageRichMessage':
+    return { text: flattenRichMessage(content.message) };
   case 'messageUnsupported':
     return { text: '' };
   default:
     return null;
   }
 };
+
+// --- rich message flattening: render the structured tree as markdown-ish text
+// so the IC sees something meaningful. Math expressions get the standard
+// `$inline$` / `$$block$$` markers so the LLM can re-emit them faithfully if
+// the message is forwarded or quoted. Entity preservation (bold, italic, links)
+// is intentionally deferred — the rich tree's nesting is richer than what our
+// TelegramMessage.entities array can express, and flattening to plain text
+// keeps the IC representation honest.
+
+const flattenRichText = (rt: Td.RichText): string => {
+  switch (rt._) {
+  case 'richTextPlain':
+    return rt.text;
+  case 'richTextFixed':
+    return flattenRichText(rt.text);
+  case 'richTextBold':
+  case 'richTextItalic':
+  case 'richTextUnderline':
+  case 'richTextStrikethrough':
+  case 'richTextSpoiler':
+  case 'richTextSubscript':
+  case 'richTextSuperscript':
+  case 'richTextMarked':
+    return flattenRichText(rt.text);
+  case 'richTextUrl':
+  case 'richTextEmailAddress':
+  case 'richTextPhoneNumber':
+  case 'richTextBankCardNumber':
+  case 'richTextMention':
+  case 'richTextHashtag':
+  case 'richTextCashtag':
+  case 'richTextBotCommand':
+    return flattenRichText(rt.text);
+  case 'richTextMentionName':
+    return flattenRichText(rt.text);
+  case 'richTextDateTime':
+    return flattenRichText(rt.text);
+  case 'richTextCustomEmoji':
+    return rt.alternative_text;
+  case 'richTextIcon':
+    return '';
+  case 'richTextMathematicalExpression':
+    return `$${rt.expression}$`;
+  case 'richTextReference':
+    return flattenRichText(rt.text);
+  case 'richTextReferenceLink':
+    return flattenRichText(rt.text);
+  case 'richTextAnchor':
+    return '';
+  case 'richTextAnchorLink':
+    return flattenRichText(rt.text);
+  case 'richTexts':
+    return rt.texts.map(flattenRichText).join('');
+  }
+};
+
+const flattenPageBlock = (block: Td.PageBlock): string => {
+  switch (block._) {
+  case 'pageBlockTitle':
+    return `# ${flattenRichText(block.title)}\n\n`;
+  case 'pageBlockSubtitle':
+    return `## ${flattenRichText(block.subtitle)}\n\n`;
+  case 'pageBlockHeader':
+    return `# ${flattenRichText(block.header)}\n\n`;
+  case 'pageBlockSubheader':
+    return `## ${flattenRichText(block.subheader)}\n\n`;
+  case 'pageBlockSectionHeading':
+    return `${'#'.repeat(Math.min(Math.max(block.size, 1), 6))} ${flattenRichText(block.text)}\n\n`;
+  case 'pageBlockKicker':
+    return `${flattenRichText(block.kicker)}\n\n`;
+  case 'pageBlockParagraph':
+    return `${flattenRichText(block.text)}\n\n`;
+  case 'pageBlockPreformatted':
+    return `\`\`\`\n${flattenRichText(block.text)}\n\`\`\`\n\n`;
+  case 'pageBlockFooter':
+    return `${flattenRichText(block.footer)}\n\n`;
+  case 'pageBlockDivider':
+    return '---\n\n';
+  case 'pageBlockMathematicalExpression':
+    return `$$${block.expression}$$\n\n`;
+  case 'pageBlockAnchor':
+    return '';
+  case 'pageBlockList':
+    return block.items.map((item, i) => {
+      const marker = item.label || `${i + 1}.`;
+      const body = item.blocks.map(flattenPageBlock).join('').trim();
+      return `${marker} ${body}\n`;
+    }).join('') + '\n';
+  case 'pageBlockBlockQuote': {
+    const text = block.blocks.map(flattenPageBlock).join('').trim();
+    return text.split('\n').map((line: string) => `> ${line}`).join('\n') + '\n\n';
+  }
+  case 'pageBlockPullQuote': {
+    const text = flattenRichText(block.text);
+    return text.split('\n').map((line: string) => `> ${line}`).join('\n') + '\n\n';
+  }
+  case 'pageBlockAnimation':
+  case 'pageBlockAudio':
+  case 'pageBlockPhoto':
+  case 'pageBlockVideo':
+  case 'pageBlockVoiceNote':
+    return `[${block._.slice('pageBlock'.length).toLowerCase()}]\n\n`;
+  case 'pageBlockTable': {
+    const rows = block.cells.map(row => row.map(cell => {
+      const inner = cell.text ? flattenRichText(cell.text) : '';
+      return inner.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+    }).join(' | '));
+    if (rows.length === 0) return '';
+    const header = rows[0]!;
+    const separator = header.split('|').map(() => '---').join('|');
+    return [header, separator, ...rows.slice(1)].map(r => `| ${r} |`).join('\n') + '\n\n';
+  }
+  case 'pageBlockDetails':
+    return block.blocks.map(flattenPageBlock).join('');
+  case 'pageBlockThinking':
+    return ''; // streaming "thinking" indicator — skip
+  default:
+    return '';
+  }
+};
+
+const flattenRichMessage = (msg: Td.richMessage): string =>
+  msg.blocks.map(flattenPageBlock).join('').replace(/\n{3,}/g, '\n\n').trim();
 
 // --- forward info ---
 

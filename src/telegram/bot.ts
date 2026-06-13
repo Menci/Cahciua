@@ -9,6 +9,7 @@ import type * as Td from 'tdlib-types';
 import type { EntityCache } from './entity-cache';
 import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
+import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
 import { fromTdMessage } from './message/tdlib';
 
@@ -182,21 +183,45 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
   };
 
   const sendMessage = async (chatId: string | number, text: string, opts?: SendOptions): Promise<SentMessage> => {
-    const formatted = formattedFromHtml(text, opts?.parseMode ?? 'HTML');
+    // The caller passes markdown (LLM output). We render to Telegram-supported
+    // HTML and then dispatch to either inputMessageRichMessage (for rich-only
+    // features like math, headings, lists, tables) or inputMessageText (for
+    // plain entity-style content that older clients can render correctly).
+    const html = renderMarkdownToTelegramHTML(text);
+    const replyTo: Td.InputMessageReplyTo$Input | undefined = opts?.replyToMessageId
+      ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
+      : undefined;
+
+    const content: Td.InputMessageContent$Input = hasRichOnlyMarkup(html)
+      ? {
+        _: 'inputMessageRichMessage',
+        message: {
+          _: 'inputRichMessage',
+          source: { _: 'richMessageSourceHtml', text: html },
+          is_rtl: false,
+          detect_automatic_blocks: false,
+        },
+        clear_draft: true,
+      }
+      : {
+        _: 'inputMessageText',
+        text: formattedFromHtml(html, opts?.parseMode ?? 'HTML'),
+        clear_draft: true,
+      };
+
     const sent = await client.invoke({
       _: 'sendMessage',
       chat_id: Number(chatId),
-      reply_to: opts?.replyToMessageId
-        ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
-        : undefined,
-      input_message_content: {
-        _: 'inputMessageText',
-        text: formatted,
-        clear_draft: true,
-      },
+      reply_to: replyTo,
+      input_message_content: content,
     }) as Td.message;
-    const content = sent.content._ === 'messageText' ? sent.content.text.text : '';
-    return { messageId: sent.id, date: sent.date, text: content };
+
+    const sentText = sent.content._ === 'messageText'
+      ? sent.content.text.text
+      : sent.content._ === 'messageRichMessage'
+        ? ''  // rich content doesn't reduce to plain text cleanly; downstream only uses the returned messageId.
+        : '';
+    return { messageId: sent.id, date: sent.date, text: sentText };
   };
 
   const sendFileGeneric = async (
@@ -215,26 +240,26 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
       let content: Td.InputMessageContent$Input;
       switch (kind) {
       case 'photo':
-        content = { _: 'inputMessagePhoto', photo: inputFile, width: 0, height: 0, caption };
+        content = { _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: inputFile }, caption };
         break;
       case 'video':
-        content = { _: 'inputMessageVideo', video: inputFile, duration: 0, width: 0, height: 0, supports_streaming: true, caption };
+        content = { _: 'inputMessageVideo', video: { _: 'inputVideo', video: inputFile, supports_streaming: true }, caption };
         break;
       case 'audio':
-        content = { _: 'inputMessageAudio', audio: inputFile, duration: 0, caption };
+        content = { _: 'inputMessageAudio', audio: { _: 'inputAudio', audio: inputFile }, caption };
         break;
       case 'voice':
         content = { _: 'inputMessageVoiceNote', voice_note: inputFile, duration: 0, caption };
         break;
       case 'animation':
-        content = { _: 'inputMessageAnimation', animation: inputFile, duration: 0, width: 0, height: 0, caption };
+        content = { _: 'inputMessageAnimation', animation: { _: 'inputAnimation', animation: inputFile }, caption };
         break;
       case 'video_note':
         content = { _: 'inputMessageVideoNote', video_note: inputFile, duration: 0, length: 240 };
         break;
       case 'document':
       default:
-        content = { _: 'inputMessageDocument', document: inputFile, disable_content_type_detection: false, caption };
+        content = { _: 'inputMessageDocument', document: { _: 'inputDocument', document: inputFile, disable_content_type_detection: false }, caption };
         break;
       }
 
@@ -270,11 +295,11 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
         const inputFile: Td.InputFile$Input = { _: 'inputFileLocal', path };
         const caption = m.caption ? formattedFromHtml(m.caption, m.captionParseMode ?? 'HTML') : { _: 'formattedText' as const, text: '', entities: [] };
         switch (m.type) {
-        case 'photo': return { _: 'inputMessagePhoto', photo: inputFile, width: 0, height: 0, caption };
-        case 'video': return { _: 'inputMessageVideo', video: inputFile, duration: 0, width: 0, height: 0, supports_streaming: true, caption };
-        case 'audio': return { _: 'inputMessageAudio', audio: inputFile, duration: 0, caption };
+        case 'photo': return { _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: inputFile }, caption };
+        case 'video': return { _: 'inputMessageVideo', video: { _: 'inputVideo', video: inputFile, supports_streaming: true }, caption };
+        case 'audio': return { _: 'inputMessageAudio', audio: { _: 'inputAudio', audio: inputFile }, caption };
         case 'document':
-        default: return { _: 'inputMessageDocument', document: inputFile, disable_content_type_detection: false, caption };
+        default: return { _: 'inputMessageDocument', document: { _: 'inputDocument', document: inputFile, disable_content_type_detection: false }, caption };
         }
       }));
 
