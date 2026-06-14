@@ -118,7 +118,13 @@ export const createDriver = (config: DriverConfig, deps: {
 
     const rc = signal<RenderedContext>([]);
     const lastProcessedMs = signal(0);
+    // Mirrors wasToolLoopInterrupted(latest persisted TR). When true, the reply
+    // effect should fire even without new external events to drive the loop
+    // forward (e.g. sleep / requiresFollowUp tool result waiting for the next
+    // step). Initialized async on cold start, updated at the end of each cycle.
+    const lastTRInterrupted = signal(false);
     void getLastProcessedTime(chatId).then(v => lastProcessedMs(Math.max(lastProcessedMs(), v)));
+    void loadTRs(chatId).then(trs => lastTRInterrupted(wasToolLoopInterrupted(trs)));
     const running = signal(false);
     const failedRc = signal<RenderedContext | null>(null);
     // Typing signal: written by handleTyping when another user is typing. The reply
@@ -175,6 +181,7 @@ export const createDriver = (config: DriverConfig, deps: {
       const rcVal = rc();
       if (rcVal.length === 0) return false;
       if (rcVal === failedRc()) return false;
+      if (lastTRInterrupted()) return true;
       return latestExternalEventMs(rcVal, lastProcessedMs()) != null;
     });
 
@@ -426,6 +433,16 @@ export const createDriver = (config: DriverConfig, deps: {
             log.withError(err).withFields({ chatId }).error('LLM call failed');
             failedRc(rcAtStart);
           } finally {
+            // Refresh interrupted state from latest persisted TRs so the effect
+            // re-fires for tool-loop continuation when needed (e.g. sleep returned
+            // requiresFollowUp). Done before flipping running so the recompute
+            // sees both signals updated atomically.
+            try {
+              const latestTRs = await loadTRs(chatId, cursorMs());
+              lastTRInterrupted(wasToolLoopInterrupted(latestTRs));
+            } catch (err) {
+              log.withError(err).withFields({ chatId }).warn('Failed to refresh lastTRInterrupted');
+            }
             running(false);
           }
         })();
