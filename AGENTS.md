@@ -86,7 +86,7 @@ Build / types lifecycle (single-responsibility, idempotent):
 
 | Command | Effect |
 |---|---|
-| `pnpm tdlib:build` | (1) git clone + cmake build of TDLib master → `vendor/libtdjson.so`. (2) Chains into `pnpm tdlib:types`. |
+| `pnpm tdlib:build` | (1) git clone + cmake build of TDLib master → `vendor/libtdjson.so`. Patches in `scripts/tdlib-patches/*.patch` apply via `patch -p1` after the master reset (currently: drop the local-cache guard from `set_message_reactions` so bots can react to messages not currently in TDLib's in-memory map — the downstream MTProto query needs only chat peer + server msg_id). (2) Chains into `pnpm tdlib:types`. |
 | `pnpm tdlib:types` | Generates `types/tdlib-types.d.ts` from whichever libtdjson `resolveTdjson()` would pick (vendor → prebuilt fallback). Idempotent. |
 | `postinstall` (auto) | `pnpm tdlib:types`. Ensures types match runtime after any `pnpm install`. |
 

@@ -1,0 +1,12 @@
+--- a/td/telegram/MessageReaction.cpp
++++ b/td/telegram/MessageReaction.cpp
+@@ -1122,9 +1122,6 @@
+ 
+ void set_message_reactions(Td *td, MessageFullId message_full_id, vector<ReactionType> reaction_types, bool is_big,
+                            Promise<Unit> &&promise) {
+-  if (!td->messages_manager_->have_message_force(message_full_id, "set_message_reactions")) {
+-    return promise.set_error(400, "Message not found");
+-  }
+   for (const auto &reaction_type : reaction_types) {
+     if (reaction_type.is_empty() || reaction_type.is_paid_reaction()) {
+       return promise.set_error(400, "Invalid reaction type specified");

@@ -28,6 +28,15 @@ fi
 TD_COMMIT=$(git -C "$BUILD_DIR/td" rev-parse HEAD)
 echo ">>> TDLib commit: $TD_COMMIT"
 
+PATCH_DIR="$REPO_ROOT/scripts/tdlib-patches"
+if [ -d "$PATCH_DIR" ]; then
+  for p in "$PATCH_DIR"/*.patch; do
+    [ -f "$p" ] || continue
+    echo ">>> Applying $(basename "$p")"
+    patch -p1 -d "$BUILD_DIR/td" --no-backup-if-mismatch < "$p"
+  done
+fi
+
 cd "$BUILD_DIR/td"
 mkdir -p build
 cd build
