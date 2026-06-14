@@ -169,9 +169,18 @@ Output: structured plain-text summary, prepended as a synthetic first user messa
 
 ### Probe / activate gate
 
-In group chats, run a small `probe.model` first when the bot wasn't recently mentioned/replied to (`lastMentionedAtMs <= lastTrTimeMs`). Probe = single LLM call, no tool execution. No tool calls → bot stays silent; has tool calls → discard probe, activate primary model with same context.
+Mandatory two-step pipeline: every reply turn first runs **probe** (an outside-judge LLM call), and only proceeds to **primary** (the bot itself) when probe judges `should_act = true`.
 
-Probe responses go in `probe_responses` (dedicated table). They **never** enter `composeContext` — debug/analysis only.
+Probe and primary share `prompts/system.velin.md` and `prompts/late-binding.velin.md` via a `mode: 'primary' | 'probe'` prop:
+
+- **Probe mode** frames the model as a third-party judge with knowledge of the bot's identity (systemFiles are relabeled as background on the bot). It receives a single tool, `decide(should_act, reason)`, and the tool call args ARE the probe result. Anything else the model emits is discarded. Reason language is unconstrained.
+- **Primary mode** is the bot in first person. The system prompt opens by stating that an outside evaluator has already judged the bot should act this turn, so primary chooses *which* actions, not *whether* to act. There is no `stay_silent` tool — primary may still skip `send_message` for a turn (e.g. `react` only), but cannot back out via a dedicated silence tool. The primary's `forceToolCall` config still applies and is independent of probe's.
+
+Probe is **skipped** when there's a strong de-facto act signal: the bot was mentioned, replied to, or the previous tool loop was interrupted. Runtime events (background task completion) DO go through probe — the judge decides whether the result genuinely warrants surfacing to the chat.
+
+If probe fails to emit a valid `decide` call (e.g. model didn't call the tool despite forceToolCall), the gate fails closed: treated as `should_act = false`, primary does not run.
+
+Probe responses are stored in `probe_responses_v2` (dedicated table). The `isActivated` column mirrors `should_act`. The `reason` lives inside the persisted `entries` JSON (the decide tool call's args) — no separate column. Probe responses **never** enter `composeContext` — debug/analysis only.
 
 ### Media-to-text transforms
 

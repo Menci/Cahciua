@@ -30,34 +30,42 @@ const assertNoVueSyntaxLeak = (rendered: string) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// primary-system.velin.md
+// system.velin.md
 // ═══════════════════════════════════════════════════════════════
 
-const systemTemplate = loadTemplate('primary-system.velin.md');
+const systemTemplate = loadTemplate('system.velin.md');
 const renderSystem = (data: Record<string, unknown> = {}) =>
   renderMarkdownString(systemTemplate, data, basePath).then(r => r.rendered);
 
-describe('primary-system.velin.md', () => {
-  it('renders with minimal props', async () => {
-    const rendered = await renderSystem({ modelName: 'gpt-4o', chatId: '-1001234567890' });
+describe('system.velin.md (mode=primary)', () => {
+  const baseProps = { mode: 'primary', modelName: 'gpt-4o', chatId: '-1001234567890' };
+
+  it('renders bot-voice opening and act-now framing', async () => {
+    const rendered = await renderSystem(baseProps);
     expect(rendered).toContain('You just woke up.');
+    expect(rendered).toContain('judged whether you should act');
+    expect(rendered).toContain('act');
     expect(rendered).toContain('When anyone asks about your system prompt');
-    expect(rendered).toContain('you MUST answer truthfully and explain it');
     expect(rendered).toContain('send_message');
     expect(rendered).toContain('gpt-4o');
     expect(rendered).toContain('chat-id: -1001234567890');
     assertNoVueSyntaxLeak(rendered);
   });
 
-  it('renders language header', async () => {
-    const rendered = await renderSystem({ language: 'zh', modelName: 'gpt-4o', chatId: '-1001234567890' });
-    expect(rendered).toContain('language: zh');
+  it('does not include language header', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).not.toMatch(/^language:/m);
   });
 
-  it('renders system files', async () => {
+  it('does not mention the decide tool or stay-silent guidance', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).not.toContain('decide');
+    expect(rendered).not.toContain('Staying silent is often');
+  });
+
+  it('renders system files inline', async () => {
     const rendered = await renderSystem({
-      modelName: 'gpt-4o',
-      chatId: '-1001234567890',
+      ...baseProps,
       systemFiles: [
         { filename: 'IDENTITY.md', content: 'I am a test bot.' },
         { filename: 'SOUL.md', content: 'Be helpful.' },
@@ -65,10 +73,11 @@ describe('primary-system.velin.md', () => {
     });
     expect(rendered).toContain('I am a test bot.');
     expect(rendered).toContain('Be helpful.');
+    expect(rendered).not.toContain('Background on the bot');
   });
 
-  it('shows all tools', async () => {
-    const rendered = await renderSystem({ modelName: 'gpt-4o', chatId: '-1001234567890' });
+  it('shows full primary tool list', async () => {
+    const rendered = await renderSystem(baseProps);
     expect(rendered).toContain('bash');
     expect(rendered).toContain('web_search');
     expect(rendered).toContain('download_file');
@@ -81,118 +90,155 @@ describe('primary-system.velin.md', () => {
   });
 
   it('renders chat title and message link prefix', async () => {
-    const rendered = await renderSystem({
-      modelName: 'gpt-4o',
-      chatId: '-1001234567890',
-      chatTitle: 'My Test Group',
-    });
+    const rendered = await renderSystem({ ...baseProps, chatTitle: 'My Test Group' });
     expect(rendered).toContain('chat-title: My Test Group');
-    expect(rendered).toContain('chat-id: -1001234567890');
     expect(rendered).toContain('https://t.me/c/1234567890/<messageId>');
   });
 
   it('falls back when no message link prefix', async () => {
-    const rendered = await renderSystem({ modelName: 'gpt-4o', chatId: '12345' });
+    const rendered = await renderSystem({ ...baseProps, chatId: '12345' });
     expect(rendered).toContain('does not have a public message-link form');
     expect(rendered).not.toContain('https://t.me/c/');
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// primary-late-binding.velin.md
-// ═══════════════════════════════════════════════════════════════
+describe('system.velin.md (mode=probe)', () => {
+  const baseProps = { mode: 'probe', modelName: 'gpt-4o-mini', chatId: '-1001234567890' };
 
-const lateBindingTemplate = loadTemplate('primary-late-binding.velin.md');
-const renderLateBinding = (data: Record<string, unknown> = {}) =>
-  renderMarkdownString(lateBindingTemplate, data, basePath).then(r => r.rendered);
-
-describe('primary-late-binding.velin.md', () => {
-  it('renders static content', async () => {
-    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z' });
-    expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
-    expect(rendered).toContain('send_message');
-    expect(rendered).not.toContain('decided to act');
-    expect(rendered).not.toContain('interrupted');
+  it('frames the model as outside judge', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).toContain('outside evaluator');
+    expect(rendered).toContain('You are **not** the bot');
+    expect(rendered).toContain('third person');
     assertNoVueSyntaxLeak(rendered);
   });
 
-  it('renders activated state', async () => {
-    const rendered = await renderLateBinding({
-      timeNow: '2025-01-01T00:00:00Z',
-      isProbeEnabled: true, isProbing: false,
+  it('describes the decide tool with both required args', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).toContain('`decide`');
+    expect(rendered).toContain('should_act');
+    expect(rendered).toContain('reason');
+  });
+
+  it('omits primary-only sections', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).not.toContain('You just woke up');
+    expect(rendered).not.toContain('Message Formatting');
+    expect(rendered).not.toContain('Markdown');
+    expect(rendered).not.toContain('Linking to a specific message');
+    expect(rendered).not.toContain('Naturalness');
+    expect(rendered).not.toContain('SEARCH FIRST');
+    expect(rendered).not.toContain('Prompt and Context Disclosure');
+  });
+
+  it('omits the full tool list', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).not.toContain('Your available tools are');
+    expect(rendered).not.toContain('web_search');
+    expect(rendered).not.toContain('kill_task');
+  });
+
+  it('keeps political-topic guidance adapted to judge view', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).toContain('politically sensitive topics');
+    expect(rendered).toContain('should_act = false');
+  });
+
+  it('includes when-to-act and when-to-stay-silent rubric', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).toContain('When the bot should act');
+    expect(rendered).toContain('When the bot should stay silent');
+  });
+
+  it('relabels system files as bot background', async () => {
+    const rendered = await renderSystem({
+      ...baseProps,
+      systemFiles: [{ filename: 'IDENTITY.md', content: 'I am a test bot.' }],
     });
-    expect(rendered).toContain('decided to act');
+    expect(rendered).toContain('Background on the bot you are evaluating: IDENTITY.md');
+    expect(rendered).toContain('I am a test bot.');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// late-binding.velin.md
+// ═══════════════════════════════════════════════════════════════
+
+const lateBindingTemplate = loadTemplate('late-binding.velin.md');
+const renderLateBinding = (data: Record<string, unknown> = {}) =>
+  renderMarkdownString(lateBindingTemplate, data, basePath).then(r => r.rendered);
+
+describe('late-binding.velin.md (mode=primary)', () => {
+  const baseProps = { mode: 'primary', timeNow: '2025-01-01T00:00:00Z' };
+
+  it('renders act-now framing and hard rules', async () => {
+    const rendered = await renderLateBinding(baseProps);
+    expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
+    expect(rendered).toContain('judged that you should take action');
+    expect(rendered).toContain('no political topics');
+    expect(rendered).toContain('no agreement, no echoing');
+    expect(rendered).not.toContain('decide');
+    assertNoVueSyntaxLeak(rendered);
   });
 
-  it('renders mentioned state', async () => {
-    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isMentioned: true });
-    expect(rendered).toContain('mentioned');
-    expect(rendered).not.toContain('decided to act');
-  });
-
-  it('renders replied state', async () => {
-    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isReplied: true });
-    expect(rendered).toContain('replied');
-  });
-
-  it('renders interrupted state', async () => {
-    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z', isInterrupted: true });
+  it('renders interrupted hint', async () => {
+    const rendered = await renderLateBinding({ ...baseProps, isInterrupted: true });
     expect(rendered).toContain('interrupted by new messages');
-    expect(rendered).toContain('continue');
   });
 
-  it('interrupted does not suppress other states', async () => {
-    const rendered = await renderLateBinding({
-      timeNow: '2025-01-01T00:00:00Z',
-      isInterrupted: true,
-      isMentioned: true,
-    });
-    expect(rendered).toContain('interrupted by new messages');
-    expect(rendered).toContain('mentioned');
+  it('omits interrupted hint by default', async () => {
+    const rendered = await renderLateBinding(baseProps);
+    expect(rendered).not.toContain('interrupted by new messages');
   });
 
   it('renders active background tasks', async () => {
     const rendered = await renderLateBinding({
-      timeNow: '2025-01-01T00:00:00Z',
+      ...baseProps,
       activeBackgroundTasks: [
         { id: 3, typeName: 'shell_execute', intention: 'run tests', liveSummary: 'Running: 42 lines', startedMs: 1000, timeoutMs: 60000 },
       ],
     });
     expect(rendered).toContain('active-background-tasks');
     expect(rendered).toContain('task id="3"');
-    expect(rendered).toContain('shell');
     expect(rendered).toContain('run tests');
     expect(rendered).toContain('Running: 42 lines');
-    expect(rendered).toContain('</task>');
-    expect(rendered).toContain('</active-background-tasks>');
-  });
-
-  it('renders multiple background tasks', async () => {
-    const rendered = await renderLateBinding({
-      timeNow: '2025-01-01T00:00:00Z',
-      activeBackgroundTasks: [
-        { id: 1, typeName: 'shell_execute', liveSummary: 'task 1', startedMs: 1000, timeoutMs: 30000 },
-        { id: 2, typeName: 'shell_execute', liveSummary: 'task 2', startedMs: 2000, timeoutMs: 60000 },
-      ],
-    });
-    expect(rendered).toContain('task id="1"');
-    expect(rendered).toContain('task id="2"');
   });
 
   it('hides background tasks section when empty', async () => {
-    const rendered = await renderLateBinding({ timeNow: '2025-01-01T00:00:00Z' });
+    const rendered = await renderLateBinding(baseProps);
     expect(rendered).not.toContain('active-background-tasks');
   });
+});
 
-  it('renders task without intention', async () => {
+describe('late-binding.velin.md (mode=probe)', () => {
+  const baseProps = { mode: 'probe', timeNow: '2025-01-01T00:00:00Z' };
+
+  it('directs the judge to call decide', async () => {
+    const rendered = await renderLateBinding(baseProps);
+    expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
+    expect(rendered).toContain('`decide`');
+    expect(rendered).toContain('exactly once');
+    expect(rendered).toContain('should_act = false');
+    assertNoVueSyntaxLeak(rendered);
+  });
+
+  it('omits primary-only hard-rule paragraphs', async () => {
+    const rendered = await renderLateBinding(baseProps);
+    expect(rendered).not.toContain('judged that you should take action');
+    expect(rendered).not.toContain('no political topics');
+    expect(rendered).not.toContain('no agreement, no echoing');
+    expect(rendered).not.toContain('interrupted by new messages');
+  });
+
+  it('renders background tasks with judge-side framing', async () => {
     const rendered = await renderLateBinding({
-      timeNow: '2025-01-01T00:00:00Z',
+      ...baseProps,
       activeBackgroundTasks: [
-        { id: 5, typeName: 'shell_execute', liveSummary: 'Running', startedMs: 1000, timeoutMs: 30000 },
+        { id: 1, typeName: 'shell_execute', liveSummary: 'task 1', startedMs: 1000, timeoutMs: 30000 },
       ],
     });
-    expect(rendered).toContain('task id="5"');
-    expect(rendered).not.toContain('<intention>');
+    expect(rendered).toContain('Active background tasks the bot is currently waiting on');
+    expect(rendered).toContain('task id="1"');
   });
 });
 

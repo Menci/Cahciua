@@ -6,7 +6,7 @@ import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createBashTool, createAttachmentDownloader, createStaySilentTool, createDownloadFileTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
+import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
@@ -233,7 +233,7 @@ export const createDriver = (config: DriverConfig, deps: {
               downloadMessageMedia: deps.downloadMessageMedia,
             });
 
-            const tools: CahciuaTool[] = [sendMessageTool, createStaySilentTool(), createReactTool((messageId, emoji) => deps.setMessageReaction(chatId, messageId, emoji))];
+            const tools: CahciuaTool[] = [sendMessageTool, createReactTool((messageId, emoji) => deps.setMessageReaction(chatId, messageId, emoji))];
             tools.push(createBashTool(deps.runtimeConfig, {
               startTask: deps.backgroundTask.startTask,
               sessionId: chatId,
@@ -294,14 +294,74 @@ export const createDriver = (config: DriverConfig, deps: {
             tools.push(createReadTaskOutputTool((taskId, offset, limit) => deps.backgroundTask.readTaskOutput(taskId, offset, limit)));
             tools.push(createSleepTool());
 
-            // When probe gates the silence decision and primary forces a tool
-            // call, primary shouldn't be allowed to back out via stay_silent
-            // (causes probe-vs-primary disagreement where probe says "respond"
-            // but primary uses stay_silent to satisfy force-tool). Strip the
-            // tool from primary in that configuration.
-            const primaryMustRespond = chatConfig.probe.enabled && chatConfig.primary.forceToolCall;
+            // --- Compute mention/reply/interrupt state from RC + TRs ---
+            const rcVal = rcAtStart;
+            const isInterrupted = wasToolLoopInterrupted(trs);
+            // mention/reply skip the probe — those are de facto "should act" signals.
+            // runtime events (background task completion) DO go through probe; the
+            // judge can decide whether the result genuinely warrants surfacing.
+            const isMentioned = rcVal.some(seg => seg.mentionsMe && seg.receivedAtMs > lastProcessedMs());
+            const isReplied = rcVal.some(seg => seg.repliesToMe && seg.receivedAtMs > lastProcessedMs());
+            const skipProbe = isInterrupted || isMentioned || isReplied;
+
+            const activeBackgroundTasks = deps.backgroundTask.getActiveTasks(chatId);
+            const timeNow = localTimeNow();
+
+            // --- Probe gate ---
+            if (!skipProbe) {
+              log.withFields({ chatId, lastProcessedMs: lastProcessedMs() }).log('Running probe');
+
+              const probeSystem = await renderSystemPrompt({
+                mode: 'probe',
+                currentChannel: 'telegram',
+                modelName: chatConfig.probe.model.model,
+                chatId,
+                chatTitle: deps.getChatTitle(chatId),
+                systemFiles: chatConfig.systemFiles,
+              });
+
+              const probeEntries = [...ctx.entries];
+              injectLateBindingPrompt(probeEntries, await renderLateBindingPrompt({
+                mode: 'probe',
+                timeNow,
+                activeBackgroundTasks,
+              }));
+
+              const decideTool = createDecideTool();
+              const probeRequestedAt = Date.now();
+              const probeResult = await callLlm(
+                { ...chatConfig.probe.model, forceToolCall: chatConfig.probe.forceToolCall },
+                probeEntries, probeSystem,
+                [decideTool].map(toToolSchema),
+                { log, label: `probe:${chatId}`, dumpId: `${chatId}.probe`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
+              );
+
+              const decision = extractDecideResult(probeResult.entries);
+              // No decide call (model failed to call the only tool) is treated as
+              // silence — fail closed rather than activating primary on garbage.
+              const shouldAct = decision?.should_act === true;
+
+              log.withFields({ chatId, shouldAct, reason: decision?.reason }).log('Probe result');
+
+              await deps.persistProbeResponse(chatId, {
+                requestedAtMs: probeRequestedAt,
+                entries: probeResult.entries,
+                inputTokens: probeResult.usage.inputTokens,
+                outputTokens: probeResult.usage.outputTokens,
+                cacheReadTokens: probeResult.usage.cacheReadTokens,
+                cacheWriteTokens: probeResult.usage.cacheWriteTokens,
+                modelName: chatConfig.probe.model.model,
+                isActivated: shouldAct,
+                createdAt: Date.now(),
+              });
+
+              lastProcessedMs(probeRequestedAt);
+
+              if (!shouldAct) return;
+            }
 
             const system = await renderSystemPrompt({
+              mode: 'primary',
               currentChannel: 'telegram',
               modelName: chatConfig.primary.model.model,
               chatId,
@@ -309,79 +369,14 @@ export const createDriver = (config: DriverConfig, deps: {
               systemFiles: chatConfig.systemFiles,
             });
 
-            // --- Compute mention/reply/interrupt state from RC + TRs ---
-            const rcVal = rcAtStart;
-            const isInterrupted = wasToolLoopInterrupted(trs);
-            const lastMentionedAtMs = rcVal.reduce((max, seg) =>
-              (seg.mentionsMe || seg.repliesToMe || seg.isRuntimeEvent) ? Math.max(max, seg.receivedAtMs) : max, 0);
-            const isMentioned = rcVal.some(seg => seg.mentionsMe && seg.receivedAtMs > lastProcessedMs());
-            const isReplied = rcVal.some(seg => seg.repliesToMe && seg.receivedAtMs > lastProcessedMs());
-
-            const lateBindingParams = {
-              timeNow: localTimeNow(),
-              isMentioned, isReplied,
-              isInterrupted,
-              activeBackgroundTasks: deps.backgroundTask.getActiveTasks(chatId),
-            };
-
-            // --- Probe gate ---
-            // Skip probe if: mentioned, replied to, runtime event, or tool loop was interrupted.
-            // In those cases go straight to primary model.
-            if (chatConfig.probe.enabled && !isInterrupted) {
-              const needsProbe = lastMentionedAtMs <= lastProcessedMs();
-
-              if (needsProbe) {
-                log.withFields({ chatId, lastMentionedAtMs, lastProcessedMs: lastProcessedMs() }).log('Running probe');
-
-                const probeEntries = [...ctx.entries];
-                injectLateBindingPrompt(probeEntries, await renderLateBindingPrompt({
-                  ...lateBindingParams, isProbeEnabled: true, isProbing: true,
-                }));
-
-                const probeRequestedAt = Date.now();
-                const probeResult = await callLlm(
-                  { ...chatConfig.probe.model, forceToolCall: chatConfig.probe.forceToolCall },
-                  probeEntries, system,
-                  tools.map(toToolSchema),
-                  { log, label: `probe:${chatId}`, dumpId: `${chatId}.probe`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
-                );
-
-                const hasToolCalls = probeResult.entries.some(
-                  e => e.kind === 'message' && e.role === 'assistant'
-                    && e.parts.some(p => p.kind === 'toolCall' && p.name !== 'stay_silent'),
-                );
-
-                log.withFields({ chatId, hasToolCalls }).log('Probe result');
-
-                await deps.persistProbeResponse(chatId, {
-                  requestedAtMs: probeRequestedAt,
-                  entries: probeResult.entries,
-                  inputTokens: probeResult.usage.inputTokens,
-                  outputTokens: probeResult.usage.outputTokens,
-                  cacheReadTokens: probeResult.usage.cacheReadTokens,
-                  cacheWriteTokens: probeResult.usage.cacheWriteTokens,
-                  modelName: chatConfig.probe.model.model,
-                  isActivated: hasToolCalls,
-                  createdAt: Date.now(),
-                });
-
-                lastProcessedMs(probeRequestedAt);
-
-                if (!hasToolCalls) {
-                  log.withFields({ chatId }).log('Probe: model chose silence');
-                  return;
-                }
-                log.withFields({ chatId }).log('Probe: tool calls detected, activating primary model');
-              }
-            }
-
             injectLateBindingPrompt(ctx.entries, await renderLateBindingPrompt({
-              ...lateBindingParams, isProbeEnabled: chatConfig.probe.enabled, isProbing: false,
+              mode: 'primary',
+              timeNow,
+              isInterrupted,
+              activeBackgroundTasks,
             }));
 
-            const primaryTools = primaryMustRespond
-              ? tools.filter(t => t.function.name !== 'stay_silent')
-              : tools;
+            const primaryTools = tools;
 
             const runner = getOrCreateRunner(chatConfig.primary.model);
 

@@ -476,17 +476,51 @@ export const createReactTool = (
   },
 });
 
-export const createStaySilentTool = (): CahciuaTool => createTool({
-  name: 'stay_silent',
-  description: 'Mark this evaluation as a deliberate choice to stay silent. Use only when you have considered the chat and decided not to speak. Equivalent to making no tool call when send_message is otherwise unrestricted.',
+export const DECIDE_TOOL_NAME = 'decide';
+
+export interface DecideArgs {
+  should_act: boolean;
+  reason: string;
+}
+
+export const createDecideTool = (): CahciuaTool => createTool({
+  name: DECIDE_TOOL_NAME,
+  description:
+    'Record your judgement on whether the bot should take any action this turn. '
+    + 'Calling this tool IS the output of the evaluation; the arguments are the result.',
   parameters: {
     type: 'object',
     properties: {
-      reason: { type: 'string', description: 'Brief internal note on why you are staying silent (not shown to anyone).' },
+      should_act: {
+        type: 'boolean',
+        description: 'true if the bot should take some action now (send a message, react, run a tool, etc.); false to stay silent.',
+      },
+      reason: {
+        type: 'string',
+        description: 'Brief, honest explanation of the judgement (one or two sentences). Speaks about the bot in third person.',
+      },
     },
+    required: ['should_act', 'reason'],
   },
   execute: () => ({ content: JSON.stringify({ ok: true }), requiresFollowUp: false }),
 });
+
+/** Extract the decide tool's args from a probe call's entries. Returns null if not present or malformed. */
+export const extractDecideResult = (entries: ConversationEntry[]): DecideArgs | null => {
+  for (const e of entries) {
+    if (e.kind !== 'message' || e.role !== 'assistant') continue;
+    for (const p of e.parts) {
+      if (p.kind === 'toolCall' && p.name === DECIDE_TOOL_NAME) {
+        try {
+          const parsed = JSON.parse(p.args) as Partial<DecideArgs>;
+          if (typeof parsed.should_act === 'boolean' && typeof parsed.reason === 'string')
+            return { should_act: parsed.should_act, reason: parsed.reason };
+        } catch { /* fall through */ }
+      }
+    }
+  }
+  return null;
+};
 
 const SLEEP_MAX_SECONDS = 300;
 

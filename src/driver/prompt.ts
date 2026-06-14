@@ -15,20 +15,22 @@ const cleanVelinOutput = (raw: string): string =>
     .replace(/<!--\[-->/g, '')
     .replace(/<!--]-->/g, '')
     .replace(/<!--v-if-->/g, '')
-    .replace(/\u200B/g, '\n')
+    .replace(/​/g, '\n')
     .replace(/\\`/g, '`')
     .replace(/\\_/g, '_')
     .replace(/^[^\S\n]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-const systemPromptTemplate = readFileSync(resolve(__dirname, '../../prompts/primary-system.velin.md'), 'utf-8');
-const lateBindingTemplate = readFileSync(resolve(__dirname, '../../prompts/primary-late-binding.velin.md'), 'utf-8');
+const systemPromptTemplate = readFileSync(resolve(__dirname, '../../prompts/system.velin.md'), 'utf-8');
+const lateBindingTemplate = readFileSync(resolve(__dirname, '../../prompts/late-binding.velin.md'), 'utf-8');
 const compactionSystemTemplate = readFileSync(resolve(__dirname, '../../prompts/compaction-system.velin.md'), 'utf-8');
 const compactionUserTemplate = readFileSync(resolve(__dirname, '../../prompts/compaction-late-binding.velin.md'), 'utf-8');
 
+export type PromptMode = 'primary' | 'probe';
+
 export const renderSystemPrompt = async (params: {
-  language?: string;
+  mode: PromptMode;
   modelName: string;
   currentChannel?: string;
   chatId: string;
@@ -40,13 +42,10 @@ export const renderSystemPrompt = async (params: {
 };
 
 export const renderLateBindingPrompt = async (params: {
+  mode: PromptMode;
   timeNow: string;
-  isProbeEnabled?: boolean;
-  isProbing?: boolean;
-  isMentioned?: boolean;
-  isReplied?: boolean;
-  activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
   isInterrupted?: boolean;
+  activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
 }) => {
   const { rendered } = await renderMarkdownString(lateBindingTemplate, params, basePath);
   return cleanVelinOutput(rendered);

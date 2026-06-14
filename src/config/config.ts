@@ -54,8 +54,7 @@ const ChatConfigSchema = v.object({
     model: v.optional(v.string()),
   }), {}),
   probe: v.optional(v.object({
-    enabled: v.optional(v.boolean(), false),
-    model: v.optional(v.string(), ''),
+    model: v.optional(v.string()),
     forceToolCall: v.optional(v.boolean(), false),
   }), {}),
   imageToText: v.optional(v.object({
@@ -111,7 +110,6 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
     model: v.string(),
   })),
   probe: v.partial(v.object({
-    enabled: v.boolean(),
     model: v.string(),
     forceToolCall: v.boolean(),
   })),
@@ -197,7 +195,7 @@ export interface ResolvedChatConfig {
   sendTypingAction: boolean;
   debounce: DebounceConfig;
   compaction: CompactionConfig;
-  probe: { enabled: boolean; model: LlmEndpoint; forceToolCall: boolean };
+  probe: { model: LlmEndpoint; forceToolCall: boolean };
   imageToText: { enabled: boolean; model?: string; maxConcurrency: number };
   animationToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
@@ -281,7 +279,6 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
       model: merged.compaction.model ? resolveModel(config, merged.compaction.model) : undefined,
     },
     probe: {
-      enabled: merged.probe.enabled,
       model: merged.probe.model ? resolveModel(config, merged.probe.model) : primaryModel,
       forceToolCall: merged.probe.forceToolCall,
     },
