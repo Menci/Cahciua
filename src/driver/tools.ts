@@ -451,9 +451,9 @@ export const createReadImageTool = (deps: {
   },
 });
 
-export const createDismissMessageTool = (): CahciuaTool => createTool({
-  name: 'dismiss_message',
-  description: 'Explicitly signal that you have decided to stay silent this turn — no message will be sent. Call this when you consciously choose not to respond.',
+export const createStaySilentTool = (): CahciuaTool => createTool({
+  name: 'stay_silent',
+  description: 'Mark this evaluation as a deliberate choice to stay silent. Use only when you have considered the chat and decided not to speak. Equivalent to making no tool call when send_message is otherwise unrestricted.',
   parameters: {
     type: 'object',
     properties: {

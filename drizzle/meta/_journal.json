@@ -1,195 +1,202 @@
 {
-  "version": "7",
-  "dialect": "sqlite",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1773059764567,
-      "tag": "0000_initial_schema",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1773067939887,
-      "tag": "0001_messages_deleted_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1773068462396,
-      "tag": "0002_users_is_premium_not_null",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1773073241783,
-      "tag": "0003_create_events_table",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1773080982180,
-      "tag": "0004_events_chat_id_not_null",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1773087282449,
-      "tag": "0005_events_add_received_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1773496800000,
-      "tag": "0006_content_node_string_ids",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1773496800001,
-      "tag": "0007_backfill_events_content",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1773496800002,
-      "tag": "0008_events_utc_offset",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1773496800003,
-      "tag": "0009_rename_thumbnail_to_thumbnail_webp",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "6",
-      "when": 1773496800004,
-      "tag": "0010_create_turn_responses",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "6",
-      "when": 1773496800005,
-      "tag": "0011_turn_responses_reasoning_compat",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "6",
-      "when": 1773496800006,
-      "tag": "0012_drop_response_envelope",
-      "breakpoints": true
-    },
-    {
-      "idx": 13,
-      "version": "6",
-      "when": 1773496800007,
-      "tag": "0013_rename_reasoning_signature_compat",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "6",
-      "when": 1773496800008,
-      "tag": "0014_fix_bot_utc_offset",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "6",
-      "when": 1773496800009,
-      "tag": "0015_events_is_self_sent",
-      "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "6",
-      "when": 1773648000000,
-      "tag": "0016_create_compactions_table",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "6",
-      "when": 1773648000001,
-      "tag": "0017_compactions_append_only",
-      "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "6",
-      "when": 1773648000002,
-      "tag": "0018_compactions_token_stats",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "6",
-      "when": 1773734400000,
-      "tag": "0019_create_probe_responses",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "6",
-      "when": 1773820800000,
-      "tag": "0020_events_service_action",
-      "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "6",
-      "when": 1773820800001,
-      "tag": "0021_create_image_alt_texts",
-      "breakpoints": true
-    },
-    {
-      "idx": 22,
-      "version": "6",
-      "when": 1773820800002,
-      "tag": "0022_image_alt_texts_sticker_set_name",
-      "breakpoints": true
-    },
-    {
-      "idx": 23,
-      "version": "6",
-      "when": 1773907200000,
-      "tag": "0023_create_background_tasks",
-      "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "6",
-      "when": 1773907200001,
-      "tag": "0024_backfill_requires_follow_up",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "6",
-      "when": 1773993600000,
-      "tag": "0025_create_v2_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "6",
-      "when": 1778524720294,
-      "tag": "0026_cache_token_stats",
-      "breakpoints": true
-    }
-  ]
+	"version": "7",
+	"dialect": "sqlite",
+	"entries": [
+		{
+			"idx": 0,
+			"version": "6",
+			"when": 1773059764567,
+			"tag": "0000_initial_schema",
+			"breakpoints": true
+		},
+		{
+			"idx": 1,
+			"version": "6",
+			"when": 1773067939887,
+			"tag": "0001_messages_deleted_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 2,
+			"version": "6",
+			"when": 1773068462396,
+			"tag": "0002_users_is_premium_not_null",
+			"breakpoints": true
+		},
+		{
+			"idx": 3,
+			"version": "6",
+			"when": 1773073241783,
+			"tag": "0003_create_events_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "6",
+			"when": 1773080982180,
+			"tag": "0004_events_chat_id_not_null",
+			"breakpoints": true
+		},
+		{
+			"idx": 5,
+			"version": "6",
+			"when": 1773087282449,
+			"tag": "0005_events_add_received_at",
+			"breakpoints": true
+		},
+		{
+			"idx": 6,
+			"version": "6",
+			"when": 1773496800000,
+			"tag": "0006_content_node_string_ids",
+			"breakpoints": true
+		},
+		{
+			"idx": 7,
+			"version": "6",
+			"when": 1773496800001,
+			"tag": "0007_backfill_events_content",
+			"breakpoints": true
+		},
+		{
+			"idx": 8,
+			"version": "6",
+			"when": 1773496800002,
+			"tag": "0008_events_utc_offset",
+			"breakpoints": true
+		},
+		{
+			"idx": 9,
+			"version": "6",
+			"when": 1773496800003,
+			"tag": "0009_rename_thumbnail_to_thumbnail_webp",
+			"breakpoints": true
+		},
+		{
+			"idx": 10,
+			"version": "6",
+			"when": 1773496800004,
+			"tag": "0010_create_turn_responses",
+			"breakpoints": true
+		},
+		{
+			"idx": 11,
+			"version": "6",
+			"when": 1773496800005,
+			"tag": "0011_turn_responses_reasoning_compat",
+			"breakpoints": true
+		},
+		{
+			"idx": 12,
+			"version": "6",
+			"when": 1773496800006,
+			"tag": "0012_drop_response_envelope",
+			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "6",
+			"when": 1773496800007,
+			"tag": "0013_rename_reasoning_signature_compat",
+			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "6",
+			"when": 1773496800008,
+			"tag": "0014_fix_bot_utc_offset",
+			"breakpoints": true
+		},
+		{
+			"idx": 15,
+			"version": "6",
+			"when": 1773496800009,
+			"tag": "0015_events_is_self_sent",
+			"breakpoints": true
+		},
+		{
+			"idx": 16,
+			"version": "6",
+			"when": 1773648000000,
+			"tag": "0016_create_compactions_table",
+			"breakpoints": true
+		},
+		{
+			"idx": 17,
+			"version": "6",
+			"when": 1773648000001,
+			"tag": "0017_compactions_append_only",
+			"breakpoints": true
+		},
+		{
+			"idx": 18,
+			"version": "6",
+			"when": 1773648000002,
+			"tag": "0018_compactions_token_stats",
+			"breakpoints": true
+		},
+		{
+			"idx": 19,
+			"version": "6",
+			"when": 1773734400000,
+			"tag": "0019_create_probe_responses",
+			"breakpoints": true
+		},
+		{
+			"idx": 20,
+			"version": "6",
+			"when": 1773820800000,
+			"tag": "0020_events_service_action",
+			"breakpoints": true
+		},
+		{
+			"idx": 21,
+			"version": "6",
+			"when": 1773820800001,
+			"tag": "0021_create_image_alt_texts",
+			"breakpoints": true
+		},
+		{
+			"idx": 22,
+			"version": "6",
+			"when": 1773820800002,
+			"tag": "0022_image_alt_texts_sticker_set_name",
+			"breakpoints": true
+		},
+		{
+			"idx": 23,
+			"version": "6",
+			"when": 1773907200000,
+			"tag": "0023_create_background_tasks",
+			"breakpoints": true
+		},
+		{
+			"idx": 24,
+			"version": "6",
+			"when": 1773907200001,
+			"tag": "0024_backfill_requires_follow_up",
+			"breakpoints": true
+		},
+		{
+			"idx": 25,
+			"version": "6",
+			"when": 1773993600000,
+			"tag": "0025_create_v2_tables",
+			"breakpoints": true
+		},
+		{
+			"idx": 26,
+			"version": "6",
+			"when": 1778524720294,
+			"tag": "0026_cache_token_stats",
+			"breakpoints": true
+		},
+		{
+			"idx": 27,
+			"version": "6",
+			"when": 1778524720295,
+			"tag": "0027_rename_dismiss_message_to_stay_silent",
+			"breakpoints": true
+		}
+	]
 }

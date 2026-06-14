@@ -6,7 +6,7 @@ import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createBashTool, createAttachmentDownloader, createDismissMessageTool, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
+import { createBashTool, createAttachmentDownloader, createStaySilentTool, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
@@ -232,7 +232,7 @@ export const createDriver = (config: DriverConfig, deps: {
               downloadMessageMedia: deps.downloadMessageMedia,
             });
 
-            const tools: CahciuaTool[] = [sendMessageTool, createDismissMessageTool()];
+            const tools: CahciuaTool[] = [sendMessageTool, createStaySilentTool()];
             tools.push(createBashTool(deps.runtimeConfig, {
               startTask: deps.backgroundTask.startTask,
               sessionId: chatId,
@@ -294,10 +294,10 @@ export const createDriver = (config: DriverConfig, deps: {
             tools.push(createSleepTool());
 
             // When probe gates the silence decision and primary forces a tool
-            // call, primary shouldn't be allowed to back out via dismiss_message
+            // call, primary shouldn't be allowed to back out via stay_silent
             // (causes probe-vs-primary disagreement where probe says "respond"
-            // but primary uses dismiss to satisfy force-tool). Strip the tool
-            // and omit the silence-mechanism reminder from late-binding.
+            // but primary uses stay_silent to satisfy force-tool). Strip the
+            // tool from primary in that configuration.
             const primaryMustRespond = chatConfig.probe.enabled && chatConfig.primary.forceToolCall;
 
             const system = await renderSystemPrompt({
@@ -347,7 +347,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
                 const hasToolCalls = probeResult.entries.some(
                   e => e.kind === 'message' && e.role === 'assistant'
-                    && e.parts.some(p => p.kind === 'toolCall' && p.name !== 'dismiss_message'),
+                    && e.parts.some(p => p.kind === 'toolCall' && p.name !== 'stay_silent'),
                 );
 
                 log.withFields({ chatId, hasToolCalls }).log('Probe result');
@@ -379,7 +379,7 @@ export const createDriver = (config: DriverConfig, deps: {
             }));
 
             const primaryTools = primaryMustRespond
-              ? tools.filter(t => t.function.name !== 'dismiss_message')
+              ? tools.filter(t => t.function.name !== 'stay_silent')
               : tools;
 
             const runner = getOrCreateRunner(chatConfig.primary.model);
