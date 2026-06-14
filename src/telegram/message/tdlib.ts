@@ -1,6 +1,7 @@
 import type * as Td from 'tdlib-types';
 
 import type { EntityCache } from '../entity-cache';
+import { tdLibToServerMessageId } from './id-conversion';
 import type { Attachment, ForwardInfo, MessageEntity, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from './types';
 
 // --- chat / sender ---
@@ -338,7 +339,7 @@ const convertForwardInfo = (cache: EntityCache, fwd: Td.messageForwardInfo | und
   case 'messageOriginChannel':
     info.fromChatId = String(origin.chat_id);
     info.sender = cache.resolveChatAsUser(origin.chat_id);
-    if (origin.message_id) info.fromMessageId = origin.message_id;
+    if (origin.message_id) info.fromMessageId = tdLibToServerMessageId(origin.message_id);
     break;
   case 'messageOriginHiddenUser':
     info.senderName = origin.sender_name;
@@ -348,7 +349,7 @@ const convertForwardInfo = (cache: EntityCache, fwd: Td.messageForwardInfo | und
   // to fill in fromChatId/fromMessageId when origin didn't already supply them.
   if (fwd.source && info.fromChatId === undefined && fwd.source.chat_id) {
     info.fromChatId = String(fwd.source.chat_id);
-    if (fwd.source.message_id) info.fromMessageId = fwd.source.message_id;
+    if (fwd.source.message_id) info.fromMessageId = tdLibToServerMessageId(fwd.source.message_id);
   }
   return info;
 };
@@ -385,7 +386,7 @@ const convertServiceContent = (
   case 'messageChatDeletePhoto':
     return { ...base, source: 'userbot', deleteChatPhoto: true };
   case 'messagePinMessage':
-    return { ...base, source: 'userbot', pinnedMessage: { messageId: content.message_id } };
+    return { ...base, source: 'userbot', pinnedMessage: { messageId: tdLibToServerMessageId(content.message_id) } };
   default:
     return null;
   }
@@ -407,13 +408,13 @@ const SERVICE_CONTENT_TYPES = new Set([
 export const fromTdMessage = (cache: EntityCache, msg: Td.message): TelegramMessage | null => {
   const replyTo = msg.reply_to?._ === 'messageReplyToMessage' ? msg.reply_to : undefined;
   const base: Omit<TelegramMessage, 'source'> = {
-    messageId: msg.id,
+    messageId: tdLibToServerMessageId(msg.id),
     chatId: chatIdToString(msg.chat_id),
     sender: senderToUser(cache, msg.sender_id),
     date: msg.date,
     editDate: msg.edit_date || undefined,
     text: '',
-    replyToMessageId: replyTo?.message_id || undefined,
+    replyToMessageId: replyTo?.message_id ? tdLibToServerMessageId(replyTo.message_id) : undefined,
     forwardInfo: convertForwardInfo(cache, msg.forward_info),
     mediaGroupId: msg.media_album_id && msg.media_album_id !== '0' ? msg.media_album_id : undefined,
     viaBotId: msg.via_bot_user_id ? String(msg.via_bot_user_id) : undefined,
@@ -438,7 +439,7 @@ export const fromTdMessageEdited = (cache: EntityCache, msg: Td.message): Telegr
   const result = convertContent(msg.content);
   if (!result) return null;
   return {
-    messageId: msg.id,
+    messageId: tdLibToServerMessageId(msg.id),
     chatId: chatIdToString(msg.chat_id),
     sender: senderToUser(cache, msg.sender_id),
     date: msg.date,

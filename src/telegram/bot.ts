@@ -13,6 +13,7 @@ import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
 import { fromTdMessage } from './message/tdlib';
 import { resolveMessageMetadata } from './message/resolve-metadata';
+import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
 
 export interface BotClientOptions {
   apiId: number;
@@ -195,7 +196,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     // plain entity-style content that older clients can render correctly).
     const html = renderMarkdownToTelegramHTML(text);
     const replyTo: Td.InputMessageReplyTo$Input | undefined = opts?.replyToMessageId
-      ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
+      ? { _: 'inputMessageReplyToMessage', message_id: serverToTdLibMessageId(opts.replyToMessageId) }
       : undefined;
 
     const content: Td.InputMessageContent$Input = hasRichOnlyMarkup(html)
@@ -227,7 +228,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
       : sent.content._ === 'messageRichMessage'
         ? ''  // rich content doesn't reduce to plain text cleanly; downstream only uses the returned messageId.
         : '';
-    return { messageId: sent.id, date: sent.date, text: sentText };
+    return { messageId: tdLibToServerMessageId(sent.id), date: sent.date, text: sentText };
   };
 
   const sendFileGeneric = async (
@@ -273,12 +274,12 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
         _: 'sendMessage',
         chat_id: Number(chatId),
         reply_to: opts?.replyToMessageId
-          ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
+          ? { _: 'inputMessageReplyToMessage', message_id: serverToTdLibMessageId(opts.replyToMessageId) }
           : undefined,
         input_message_content: content,
       }) as Td.message;
       const captionText = 'caption' in sent.content && sent.content.caption ? sent.content.caption.text : '';
-      return { messageId: sent.id, date: sent.date, text: captionText };
+      return { messageId: tdLibToServerMessageId(sent.id), date: sent.date, text: captionText };
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
@@ -313,11 +314,11 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
         _: 'sendMessageAlbum',
         chat_id: Number(chatId),
         reply_to: opts?.replyToMessageId
-          ? { _: 'inputMessageReplyToMessage', message_id: opts.replyToMessageId }
+          ? { _: 'inputMessageReplyToMessage', message_id: serverToTdLibMessageId(opts.replyToMessageId) }
           : undefined,
         input_message_contents: contents,
       }) as Td.messages;
-      return result.messages.flatMap((m): SentMessage[] => m ? [{ messageId: m.id, date: m.date, text: 'caption' in m.content && m.content.caption ? m.content.caption.text : '' }] : []);
+      return result.messages.flatMap((m): SentMessage[] => m ? [{ messageId: tdLibToServerMessageId(m.id), date: m.date, text: 'caption' in m.content && m.content.caption ? m.content.caption.text : '' }] : []);
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
@@ -336,7 +337,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     await client.invoke({
       _: 'setMessageReactions',
       chat_id: Number(chatId),
-      message_id: messageId,
+      message_id: serverToTdLibMessageId(messageId),
       reaction_types: emoji ? [{ _: 'reactionTypeEmoji', emoji }] : [],
       is_big: false,
     });
@@ -355,7 +356,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
   };
 
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
-    const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: messageId }) as Td.message;
+    const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: serverToTdLibMessageId(messageId) }) as Td.message;
     const file = findFileInContent(msg.content);
     if (!file) return undefined;
     const downloaded = await waitForFileDownload(file.id);

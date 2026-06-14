@@ -8,6 +8,7 @@ import { createEventBus } from './event-bus';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
 import { fromTdMessage, fromTdMessageEdited } from './message/tdlib';
 import { resolveMessageMetadata } from './message/resolve-metadata';
+import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
 import { isTypingLikeAction } from './typing-action';
 
 export interface UserbotOptions {
@@ -126,7 +127,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     }
     case 'updateDeleteMessages': {
       if (!update.is_permanent) return;
-      deleteBus.emit({ messageIds: [...update.message_ids], chatId: String(update.chat_id) });
+      deleteBus.emit({ messageIds: [...update.message_ids].map(tdLibToServerMessageId), chatId: String(update.chat_id) });
       return;
     }
     case 'updateChatAction': {
@@ -166,17 +167,18 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     const result = await client.invoke({
       _: 'getChatHistory',
       chat_id: Number(chatId),
-      from_message_id: opts.offsetId ?? 0,
+      from_message_id: opts.offsetId ? serverToTdLibMessageId(opts.offsetId) : 0,
       offset: 0,
       limit,
       only_local: false,
     }) as Td.messages;
     const msgs = result.messages.flatMap((m): TelegramMessage[] => {
       if (!m) return [];
-      if (opts.minId !== undefined && m.id <= opts.minId) return [];
-      if (opts.maxId !== undefined && m.id >= opts.maxId) return [];
       const conv = fromTdMessage(cache, m);
-      return conv ? [conv] : [];
+      if (!conv) return [];
+      if (opts.minId !== undefined && conv.messageId <= opts.minId) return [];
+      if (opts.maxId !== undefined && conv.messageId >= opts.maxId) return [];
+      return [conv];
     });
     await Promise.all(msgs.map(m => resolveMessageMetadata(client, m)));
     return msgs;
@@ -187,7 +189,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     const result = await client.invoke({
       _: 'getMessages',
       chat_id: Number(chatId),
-      message_ids: messageIds,
+      message_ids: messageIds.map(serverToTdLibMessageId),
     }) as Td.messages;
     const msgs = result.messages.flatMap((m): TelegramMessage[] => {
       if (!m) return [];
@@ -209,7 +211,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
   };
 
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
-    const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: messageId }) as Td.message;
+    const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: serverToTdLibMessageId(messageId) }) as Td.message;
     const file = findFileInContent(msg.content);
     if (!file) return undefined;
     const downloaded = await waitForFileDownload(file.id);
