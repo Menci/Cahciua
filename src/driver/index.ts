@@ -293,13 +293,19 @@ export const createDriver = (config: DriverConfig, deps: {
             tools.push(createReadTaskOutputTool((taskId, offset, limit) => deps.backgroundTask.readTaskOutput(taskId, offset, limit)));
             tools.push(createSleepTool());
 
+            // When probe gates the silence decision and primary forces a tool
+            // call, primary shouldn't be allowed to back out via dismiss_message
+            // (causes probe-vs-primary disagreement where probe says "respond"
+            // but primary uses dismiss to satisfy force-tool). Strip the tool
+            // and omit the silence-mechanism reminder from late-binding.
+            const primaryMustRespond = chatConfig.probe.enabled && chatConfig.primary.forceToolCall;
+
             const system = await renderSystemPrompt({
               currentChannel: 'telegram',
               modelName: chatConfig.primary.model.model,
               chatId,
               chatTitle: deps.getChatTitle(chatId),
               systemFiles: chatConfig.systemFiles,
-              forceToolCall: chatConfig.primary.forceToolCall,
             });
 
             // --- Compute mention/reply/interrupt state from RC + TRs ---
@@ -314,7 +320,6 @@ export const createDriver = (config: DriverConfig, deps: {
               timeNow: localTimeNow(),
               isMentioned, isReplied,
               isInterrupted,
-              forceToolCall: chatConfig.primary.forceToolCall,
               activeBackgroundTasks: deps.backgroundTask.getActiveTasks(chatId),
             };
 
@@ -327,30 +332,15 @@ export const createDriver = (config: DriverConfig, deps: {
               if (needsProbe) {
                 log.withFields({ chatId, lastMentionedAtMs, lastProcessedMs: lastProcessedMs() }).log('Running probe');
 
-                // If probe's forceToolCall differs from primary's, render its own
-                // system + late-binding so the silence-mechanism prompt matches the
-                // tool_choice the wire will send. Otherwise share for KV-cache hits.
-                const probeSystem = chatConfig.probe.forceToolCall === chatConfig.primary.forceToolCall
-                  ? system
-                  : await renderSystemPrompt({
-                    currentChannel: 'telegram',
-                    modelName: chatConfig.probe.model.model,
-                    chatId,
-                    chatTitle: deps.getChatTitle(chatId),
-                    systemFiles: chatConfig.systemFiles,
-                    forceToolCall: chatConfig.probe.forceToolCall,
-                  });
-
                 const probeEntries = [...ctx.entries];
                 injectLateBindingPrompt(probeEntries, await renderLateBindingPrompt({
                   ...lateBindingParams, isProbeEnabled: true, isProbing: true,
-                  forceToolCall: chatConfig.probe.forceToolCall,
                 }));
 
                 const probeRequestedAt = Date.now();
                 const probeResult = await callLlm(
                   { ...chatConfig.probe.model, forceToolCall: chatConfig.probe.forceToolCall },
-                  probeEntries, probeSystem,
+                  probeEntries, system,
                   tools.map(toToolSchema),
                   { log, label: `probe:${chatId}`, dumpId: `${chatId}.probe`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
                 );
@@ -388,6 +378,10 @@ export const createDriver = (config: DriverConfig, deps: {
               ...lateBindingParams, isProbeEnabled: chatConfig.probe.enabled, isProbing: false,
             }));
 
+            const primaryTools = primaryMustRespond
+              ? tools.filter(t => t.function.name !== 'dismiss_message')
+              : tools;
+
             const runner = getOrCreateRunner(chatConfig.primary.model);
 
             // Show a "typing…" action while the model works, refreshed every 5s
@@ -405,7 +399,7 @@ export const createDriver = (config: DriverConfig, deps: {
                 chatId,
                 entries: ctx.entries,
                 system,
-                tools,
+                tools: primaryTools,
                 maxSteps: MAX_STEPS,
                 maxImagesAllowed: chatConfig.primary.model.maxImagesAllowed,
                 forceToolCall: chatConfig.primary.forceToolCall,

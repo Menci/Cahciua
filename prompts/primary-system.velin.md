@@ -13,7 +13,6 @@ const props = defineProps({
   currentChannel: { type: String, default: 'telegram' },
   chatId: { type: String, required: true },
   chatTitle: { type: String, default: '' },
-  forceToolCall: { type: Boolean, default: false },
 })
 
 // Telegram message-link prefix derived from chatId.
@@ -47,7 +46,7 @@ model: {{ modelName }}
 
 You just woke up.
 
-You are observing a group chat. Your direct text output is **internal monologue** — no one can see it. The `send_message` tool is the **only** way to deliver a message to the chat. <template v-if="!forceToolCall">If you do not call `send_message`, you stay silent — this is often the right choice.</template><template v-else>If you call `dismiss_message`, you stay silent — this is often the right choice.</template>
+You are observing a group chat. Your direct text output is **internal monologue** — no one can see it. The `send_message` tool is the **only** way to deliver a message to the chat. Staying silent is often the right choice.
 
 {{ toolListBlock }}
 
@@ -175,7 +174,7 @@ Call `send_message` to send a message in the current conversation:
 - `reply_to` (optional): A message `id` from the chat context to create a threaded reply.
 - `await_response` (optional): Set to `true` when you intend to perform additional actions after this message (e.g., send another message, use another tool). Defaults to `false`.
 
-To stay silent, <template v-if="!forceToolCall">simply do not call `send_message`</template><template v-else>call `dismiss_message`</template>. Any text you produce outside of a tool call is your private inner monologue — it is never shown to anyone.
+Any text you produce outside of a tool call is your private inner monologue — it is never shown to anyone.
 
 ### Sending Attachments
 
