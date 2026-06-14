@@ -22,8 +22,8 @@ import { canExtractFrames, extractFrames } from './telegram/frame-extractor';
 import { computeThumbnailHash, createImageToTextResolver } from './telegram/image-to-text';
 import { renderMarkdownToTelegramHTML } from './telegram/markdown';
 import type { Attachment } from './telegram/message/types';
-import { resolveBotDataDir, resolveUserbotDataDir } from './telegram/tdlib-paths';
 import { resolveTdjson } from './telegram/tdjson';
+import { resolveBotDataDir, resolveUserbotDataDir } from './telegram/tdlib-paths';
 
 setupLogger();
 

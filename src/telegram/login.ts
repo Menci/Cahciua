@@ -5,9 +5,9 @@ import * as readline from 'node:readline/promises';
 import { Format, initLogger, LogLevel, useGlobalLogger } from '@guiiai/logg';
 import * as tdl from 'tdl';
 
-import { loadConfig } from '../config/config';
-import { resolveUserbotDataDir } from './tdlib-paths';
 import { resolveTdjson } from './tdjson';
+import { resolveUserbotDataDir } from './tdlib-paths';
+import { loadConfig } from '../config/config';
 
 const main = async () => {
   initLogger(LogLevel.Log, Format.Pretty);
@@ -74,7 +74,7 @@ const main = async () => {
     // The closing handshake itself flushes too, but settle background tasks first.
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    log.log('Userbot state saved to ' + dataDir);
+    log.log(`Userbot state saved to ${  dataDir}`);
   } finally {
     rl.close();
     await client.close();

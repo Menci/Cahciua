@@ -6,9 +6,9 @@ import type { EntityCache } from './entity-cache';
 import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
-import { fromTdMessage, fromTdMessageEdited } from './message/tdlib';
-import { resolveMessageMetadata } from './message/resolve-metadata';
 import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
+import { resolveMessageMetadata } from './message/resolve-metadata';
+import { fromTdMessage, fromTdMessageEdited } from './message/tdlib';
 import { isTypingLikeAction } from './typing-action';
 
 export interface UserbotOptions {

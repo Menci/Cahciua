@@ -280,18 +280,18 @@ const flattenPageBlock = (block: Td.PageBlock): string => {
   case 'pageBlockAnchor':
     return '';
   case 'pageBlockList':
-    return block.items.map((item, i) => {
+    return `${block.items.map((item, i) => {
       const marker = item.label || `${i + 1}.`;
       const body = item.blocks.map(flattenPageBlock).join('').trim();
       return `${marker} ${body}\n`;
-    }).join('') + '\n';
+    }).join('')  }\n`;
   case 'pageBlockBlockQuote': {
     const text = block.blocks.map(flattenPageBlock).join('').trim();
-    return text.split('\n').map((line: string) => `> ${line}`).join('\n') + '\n\n';
+    return `${text.split('\n').map((line: string) => `> ${line}`).join('\n')  }\n\n`;
   }
   case 'pageBlockPullQuote': {
     const text = flattenRichText(block.text);
-    return text.split('\n').map((line: string) => `> ${line}`).join('\n') + '\n\n';
+    return `${text.split('\n').map((line: string) => `> ${line}`).join('\n')  }\n\n`;
   }
   case 'pageBlockAnimation':
   case 'pageBlockAudio':
@@ -307,7 +307,7 @@ const flattenPageBlock = (block: Td.PageBlock): string => {
     if (rows.length === 0) return '';
     const header = rows[0]!;
     const separator = header.split('|').map(() => '---').join('|');
-    return [header, separator, ...rows.slice(1)].map(r => `| ${r} |`).join('\n') + '\n\n';
+    return `${[header, separator, ...rows.slice(1)].map(r => `| ${r} |`).join('\n')  }\n\n`;
   }
   case 'pageBlockDetails':
     return block.blocks.map(flattenPageBlock).join('');

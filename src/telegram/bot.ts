@@ -11,9 +11,9 @@ import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
 import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
-import { fromTdMessage } from './message/tdlib';
-import { resolveMessageMetadata } from './message/resolve-metadata';
 import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
+import { resolveMessageMetadata } from './message/resolve-metadata';
+import { fromTdMessage } from './message/tdlib';
 
 export interface BotClientOptions {
   apiId: number;
@@ -94,7 +94,7 @@ const parseMode = (mode: 'HTML' | 'MarkdownV2' | undefined): Td.TextParseMode$In
 const formattedFromHtml = (text: string, mode: 'HTML' | 'MarkdownV2' = 'HTML'): Td.formattedText$Input => {
   if (!text) return { _: 'formattedText', text: '', entities: [] };
   const result = tdl.execute({ _: 'parseTextEntities', text, parse_mode: parseMode(mode) });
-  if (result && result._ === 'formattedText') {
+  if (result?._ === 'formattedText') {
     return { _: 'formattedText', text: result.text, entities: result.entities };
   }
   // parseTextEntities returned an error — fall back to plain text without entities.
@@ -201,20 +201,20 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
 
     const content: Td.InputMessageContent$Input = hasRichOnlyMarkup(html)
       ? {
-        _: 'inputMessageRichMessage',
-        message: {
-          _: 'inputRichMessage',
-          source: { _: 'richMessageSourceHtml', text: html },
-          is_rtl: false,
-          detect_automatic_blocks: false,
-        },
-        clear_draft: true,
-      }
+          _: 'inputMessageRichMessage',
+          message: {
+            _: 'inputRichMessage',
+            source: { _: 'richMessageSourceHtml', text: html },
+            is_rtl: false,
+            detect_automatic_blocks: false,
+          },
+          clear_draft: true,
+        }
       : {
-        _: 'inputMessageText',
-        text: formattedFromHtml(html, opts?.parseMode ?? 'HTML'),
-        clear_draft: true,
-      };
+          _: 'inputMessageText',
+          text: formattedFromHtml(html, opts?.parseMode ?? 'HTML'),
+          clear_draft: true,
+        };
 
     const sent = await client.invoke({
       _: 'sendMessage',

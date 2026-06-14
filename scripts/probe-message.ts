@@ -14,8 +14,8 @@ import * as tdl from 'tdl';
 import type * as Td from 'tdlib-types';
 
 import { loadConfig } from '../src/config/config';
-import { resolveUserbotDataDir } from '../src/telegram/tdlib-paths';
 import { resolveTdjson } from '../src/telegram/tdjson';
+import { resolveUserbotDataDir } from '../src/telegram/tdlib-paths';
 
 useGlobalLogger({ level: 'log', mode: 'pretty' });
 const logger = useLogger('probe');
