@@ -12,6 +12,7 @@ import { createEventBus } from './event-bus';
 import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
 import { fromTdMessage } from './message/tdlib';
+import { resolveMessageMetadata } from './message/resolve-metadata';
 
 export interface BotClientOptions {
   apiId: number;
@@ -77,7 +78,6 @@ export interface BotClient {
   sendChatAction(chatId: string | number, action?: 'typing'): Promise<void>;
   setMessageReaction(chatId: string | number, messageId: number, emoji: string | undefined): Promise<void>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
-  getStickerSetTitle(setIdOrName: string): Promise<string>;
   getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
   raw(): tdl.Client;
   entityCache(): EntityCache;
@@ -159,7 +159,12 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
       break;
     case 'updateNewMessage': {
       const msg = fromTdMessage(cache, update.message);
-      if (msg) messageBus.emit({ ...msg, source: 'bot' });
+      if (msg) {
+        void (async () => {
+          await resolveMessageMetadata(client, msg);
+          messageBus.emit({ ...msg, source: 'bot' });
+        })();
+      }
       break;
     }
     }
@@ -358,26 +363,6 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     return await fs.readFile(downloaded.local.path);
   };
 
-  const getStickerSetTitle = async (setIdOrName: string): Promise<string> => {
-    if (/^-?\d+$/.test(setIdOrName)) {
-      try {
-        const set = await client.invoke({ _: 'getStickerSet', set_id: setIdOrName }) as Td.stickerSet;
-        return set.title;
-      } catch (err) {
-        // Premium custom-emoji sets the bot account can't materialize via
-        // messages.getStickerSet (STICKERSET_INVALID is deterministic, not
-        // transient). Fall back to the short_name TDLib already cached when
-        // getCustomEmojiStickers was called — it's a slug like "MyAnimePack",
-        // not the human title, but readable enough for the LLM.
-        const name = await client.invoke({ _: 'getStickerSetName', set_id: setIdOrName }) as Td.text;
-        if (name.text) return name.text;
-        throw err;
-      }
-    }
-    const set = await client.invoke({ _: 'searchStickerSet', name: setIdOrName }) as Td.stickerSet;
-    return set.title;
-  };
-
   const getCustomEmojiInfo = async (customEmojiIds: string[]): Promise<CustomEmojiInfo[]> => {
     if (customEmojiIds.length === 0) return [];
     const stickers = await client.invoke({
@@ -418,7 +403,6 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     sendChatAction,
     setMessageReaction,
     downloadMessageMedia,
-    getStickerSetTitle,
     getCustomEmojiInfo,
     raw: () => client,
     entityCache: () => cache,

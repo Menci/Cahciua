@@ -10,7 +10,6 @@ import { createEventBus } from './event-bus';
 import { canExtractFrames, extractFrames } from './frame-extractor';
 import type { ImageToTextResolver } from './image-to-text';
 import type { Attachment, MessageEntity, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
-import { normalizeStickerSetMetadata } from './pack-title';
 import { createSessionIngressQueue } from './session-ingress-queue';
 import { canGenerateThumbnail, generateThumbnail } from './thumbnail';
 import type { FetchOptions, TypingEvent, UserbotClient } from './userbot';
@@ -70,7 +69,6 @@ export interface TelegramManager {
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
   getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
-  resolvePackTitle(setIdOrName: string): Promise<string>;
   botUserId: string;
   bot: BotClient;
   userbot?: UserbotClient;
@@ -128,35 +126,6 @@ export const createTelegramManager = (
   const customEmojiToText = options.customEmojiToText;
   const customEmojiToTextChatIds = options.customEmojiToTextChatIds;
 
-  // Negative cache: STICKERSET_INVALID for bot-inaccessible premium custom
-  // emoji sets is deterministic per (set_id, account), so we store the
-  // fallback (the input id itself) and surface the warning once per set.
-  const packTitleCache = new Map<string, string>();
-  const packTitleInflight = new Map<string, Promise<string>>();
-  const resolvePackTitle = async (setIdOrName: string): Promise<string> => {
-    const cached = packTitleCache.get(setIdOrName);
-    if (cached !== undefined) return cached;
-    const inflight = packTitleInflight.get(setIdOrName);
-    if (inflight) return await inflight;
-
-    const task = (async () => {
-      try {
-        const title = await bot.getStickerSetTitle(setIdOrName);
-        packTitleCache.set(setIdOrName, title);
-        return title;
-      } catch (err) {
-        log.withError(err).withFields({ setIdOrName }).warn('Failed to resolve pack title');
-        packTitleCache.set(setIdOrName, setIdOrName);
-        return setIdOrName;
-      } finally {
-        packTitleInflight.delete(setIdOrName);
-      }
-    })();
-
-    packTitleInflight.set(setIdOrName, task);
-    return await task;
-  };
-
   const hydrateAttachments = async (
     chatId: string,
     messageId: number,
@@ -165,8 +134,6 @@ export const createTelegramManager = (
     entities?: MessageEntity[],
   ) => {
     if (attachments) {
-      await normalizeStickerSetMetadata(attachments, resolvePackTitle);
-
       const originalBuffers = new Map<Attachment, Buffer>();
       await Promise.all(attachments.map(async att => {
         if (att.thumbnailWebp || !canGenerateThumbnail(att)) return;
@@ -216,15 +183,17 @@ export const createTelegramManager = (
     }
 
     if (customEmojiToText && (!customEmojiToTextChatIds || customEmojiToTextChatIds.has(chatId)) && entities) {
-      const emojiIds = new Map<string, string>();
-      for (const ent of entities) {
-        if (ent.type === 'custom_emoji' && ent.customEmojiId) {
-          const fallback = text.substring(ent.offset, ent.offset + ent.length);
-          emojiIds.set(ent.customEmojiId, fallback);
-        }
-      }
-      if (emojiIds.size > 0) {
-        await customEmojiToText.resolve(emojiIds);
+      const items = entities.flatMap(ent => {
+        if (ent.type !== 'custom_emoji' || !ent.customEmojiId) return [];
+        return [{
+          customEmojiId: ent.customEmojiId,
+          fallbackEmoji: text.substring(ent.offset, ent.offset + ent.length),
+          stickerSetName: ent.customEmojiSetName,
+          format: ent.customEmojiFormat,
+        }];
+      });
+      if (items.length > 0) {
+        await customEmojiToText.resolve(items);
       }
     }
   };
@@ -347,7 +316,6 @@ export const createTelegramManager = (
     fetchSpecificMessages: (chatId, ids) => userbot?.fetchSpecificMessages(chatId, ids) ?? Promise.resolve([]),
     downloadMessageMedia,
     getCustomEmojiInfo: ids => bot.getCustomEmojiInfo(ids),
-    resolvePackTitle,
     botUserId: bot.botUserId(),
     bot,
     userbot,

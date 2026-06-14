@@ -8,6 +8,14 @@ export interface MessageEntity {
   language?: string;
   customEmojiId?: string;
   userId?: string;
+
+  // Resolved at ingress for custom_emoji entities. Populated on the same client
+  // that received the message — its TDLib has the sticker set's access_hash in
+  // memory at that moment. Persisted on the entity so downstream code never
+  // re-resolves.
+  customEmojiSetId?: string;
+  customEmojiSetName?: string;
+  customEmojiFormat?: 'static' | 'animated' | 'video';
 }
 
 export interface ForwardInfo {

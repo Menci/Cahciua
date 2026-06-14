@@ -105,9 +105,17 @@ const entityToNode = (
   case 'text_mention':
     return { type: 'mention', userId: entity.userId!, children };
 
-  // Custom emoji
+  // Custom emoji — metadata (set id / title / format) was resolved at ingress
+  // by resolveMessageMetadata; copy it onto the canonical node here.
   case 'custom_emoji':
-    return { type: 'custom_emoji', customEmojiId: entity.customEmojiId!, children };
+    return {
+      type: 'custom_emoji',
+      customEmojiId: entity.customEmojiId!,
+      children,
+      ...entity.customEmojiSetId && { stickerSetId: entity.customEmojiSetId },
+      ...entity.customEmojiSetName && { stickerSetName: entity.customEmojiSetName },
+      ...entity.customEmojiFormat && { format: entity.customEmojiFormat },
+    };
 
   // Unknown / informational types (hashtag, bot_command, email, phone_number, etc.)
   // — treat as plain text, forward-compatible with new entity types

@@ -22,7 +22,6 @@ import { canExtractFrames, extractFrames } from './telegram/frame-extractor';
 import { computeThumbnailHash, createImageToTextResolver } from './telegram/image-to-text';
 import { renderMarkdownToTelegramHTML } from './telegram/markdown';
 import type { Attachment } from './telegram/message/types';
-import { normalizeStickerSetMetadata } from './telegram/pack-title';
 import { resolveBotDataDir, resolveUserbotDataDir } from './telegram/tdlib-paths';
 import { resolveTdjson } from './telegram/tdjson';
 
@@ -109,7 +108,6 @@ const main = async () => {
     lookupByHash: hash => loadImageAltTextByHash(db, hash),
     persist: record => persistImageAltText(db, record),
     getCustomEmojiInfo: ids => ref.telegram!.getCustomEmojiInfo(ids),
-    resolvePackTitle: setName => ref.telegram!.resolvePackTitle(setName),
   });
 
   // Sync hydration: after persistEvent, set altText transiently on canonical
@@ -194,18 +192,6 @@ const main = async () => {
       pipeline.setCompactCursor(chatId, compaction.newCursorMs);
     const eventsWithId = loadEventsWithId(db, chatId, compaction?.newCursorMs);
     const events = eventsWithId.map(({ event }) => event);
-
-    // Legacy events stored raw set_name in stickerSetName. Normalize them once and
-    // persist the resolved title so cold-start replay and live ingress share one format.
-    const packTitleTasks: Promise<void>[] = [];
-    for (const { id: eventId, event } of eventsWithId) {
-      if ((event.type !== 'message' && event.type !== 'edit') || event.attachments.length === 0) continue;
-      packTitleTasks.push((async () => {
-        if (await normalizeStickerSetMetadata(event.attachments, telegram.resolvePackTitle))
-          updateEventAttachments(db, eventId, event.attachments);
-      })());
-    }
-    if (packTitleTasks.length > 0) await Promise.all(packTitleTasks);
 
     if (imageToTextChatIds.has(chatId)) {
       const tasks: Promise<void>[] = [];
@@ -556,19 +542,23 @@ const main = async () => {
     for (const chatId of customEmojiToTextChatIds) {
       const compaction = loadCompaction(db, chatId);
       const events = loadEvents(db, chatId, compaction?.newCursorMs);
-      const emojiIds = new Map<string, string>();
+      const itemsById = new Map<string, { customEmojiId: string; fallbackEmoji: string; stickerSetName?: string; format?: 'static' | 'animated' | 'video' }>();
       for (const event of events) {
         if (event.type !== 'message' && event.type !== 'edit') continue;
         walkCustomEmoji(event.content, node => {
-          if (!emojiIds.has(node.customEmojiId)) {
-            const fallback = contentToPlainText(node.children);
-            emojiIds.set(node.customEmojiId, fallback);
+          if (!itemsById.has(node.customEmojiId)) {
+            itemsById.set(node.customEmojiId, {
+              customEmojiId: node.customEmojiId,
+              fallbackEmoji: contentToPlainText(node.children),
+              stickerSetName: node.stickerSetName,
+              format: node.format,
+            });
           }
         });
       }
-      if (emojiIds.size > 0) {
-        logger.withFields({ chatId, count: emojiIds.size }).log('Cold-start: resolving custom emoji descriptions');
-        await customEmojiToTextResolver.resolve(emojiIds);
+      if (itemsById.size > 0) {
+        logger.withFields({ chatId, count: itemsById.size }).log('Cold-start: resolving custom emoji descriptions');
+        await customEmojiToTextResolver.resolve([...itemsById.values()]);
         // Re-hydrate + re-replay to get fresh altText into IC → RC
         // (IC nodes from initial replay are Immer-frozen, so we must re-build)
         for (const event of events) hydrateAltTextFromCache(event);

@@ -7,6 +7,7 @@ import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
 import { fromTdMessage, fromTdMessageEdited } from './message/tdlib';
+import { resolveMessageMetadata } from './message/resolve-metadata';
 import { isTypingLikeAction } from './typing-action';
 
 export interface UserbotOptions {
@@ -96,7 +97,12 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
       return;
     case 'updateNewMessage': {
       const msg = fromTdMessage(cache, update.message);
-      if (msg) messageBus.emit(msg);
+      if (msg) {
+        void (async () => {
+          await resolveMessageMetadata(client, msg);
+          messageBus.emit(msg);
+        })();
+      }
       return;
     }
     case 'updateMessageEdited': {
@@ -108,7 +114,10 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
         try {
           const msg = await client.invoke({ _: 'getMessage', chat_id: update.chat_id, message_id: update.message_id }) as Td.message;
           const edit = fromTdMessageEdited(cache, msg);
-          if (edit) editBus.emit(edit);
+          if (edit) {
+            await resolveMessageMetadata(client, edit);
+            editBus.emit(edit);
+          }
         } catch (err) {
           log.withError(err).withFields({ chatId: update.chat_id, messageId: update.message_id }).warn('Failed to fetch edited message');
         }
@@ -162,13 +171,15 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
       limit,
       only_local: false,
     }) as Td.messages;
-    return result.messages.flatMap((m): TelegramMessage[] => {
+    const msgs = result.messages.flatMap((m): TelegramMessage[] => {
       if (!m) return [];
       if (opts.minId !== undefined && m.id <= opts.minId) return [];
       if (opts.maxId !== undefined && m.id >= opts.maxId) return [];
       const conv = fromTdMessage(cache, m);
       return conv ? [conv] : [];
     });
+    await Promise.all(msgs.map(m => resolveMessageMetadata(client, m)));
+    return msgs;
   };
 
   const fetchSpecificMessages = async (chatId: string, messageIds: number[]): Promise<TelegramMessage[]> => {
@@ -178,11 +189,13 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
       chat_id: Number(chatId),
       message_ids: messageIds,
     }) as Td.messages;
-    return result.messages.flatMap((m): TelegramMessage[] => {
+    const msgs = result.messages.flatMap((m): TelegramMessage[] => {
       if (!m) return [];
       const conv = fromTdMessage(cache, m);
       return conv ? [conv] : [];
     });
+    await Promise.all(msgs.map(m => resolveMessageMetadata(client, m)));
+    return msgs;
   };
 
   const waitForFileDownload = async (fileId: number, timeoutMs = 60000): Promise<Td.file> => {
