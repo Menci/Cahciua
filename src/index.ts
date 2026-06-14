@@ -296,6 +296,7 @@ const main = async () => {
     persistTurnResponse: (chatId, tr) => persistTurnResponse(db, chatId, tr),
     persistProbeResponse: (chatId, probe) => persistProbeResponse(db, chatId, probe),
     sendTypingAction: chatId => telegram.sendChatAction(chatId),
+    setMessageReaction: (chatId, messageId, emoji) => telegram.setMessageReaction(chatId, messageId, emoji),
     onDebounceStateChange: (chatId, isDebouncing) => {
       if (isDebouncing) telegram.startTypingPolling(chatId);
       else telegram.stopTypingPolling(chatId);

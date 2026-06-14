@@ -75,6 +75,7 @@ export interface BotClient {
   sendVideoNote(chatId: string | number, videoNote: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
   sendMediaGroup(chatId: string | number, media: MediaGroupItem[], options?: SendOptions): Promise<SentMessage[]>;
   sendChatAction(chatId: string | number, action?: 'typing'): Promise<void>;
+  setMessageReaction(chatId: string | number, messageId: number, emoji: string | undefined): Promise<void>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
   getStickerSetTitle(setIdOrName: string): Promise<string>;
   getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
@@ -326,6 +327,16 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     });
   };
 
+  const setMessageReaction = async (chatId: string | number, messageId: number, emoji: string | undefined) => {
+    await client.invoke({
+      _: 'setMessageReactions',
+      chat_id: Number(chatId),
+      message_id: messageId,
+      reaction_types: emoji ? [{ _: 'reactionTypeEmoji', emoji }] : [],
+      is_big: false,
+    });
+  };
+
   const waitForFileDownload = async (fileId: number, timeoutMs = 60000): Promise<Td.file> => {
     // tdlib's `synchronous: true` flag returns once the download succeeds, fails, or
     // is canceled; that's what we want for our blocking download API.
@@ -405,6 +416,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     sendVideoNote,
     sendMediaGroup,
     sendChatAction,
+    setMessageReaction,
     downloadMessageMedia,
     getStickerSetTitle,
     getCustomEmojiInfo,

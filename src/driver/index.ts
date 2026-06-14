@@ -6,7 +6,7 @@ import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createBashTool, createAttachmentDownloader, createStaySilentTool, createDownloadFileTool, createKillTaskTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
+import { createBashTool, createAttachmentDownloader, createStaySilentTool, createDownloadFileTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
@@ -47,6 +47,7 @@ export const createDriver = (config: DriverConfig, deps: {
   persistTurnResponse: (chatId: string, tr: TurnResponseV2) => Promise<void>;
   persistProbeResponse: (chatId: string, probe: ProbeResponseV2) => Promise<void>;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number, attachments?: SendMessageAttachment[]) => Promise<{ messageId: number; date: number }>;
+  setMessageReaction: (chatId: string, messageId: number, emoji: string | undefined) => Promise<void>;
   sendTypingAction?: (chatId: string) => Promise<void>;
   // Called when a chat enters (true) / leaves (false) its debounce window, so the
   // host can run an active typing poll for large supergroups only while waiting.
@@ -232,7 +233,7 @@ export const createDriver = (config: DriverConfig, deps: {
               downloadMessageMedia: deps.downloadMessageMedia,
             });
 
-            const tools: CahciuaTool[] = [sendMessageTool, createStaySilentTool()];
+            const tools: CahciuaTool[] = [sendMessageTool, createStaySilentTool(), createReactTool((messageId, emoji) => deps.setMessageReaction(chatId, messageId, emoji))];
             tools.push(createBashTool(deps.runtimeConfig, {
               startTask: deps.backgroundTask.startTask,
               sessionId: chatId,

@@ -56,6 +56,7 @@ export interface TelegramManager {
   startTypingPolling(chatId: string): void;
   stopTypingPolling(chatId: string): void;
   sendChatAction(chatId: string | number): Promise<void>;
+  setMessageReaction(chatId: string | number, messageId: number, emoji: string | undefined): Promise<void>;
   sendMessage(chatId: string | number, text: string, options?: SendOptions): Promise<SentMessage>;
   sendPhoto(chatId: string | number, photo: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
   sendDocument(chatId: string | number, document: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
@@ -333,6 +334,7 @@ export const createTelegramManager = (
     stopTypingPolling,
     sendMessage: (chatId, text, opts) => bot.sendMessage(chatId, text, opts),
     sendChatAction: chatId => bot.sendChatAction(chatId),
+    setMessageReaction: (chatId, messageId, emoji) => bot.setMessageReaction(chatId, messageId, emoji),
     sendPhoto: (chatId, photo, opts) => bot.sendPhoto(chatId, photo, opts),
     sendDocument: (chatId, doc, opts) => bot.sendDocument(chatId, doc, opts),
     sendVideo: (chatId, video, opts) => bot.sendVideo(chatId, video, opts),

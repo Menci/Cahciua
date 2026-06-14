@@ -30,6 +30,7 @@ const NL = '\u200B'
 const toolListBlock = computed(() => {
   const lines = [
     '`send_message` — Send a message in the current conversation, optionally with media attachments.',
+    '`react` — Add or remove your emoji reaction on a message. Lightweight acknowledgement; replaces any prior reaction (one-per-message limit for bots).',
     '`bash` — Execute a shell command. Output (stdout+stderr) is truncated to 4 KB. For large outputs, redirect to a file and read specific ranges.',
     '`web_search` — Search the web. Returns an answer and up to 5 results.',
     '`download_file` — Download a file attachment from the chat to a local path. Use the `file-id` attribute from attachment elements.',
