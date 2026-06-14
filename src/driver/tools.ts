@@ -74,6 +74,7 @@ export interface SendMessageAttachment {
 
 export const createSendMessageTool = (
   send: (text: string, replyTo?: string, attachments?: SendMessageAttachment[]) => Promise<{ messageId: string }>,
+  messageExists: (messageId: number) => boolean,
 ): CahciuaTool => {
   const properties: Record<string, unknown> = {
     text: { type: 'string', description: 'The message to send. When sending attachments, this becomes the caption.' },
@@ -116,6 +117,11 @@ export const createSendMessageTool = (
         await_response?: boolean;
         attachments?: SendMessageAttachment[];
       };
+      if (reply_to != null && reply_to !== '') {
+        const replyToNum = Number(reply_to);
+        if (!Number.isFinite(replyToNum) || !messageExists(replyToNum))
+          return { content: JSON.stringify({ error: `No such reply_to message_id ${reply_to} in this chat — refusing to call TDLib with an unknown id. Send the message without reply_to, or use a valid id.` }), requiresFollowUp: true };
+      }
       const result = await send(text, reply_to, attachments);
       return {
         content: JSON.stringify({ ok: true, message_id: result.messageId }),
@@ -453,6 +459,7 @@ export const createReadImageTool = (deps: {
 
 export const createReactTool = (
   setReaction: (messageId: number, emoji: string | undefined) => Promise<void>,
+  messageExists: (messageId: number) => boolean,
 ): CahciuaTool => createTool({
   name: 'react',
   description: 'Add or remove your emoji reaction on a message in the current chat. Reactions are a lightweight acknowledgement — useful when a full reply would be excessive. Bot accounts can only set one reaction per message; calling react again replaces the previous one. Custom emoji are not supported.',
@@ -469,6 +476,8 @@ export const createReactTool = (
     const { message_id, emoji, remove } = input as { message_id: string; emoji?: string; remove?: boolean };
     const messageIdNum = Number(message_id);
     if (!Number.isFinite(messageIdNum)) throw new Error(`Invalid message_id: ${message_id}`);
+    if (!messageExists(messageIdNum))
+      return { content: JSON.stringify({ error: `No such message_id ${message_id} in this chat — refusing to call TDLib with an unknown id.` }), requiresFollowUp: true };
     const targetEmoji = remove ? undefined : emoji;
     if (!remove && !emoji) throw new Error('emoji is required when remove is not true');
     await setReaction(messageIdNum, targetEmoji);

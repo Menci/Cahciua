@@ -9,7 +9,7 @@ import { shellTaskFactory } from './background-task/shell';
 import { getChatIds, loadConfig, resolveBackgroundTasks, resolveChatConfig, resolveModel, resolveRuntime } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
-import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadTurnResponses, lookupChatId, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadTurnResponses, lookupChatId, messageExists, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { PipelineEvent } from './pipeline';
@@ -331,6 +331,7 @@ const main = async () => {
     getChatTitle: chatId => pipeline.getIC(chatId)?.chatTitle,
     runtimeConfig,
     loadMessageAttachments: (chatId, messageId) => loadMessageAttachments(db, chatId, messageId),
+    messageExists: (chatId, messageId) => messageExists(db, chatId, messageId),
     downloadMessageMedia: (chatId, messageId) => telegram.downloadMessageMedia(chatId, messageId),
     resolveModel: name => resolveModel(config, name),
     backgroundTask: {

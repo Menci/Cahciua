@@ -478,6 +478,21 @@ export const loadMessageAttachments = (db: DB, chatId: string, messageId: number
   return row?.attachments ?? undefined;
 };
 
+/**
+ * Cheap existence check used at tool boundaries to validate LLM-supplied
+ * message_ids before they reach TDLib. TDLib aborts the process on malformed
+ * ids (assertion failure, not a catchable error), so we MUST gate on this
+ * before any react/reply_to call.
+ */
+export const messageExists = (db: DB, chatId: string, messageId: number): boolean => {
+  const row = db.select({ messageId: messages.messageId })
+    .from(messages)
+    .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
+    .limit(1)
+    .get();
+  return row != null;
+};
+
 // --- Background tasks storage ---
 
 export type BackgroundTaskRow = typeof backgroundTasks.$inferSelect;

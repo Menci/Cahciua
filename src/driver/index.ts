@@ -59,6 +59,7 @@ export const createDriver = (config: DriverConfig, deps: {
   getChatTitle: (chatId: string) => string | undefined;
   runtimeConfig: RuntimeConfig;
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
+  messageExists: (chatId: string, messageId: number) => boolean;
   downloadMessageMedia: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
   resolveModel: (name: string) => LlmEndpoint;
   backgroundTask: {
@@ -223,6 +224,8 @@ export const createDriver = (config: DriverConfig, deps: {
               estimatedTokens: ctx.estimatedTokens,
             }).log('Triggering LLM call');
 
+            const messageExistsHere = (messageId: number) => deps.messageExists(chatId, messageId);
+
             const sendMessageTool = createSendMessageTool(async (text, replyTo, attachments) => {
               log.withFields({
                 chatId,
@@ -232,7 +235,7 @@ export const createDriver = (config: DriverConfig, deps: {
               }).log('send_message tool called');
               const sent = await deps.sendMessage(chatId, text, replyTo ? Number(replyTo) : undefined, attachments);
               return { messageId: String(sent.messageId) };
-            });
+            }, messageExistsHere);
 
             const downloadAttachment = createAttachmentDownloader({
               chatId,
@@ -240,7 +243,7 @@ export const createDriver = (config: DriverConfig, deps: {
               downloadMessageMedia: deps.downloadMessageMedia,
             });
 
-            const tools: CahciuaTool[] = [sendMessageTool, createReactTool((messageId, emoji) => deps.setMessageReaction(chatId, messageId, emoji))];
+            const tools: CahciuaTool[] = [sendMessageTool, createReactTool((messageId, emoji) => deps.setMessageReaction(chatId, messageId, emoji), messageExistsHere)];
             tools.push(createBashTool(deps.runtimeConfig, {
               startTask: deps.backgroundTask.startTask,
               sessionId: chatId,
