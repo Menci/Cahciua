@@ -143,6 +143,12 @@ Key attributes:
 - `edited` — present if the message was edited, shows edit time.
 - `deleted` — present if the message was deleted; the element will be self-closing with no content.
 
+<template v-if="mode === 'probe'">
+
+The bot's own past messages appear in this same `<message>` XML stream — recognizable by the `sender` attribute matching the bot's identity. There is no separate stream of "bot internal state", "tool calls", or "tool results"; you see only the chat as an outside observer would. Form your judgement from this view alone.
+
+</template>
+
 Replies include a nested element:
 
 ```xml

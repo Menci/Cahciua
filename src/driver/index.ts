@@ -3,7 +3,7 @@ import { computed, effect, signal } from 'alien-signals';
 
 import { callLlm, type ToolSchema } from './call-llm';
 import { runCompaction } from './compaction';
-import { composeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
+import { composeContext, composeProbeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult } from './tools';
@@ -321,6 +321,9 @@ export const createDriver = (config: DriverConfig, deps: {
             if (!skipProbe) {
               log.withFields({ chatId, lastProcessedMs: lastProcessedMs() }).log('Running probe');
 
+              const probeCtx = composeProbeContext(rcAtStart, chatConfig.compaction.maxContextEstTokens, sum);
+              if (!probeCtx) return;
+
               const probeSystem = await renderSystemPrompt({
                 mode: 'probe',
                 currentChannel: 'telegram',
@@ -330,7 +333,7 @@ export const createDriver = (config: DriverConfig, deps: {
                 systemFiles: chatConfig.systemFiles,
               });
 
-              const probeEntries = [...ctx.entries];
+              const probeEntries = [...probeCtx.entries];
               injectLateBindingPrompt(probeEntries, await renderLateBindingPrompt({
                 mode: 'probe',
                 timeNow,

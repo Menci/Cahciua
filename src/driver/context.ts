@@ -267,6 +267,33 @@ export const composeContext = (
   return { ...trimmed, rawEstimatedTokens };
 };
 
+/**
+ * Probe sees an outside-judge view: pure chat history, no tool calls, no
+ * tool results. The bot's own messages that the primary side normally
+ * sources from TRs are taken from the RC instead — so isSelfSent segments
+ * stay in (filterSelfSentSegments is NOT applied), and TRs are excluded
+ * entirely. Compact summary still rides along for context.
+ */
+export const composeProbeContext = (
+  rc: RenderedContext,
+  maxTokens: number,
+  compactSummary?: string,
+): { entries: ConversationEntry[]; estimatedTokens: number; rawEstimatedTokens: number } | null => {
+  const merged = mergeContext(rc, []);
+  if (merged.length === 0 && !compactSummary) return null;
+
+  const entries: ConversationEntry[] = compactSummary
+    ? [
+        { kind: 'message', role: 'user', parts: [{ kind: 'text', text: `[Conversation summary]\n${compactSummary}` }] } satisfies InputMessage,
+        ...merged,
+      ]
+    : merged;
+
+  const rawEstimatedTokens = entries.reduce((a, e) => a + entryTokens(e), 0);
+  const trimmed = trimEntries(entries, maxTokens);
+  return { ...trimmed, rawEstimatedTokens };
+};
+
 export const injectLateBindingPrompt = (entries: ConversationEntry[], prompt: string): void => {
   entries.push({
     kind: 'message',
