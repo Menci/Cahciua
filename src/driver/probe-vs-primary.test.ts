@@ -1,4 +1,4 @@
-import { useGlobalLogger, useLogger } from '@guiiai/logg';
+import { Format, initLogger, LogLevel, useLogger } from '@guiiai/logg';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./call-llm', async (importOriginal) => {
@@ -16,7 +16,7 @@ import type { ResolvedChatConfig } from '../config/config';
 import type { RenderedContext } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 
-useGlobalLogger({ level: 'log', mode: 'pretty' });
+initLogger(LogLevel.Log, Format.Pretty);
 const logger = useLogger('probe-vs-primary-test');
 
 const mockCallLlm = vi.mocked(callLlm);
