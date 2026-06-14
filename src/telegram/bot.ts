@@ -137,7 +137,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     tdlibParameters: {
       device_model: 'Cahciua bot',
       application_version: '1.0',
-      use_message_database: false,
+      use_message_database: true,
       use_chat_info_database: true,
       use_secret_chats: false,
     },
@@ -189,7 +189,25 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     log.log('Bot stopped');
   };
 
+  // TDLib bot clients only learn about a chat through its own `update*` stream.
+  // In the userbot-as-ingress topology, the bot client never receives those
+  // updates and has no record of the chats the user configured — so the first
+  // sendMessage / setMessageReactions / sendChatAction call surfaces as
+  // `Chat not found` or `CHANNEL_INVALID`. Warm the chat into TDLib's cache
+  // via `getChat` once per process (use_chat_info_database persists it across
+  // restarts, so subsequent sessions hit the disk cache and skip the round
+  // trip). Failures are logged and propagated — the caller's actual op will
+  // surface a clearer message about what's wrong.
+  const knownChats = new Set<number>();
+  const ensureChatKnown = async (chatIdRaw: string | number): Promise<void> => {
+    const chatId = Number(chatIdRaw);
+    if (knownChats.has(chatId)) return;
+    await client.invoke({ _: 'getChat', chat_id: chatId });
+    knownChats.add(chatId);
+  };
+
   const sendMessage = async (chatId: string | number, text: string, opts?: SendOptions): Promise<SentMessage> => {
+    await ensureChatKnown(chatId);
     // The caller passes markdown (LLM output). We render to Telegram-supported
     // HTML and then dispatch to either inputMessageRichMessage (for rich-only
     // features like math, headings, lists, tables) or inputMessageText (for
@@ -237,6 +255,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     kind: 'photo' | 'video' | 'audio' | 'voice' | 'animation' | 'video_note' | 'document',
     opts?: MediaSendOptions,
   ): Promise<SentMessage> => {
+    await ensureChatKnown(chatId);
     const workDir = await mkdtemp(join(tmpdir(), 'cahciua-tdl-'));
     try {
       const fileName = opts?.fileName ?? `${kind}.bin`;
@@ -294,6 +313,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
   const sendVideoNote = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'video_note', o);
 
   const sendMediaGroup = async (chatId: string | number, media: MediaGroupItem[], opts?: SendOptions): Promise<SentMessage[]> => {
+    await ensureChatKnown(chatId);
     const workDir = await mkdtemp(join(tmpdir(), 'cahciua-tdl-'));
     try {
       const contents = await Promise.all(media.map(async (m, i): Promise<Td.InputMessageContent$Input> => {
@@ -326,6 +346,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
 
   const sendChatAction = async (chatId: string | number, action: 'typing' = 'typing') => {
     void action;
+    await ensureChatKnown(chatId);
     await client.invoke({
       _: 'sendChatAction',
       chat_id: Number(chatId),
@@ -334,6 +355,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
   };
 
   const setMessageReaction = async (chatId: string | number, messageId: number, emoji: string | undefined) => {
+    await ensureChatKnown(chatId);
     await client.invoke({
       _: 'setMessageReactions',
       chat_id: Number(chatId),
@@ -356,6 +378,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
   };
 
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
+    await ensureChatKnown(chatId);
     const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: serverToTdLibMessageId(messageId) }) as Td.message;
     const file = findFileInContent(msg.content);
     if (!file) return undefined;
