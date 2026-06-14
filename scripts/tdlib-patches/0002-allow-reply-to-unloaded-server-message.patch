@@ -1,0 +1,16 @@
+--- a/td/telegram/MessagesManager.cpp
++++ b/td/telegram/MessagesManager.cpp
+@@ -20851,11 +20851,8 @@
+         m = nullptr;
+       }
+       if (m == nullptr) {
+-        if (message_id.is_server() && d->dialog_id.get_type() != DialogType::SecretChat &&
+-            d->last_new_message_id.is_valid() && message_id > d->last_new_message_id &&
+-            (d->notification_info != nullptr &&
+-             message_id <= d->notification_info->max_push_notification_message_id_)) {
+-          // allow to reply to yet unreceived server message in the same chat
++        if (message_id.is_server() && d->dialog_id.get_type() != DialogType::SecretChat) {
++          // Cahciua patch: server validates reply_to msg id directly.
+           return MessageInputReplyTo{message_id,
+                                      DialogId(),
+                                      MessageQuote{td_, std::move(reply_to_message->quote_)},
