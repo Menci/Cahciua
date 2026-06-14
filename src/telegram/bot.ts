@@ -349,8 +349,19 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
 
   const getStickerSetTitle = async (setIdOrName: string): Promise<string> => {
     if (/^-?\d+$/.test(setIdOrName)) {
-      const set = await client.invoke({ _: 'getStickerSet', set_id: setIdOrName }) as Td.stickerSet;
-      return set.title;
+      try {
+        const set = await client.invoke({ _: 'getStickerSet', set_id: setIdOrName }) as Td.stickerSet;
+        return set.title;
+      } catch (err) {
+        // Premium custom-emoji sets the bot account can't materialize via
+        // messages.getStickerSet (STICKERSET_INVALID is deterministic, not
+        // transient). Fall back to the short_name TDLib already cached when
+        // getCustomEmojiStickers was called — it's a slug like "MyAnimePack",
+        // not the human title, but readable enough for the LLM.
+        const name = await client.invoke({ _: 'getStickerSetName', set_id: setIdOrName }) as Td.text;
+        if (name.text) return name.text;
+        throw err;
+      }
     }
     const set = await client.invoke({ _: 'searchStickerSet', name: setIdOrName }) as Td.stickerSet;
     return set.title;

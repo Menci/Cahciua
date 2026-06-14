@@ -127,11 +127,14 @@ export const createTelegramManager = (
   const customEmojiToText = options.customEmojiToText;
   const customEmojiToTextChatIds = options.customEmojiToTextChatIds;
 
+  // Negative cache: STICKERSET_INVALID for bot-inaccessible premium custom
+  // emoji sets is deterministic per (set_id, account), so we store the
+  // fallback (the input id itself) and surface the warning once per set.
   const packTitleCache = new Map<string, string>();
   const packTitleInflight = new Map<string, Promise<string>>();
   const resolvePackTitle = async (setIdOrName: string): Promise<string> => {
     const cached = packTitleCache.get(setIdOrName);
-    if (cached) return cached;
+    if (cached !== undefined) return cached;
     const inflight = packTitleInflight.get(setIdOrName);
     if (inflight) return await inflight;
 
@@ -142,6 +145,7 @@ export const createTelegramManager = (
         return title;
       } catch (err) {
         log.withError(err).withFields({ setIdOrName }).warn('Failed to resolve pack title');
+        packTitleCache.set(setIdOrName, setIdOrName);
         return setIdOrName;
       } finally {
         packTitleInflight.delete(setIdOrName);
