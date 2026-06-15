@@ -89,30 +89,37 @@ export const wasSendMessageCalled = (tr: TurnResponseV2): boolean =>
   trHasToolCallNamed(tr, 'send_message');
 
 /**
- * Determine whether the most recent ReAct loop ended with end_turn but
+ * Determine whether the **just-completed** ReAct loop ended with end_turn but
  * contained no send_message anywhere — indicating the bot exhausted its
  * action options without speaking. The driver uses this to schedule a
  * fallback forced-send_message round.
  *
- * Loop boundary: the loop ends at the latest TR that called end_turn. The
+ * Critical: only fires when the LATEST TR is itself an end_turn. A cycle that
+ * exited normally via send_message — or was interrupted mid-loop by new
+ * external messages — is not eligible. Walking back through history to find
+ * "the most recent end_turn ever" wrongly re-evaluates old loops on every
+ * cycle exit and triggers spurious duplicate sends.
+ *
+ * Loop boundary: the loop ends at the latest TR (which IS the end_turn). The
  * loop START is the most recent of:
  *  - the TR immediately after the previous end_turn (chain boundary), and
  *  - the latest probe activation timestamp (a fresh "should_act = true" trigger).
  * Whichever is more recent wins.
  *
- * Returns false if no end_turn TR exists yet, or if any TR in the loop
+ * Returns false if the latest TR is not end_turn, or if any TR in the loop
  * called send_message.
  */
 export const loopEndedWithoutSendMessage = (
   trs: TurnResponseV2[],
   probeActivationsMs: number[],
 ): boolean => {
-  // Find the latest end_turn TR.
-  let endIdx = -1;
-  for (let i = trs.length - 1; i >= 0; i--) {
-    if (wasEndTurnCalled(trs[i]!)) { endIdx = i; break; }
-  }
-  if (endIdx < 0) return false;
+  if (trs.length === 0) return false;
+  const endIdx = trs.length - 1;
+  // Gate on "the cycle that just exited ended with end_turn". If the latest
+  // TR is anything else (send_message, an interrupted bash/react/etc. step,
+  // a non-tool text response), this isn't an end_turn-completed loop and the
+  // fallback round must not fire.
+  if (!wasEndTurnCalled(trs[endIdx]!)) return false;
   const endMs = trs[endIdx]!.requestedAtMs;
 
   // Walk back to find the previous end_turn — anything after it is part of

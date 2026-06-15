@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { composeContext } from './context';
+import { composeContext, loopEndedWithoutSendMessage } from './context';
 import type { TurnResponseV2 } from './types';
 import type { RenderedContext } from '../rendering/types';
 import type { ConversationEntry, InputPart, ToolResult } from '../unified-api/types';
@@ -164,5 +164,73 @@ describe('composeContext — misc', () => {
       && first.parts[0]!.kind === 'text' ? first.parts[0]!.text : '';
     expect(firstText).toContain('Conversation summary');
     expect(firstText).toContain('earlier stuff');
+  });
+});
+
+describe('loopEndedWithoutSendMessage', () => {
+  const sendMsgTr = (ts: number): TurnResponseV2 => tr(ts, [
+    { kind: 'message', role: 'assistant', parts: [{ kind: 'toolCall', callId: `c${ts}`, name: 'send_message', args: '{"text":"hi"}' }], reasoning: undefined },
+    { kind: 'toolResult', callId: `c${ts}`, payload: '{"ok":true}', requiresFollowUp: false },
+  ]);
+  const endTurnTr = (ts: number): TurnResponseV2 => tr(ts, [
+    { kind: 'message', role: 'assistant', parts: [{ kind: 'toolCall', callId: `c${ts}`, name: 'end_turn', args: '{}' }], reasoning: undefined },
+    { kind: 'toolResult', callId: `c${ts}`, payload: '{"ok":true}', requiresFollowUp: false },
+  ]);
+  const reactTr = (ts: number): TurnResponseV2 => tr(ts, [
+    { kind: 'message', role: 'assistant', parts: [{ kind: 'toolCall', callId: `c${ts}`, name: 'react', args: '{"emoji":"👍","message_id":"1"}' }], reasoning: undefined },
+    { kind: 'toolResult', callId: `c${ts}`, payload: '{"ok":true}', requiresFollowUp: true },
+  ]);
+  const bashTr = (ts: number): TurnResponseV2 => tr(ts, [
+    { kind: 'message', role: 'assistant', parts: [{ kind: 'toolCall', callId: `c${ts}`, name: 'bash', args: '{"command":"ls","timeout_seconds":5}' }], reasoning: undefined },
+    { kind: 'toolResult', callId: `c${ts}`, payload: '{"ok":true}', requiresFollowUp: true },
+  ]);
+
+  it('returns false when latest TR is a clean send_message (no fallback for normal exit)', () => {
+    // Regression: previously walked back to find ANY historical end_turn and
+    // re-evaluated that loop, falsely triggering fallback after every
+    // send_message-completed cycle.
+    const trs = [endTurnTr(100), sendMsgTr(110) /* old fallback */, sendMsgTr(200) /* new cycle */];
+    const probes = [90, 190];
+    expect(loopEndedWithoutSendMessage(trs, probes)).toBe(false);
+  });
+
+  it('returns false when latest TR is mid-loop (interrupted bash/react/etc.)', () => {
+    // Interrupt path: runner break'd mid-loop. Latest TR has fwup=true tool.
+    // Fallback must not fire — the next cycle will pick up the new messages.
+    const trs = [endTurnTr(100), bashTr(200)];
+    expect(loopEndedWithoutSendMessage(trs, [90, 190])).toBe(false);
+
+    const trs2 = [endTurnTr(100), reactTr(200)];
+    expect(loopEndedWithoutSendMessage(trs2, [90, 190])).toBe(false);
+  });
+
+  it('returns false when latest TR is end_turn but the loop included send_message', () => {
+    // Loop: probe@190 → send_message@200 → end_turn@210. Already spoke; no fallback.
+    const trs = [endTurnTr(100), sendMsgTr(200), endTurnTr(210)];
+    expect(loopEndedWithoutSendMessage(trs, [190])).toBe(false);
+  });
+
+  it('returns true when latest TR is end_turn and the loop has no send_message', () => {
+    // Loop: probe@190 → react@200 → end_turn@210. Bot acted but didn't speak.
+    const trs = [endTurnTr(100), reactTr(200), endTurnTr(210)];
+    expect(loopEndedWithoutSendMessage(trs, [190])).toBe(true);
+  });
+
+  it('returns false on empty trs', () => {
+    expect(loopEndedWithoutSendMessage([], [])).toBe(false);
+  });
+
+  it('uses previous end_turn as loop boundary when newer than the latest probe activation', () => {
+    // Two end_turn cycles back-to-back. The current loop is bounded by the
+    // previous end_turn at 200, not the older probe at 50.
+    const trs = [endTurnTr(200), reactTr(300), endTurnTr(310)];
+    expect(loopEndedWithoutSendMessage(trs, [50])).toBe(true);
+  });
+
+  it('uses latest probe activation as loop boundary when newer than previous end_turn', () => {
+    // probe@250 marks a fresh trigger AFTER the previous end_turn@100.
+    // Loop = (250, 310]; only react in window → fallback.
+    const trs = [endTurnTr(100), sendMsgTr(150), reactTr(300), endTurnTr(310)];
+    expect(loopEndedWithoutSendMessage(trs, [50, 250])).toBe(true);
   });
 });
