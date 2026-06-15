@@ -38,6 +38,7 @@ const primaryToolListBlock = computed(() => {
     '`read_image` — Read and analyze an image from a chat attachment (by file-id) or the filesystem (by path). Set detail to "high" for fine details or text.',
     '`kill_task` — Kill a running background task by its ID.',
     '`read_task_output` — Read the full output of a completed background task. Supports line-based pagination (offset, limit).',
+    '`end_turn` — Signal that you have nothing more to do this turn. Escape hatch for cleanly ending the loop when no other action fits. Never use it as a substitute for an action you should be taking.',
   ]
   return 'Your available tools are:' + NL + NL + lines.map(l => '- ' + l).join(NL)
 })

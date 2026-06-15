@@ -73,7 +73,7 @@ export interface MessagesApiParams {
   maxTokens?: number;
   timeoutSec?: number;
   thinking?: ThinkingConfig;
-  forceToolCall?: boolean;
+  forceToolChoice?: 'any' | { name: string };
   onRequestBody?: (body: unknown) => void;
   log: Logger;
   label: string;
@@ -108,7 +108,11 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
       ...(params.system ? { system: params.system } : {}),
       messages: params.messages,
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-      ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: { type: 'any' } } : {}),
+      ...(params.forceToolChoice && params.tools && params.tools.length > 0
+        ? { tool_choice: params.forceToolChoice === 'any'
+          ? { type: 'any' as const }
+          : { type: 'tool' as const, name: params.forceToolChoice.name } }
+        : {}),
       ...(thinkingParam ? { thinking: thinkingParam } : {}),
     };
     params.onRequestBody?.(requestBody);

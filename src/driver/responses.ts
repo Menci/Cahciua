@@ -17,7 +17,7 @@ export interface ResponsesApiParams {
   tools?: ResponseTool[];
   timeoutSec?: number;
   thinking?: ThinkingConfig;
-  forceToolCall?: boolean;
+  forceToolChoice?: 'any' | { name: string };
   onRequestBody?: (body: unknown) => void;
   log: Logger;
   label: string;
@@ -47,7 +47,11 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
       input: params.input,
       ...(params.instructions ? { instructions: params.instructions } : {}),
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-      ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: 'required' } : {}),
+      ...(params.forceToolChoice && params.tools && params.tools.length > 0
+        ? { tool_choice: params.forceToolChoice === 'any'
+          ? 'required'
+          : { type: 'function' as const, name: params.forceToolChoice.name } }
+        : {}),
       ...(params.thinking?.effort ? { output_config: { effort: params.thinking.effort } } : {}),
     };
     params.onRequestBody?.(requestBody);

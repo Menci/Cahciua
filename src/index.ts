@@ -9,7 +9,7 @@ import { shellTaskFactory } from './background-task/shell';
 import { getChatIds, loadConfig, resolveBackgroundTasks, resolveChatConfig, resolveModel, resolveRuntime } from './config/config';
 import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
-import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadTurnResponses, lookupChatId, messageExists, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
+import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadProbeActivations, loadTurnResponses, lookupChatId, messageExists, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
 import { createPipeline } from './pipeline';
 import type { PipelineEvent } from './pipeline';
@@ -326,6 +326,7 @@ const main = async () => {
     },
     loadCompaction: chatId => loadCompaction(db, chatId),
     loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
+    loadProbeActivations: (chatId, sinceMs) => loadProbeActivations(db, chatId, sinceMs),
     persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
     setCompactCursor: (chatId, cursorMs) => pipeline.setCompactCursor(chatId, cursorMs),
     getChatTitle: chatId => pipeline.getIC(chatId)?.chatTitle,

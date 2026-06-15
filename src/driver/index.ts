@@ -3,10 +3,10 @@ import { computed, effect, signal } from 'alien-signals';
 
 import { callLlm, type ToolSchema } from './call-llm';
 import { runCompaction } from './compaction';
-import { composeContext, composeProbeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
+import { composeContext, composeProbeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult } from './tools';
+import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createEndTurnTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
@@ -54,6 +54,7 @@ export const createDriver = (config: DriverConfig, deps: {
   onDebounceStateChange?: (chatId: string, isDebouncing: boolean) => void;
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
   loadLastProbeTime: (chatId: string) => number;
+  loadProbeActivations: (chatId: string, sinceMs?: number) => number[];
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
   setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
   getChatTitle: (chatId: string) => string | undefined;
@@ -303,6 +304,7 @@ export const createDriver = (config: DriverConfig, deps: {
             tools.push(createKillTaskTool(taskId => deps.backgroundTask.killTask(taskId)));
             tools.push(createReadTaskOutputTool((taskId, offset, limit) => deps.backgroundTask.readTaskOutput(taskId, offset, limit)));
             tools.push(createSleepTool());
+            tools.push(createEndTurnTool());
 
             // --- Compute mention/reply/interrupt state from RC + TRs ---
             const rcVal = rcAtStart;
@@ -347,7 +349,7 @@ export const createDriver = (config: DriverConfig, deps: {
               const decideTool = createDecideTool();
               const probeRequestedAt = Date.now();
               const probeResult = await callLlm(
-                { ...chatConfig.probe.model, forceToolCall: chatConfig.probe.forceToolCall },
+                { ...chatConfig.probe.model, forceToolChoice: { name: 'decide' } },
                 probeEntries, probeSystem,
                 [decideTool].map(toToolSchema),
                 { log, label: `probe:${chatId}`, dumpId: `${chatId}.probe`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
@@ -417,7 +419,7 @@ export const createDriver = (config: DriverConfig, deps: {
                 tools: primaryTools,
                 maxSteps: MAX_STEPS,
                 maxImagesAllowed: chatConfig.primary.model.maxImagesAllowed,
-                forceToolCall: chatConfig.primary.forceToolCall,
+                forceToolChoice: 'any',
                 onStepComplete: async (stepEntries, usage, requestedAtMs) => {
                   await deps.persistTurnResponse(chatId, {
                     requestedAtMs,
@@ -436,6 +438,39 @@ export const createDriver = (config: DriverConfig, deps: {
                 },
                 log,
               });
+
+              // Fallback: if this ReAct loop ended via end_turn but never
+              // emitted a send_message, run one forced send_message step.
+              // The bot is not told this is happening — same prompt, same
+              // entries; only tool_choice differs at the API boundary.
+              const latestTRs = await loadTRs(chatId, cursor);
+              const probeActivations = deps.loadProbeActivations(chatId, cursor);
+              if (loopEndedWithoutSendMessage(latestTRs, probeActivations)) {
+                log.withFields({ chatId }).log('Loop ended without send_message — running forced fallback');
+                await runner.runStepLoop({
+                  chatId,
+                  entries: ctx.entries,
+                  system,
+                  tools: primaryTools,
+                  maxSteps: 1,
+                  maxImagesAllowed: chatConfig.primary.model.maxImagesAllowed,
+                  forceToolChoice: { name: 'send_message' },
+                  onStepComplete: async (stepEntries, usage, requestedAtMs) => {
+                    await deps.persistTurnResponse(chatId, {
+                      requestedAtMs,
+                      entries: stepEntries,
+                      inputTokens: usage.inputTokens,
+                      outputTokens: usage.outputTokens,
+                      cacheReadTokens: usage.cacheReadTokens,
+                      cacheWriteTokens: usage.cacheWriteTokens,
+                      modelName: chatConfig.primary.model.model,
+                    });
+                    lastProcessedMs(requestedAtMs);
+                  },
+                  checkInterrupt: () => false,
+                  log,
+                });
+              }
             } finally {
               if (typingInterval) clearInterval(typingInterval);
             }

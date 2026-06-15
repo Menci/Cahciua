@@ -25,7 +25,6 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   primary: {
     model: { apiBaseUrl: 'mock', apiKey: 'k', model: 'mock-primary', apiFormat: 'openai-chat' },
     apiFormat: 'openai-chat',
-    forceToolCall: false,
   },
   systemFiles: [],
   sendTypingAction: false,
@@ -33,7 +32,6 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   compaction: { maxContextEstTokens: 200000, workingWindowEstTokens: 8000 },
   probe: {
     model: { apiBaseUrl: 'mock', apiKey: 'k', model: 'mock-probe', apiFormat: 'openai-chat' },
-    forceToolCall: false,
   },
   imageToText: { enabled: false, maxConcurrency: 1 },
   animationToText: { enabled: false, maxFrames: 0, maxConcurrency: 1 },
@@ -129,11 +127,17 @@ describe('probe vs primary view of bot\'s own messages', () => {
         }];
         return { entries: out, usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 } };
       }
-      // primary: text-only response — no tool calls so the runner exits cleanly.
+      // primary: returns a send_message tool call so the runner accepts and
+      // exits (send_message default await_response=false → no follow-up).
       const out: ConversationEntry[] = [{
         kind: 'message',
         role: 'assistant',
-        parts: [{ kind: 'text', text: 'I am fine, thanks!' }],
+        parts: [{
+          kind: 'toolCall',
+          callId: 'primary1',
+          name: 'send_message',
+          args: JSON.stringify({ text: 'I am fine, thanks!' }),
+        }],
         reasoning: undefined,
       }];
       return { entries: out, usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } };
@@ -152,6 +156,7 @@ describe('probe vs primary view of bot\'s own messages', () => {
         setMessageReaction: async () => {},
         loadCompaction: () => null,
         loadLastProbeTime: () => 0,
+        loadProbeActivations: () => [],
         persistCompaction: () => {},
         setCompactCursor: () => undefined,
         getChatTitle: () => 'Test',
@@ -218,6 +223,101 @@ describe('probe vs primary view of bot\'s own messages', () => {
     // stripped; the only tool-call signal is the <tool-call> XML in user text.
     const probeAssistantToolCalls = collectAssistantToolCallNames(probeCall![1]);
     expect(probeAssistantToolCalls).toEqual([]);
+
+    driver.stop();
+  });
+
+  it('runs a forced send_message fallback when primary ends loop with end_turn but no send_message', async () => {
+    mockCallLlm.mockReset();
+
+    // Track which primary call this is — first call returns end_turn (no
+    // send_message), fallback call must be invoked with forceToolChoice
+    // pointing to send_message.
+    let primaryCallCount = 0;
+    let fallbackCall: typeof mockCallLlm.mock.calls[0] | undefined;
+
+    mockCallLlm.mockImplementation(async (config, _entries) => {
+      if (config.model === 'mock-probe') {
+        return {
+          entries: [{
+            kind: 'message', role: 'assistant', reasoning: undefined,
+            parts: [{
+              kind: 'toolCall', callId: 'p1', name: 'decide',
+              args: JSON.stringify({ should_act: true, reason: 'addressed' }),
+            }],
+          }],
+          usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        };
+      }
+      // primary
+      primaryCallCount++;
+      if (primaryCallCount === 1) {
+        // First primary call: end_turn alone (no send_message).
+        return {
+          entries: [{
+            kind: 'message', role: 'assistant', reasoning: undefined,
+            parts: [{ kind: 'toolCall', callId: 'pr1', name: 'end_turn', args: '{}' }],
+          }],
+          usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        };
+      }
+      // Second primary call (the fallback): send_message.
+      fallbackCall = mockCallLlm.mock.calls[mockCallLlm.mock.calls.length - 1];
+      return {
+        entries: [{
+          kind: 'message', role: 'assistant', reasoning: undefined,
+          parts: [{
+            kind: 'toolCall', callId: 'pr2', name: 'send_message',
+            args: JSON.stringify({ text: 'forced fallback message' }),
+          }],
+        }],
+        usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      };
+    });
+
+    const persistedTRs: TurnResponseV2[] = [];
+    const sendMessageCalls: { text: string }[] = [];
+
+    const driver = createDriver(
+      { chatIds: ['-100124'], resolveChatConfig: () => makeChatConfig() },
+      {
+        loadTurnResponses: async () => [...persistedTRs],
+        persistTurnResponse: async (_, tr) => { persistedTRs.push(tr); },
+        persistProbeResponse: async () => {},
+        sendMessage: async (_chatId, text) => { sendMessageCalls.push({ text }); return { messageId: 999, date: 0 }; },
+        setMessageReaction: async () => {},
+        loadCompaction: () => null,
+        loadLastProbeTime: () => 0,
+        loadProbeActivations: () => [],
+        persistCompaction: () => {},
+        setCompactCursor: () => undefined,
+        getChatTitle: () => 'Test',
+        runtimeConfig: { shell: ['/bin/bash', '-c'], writeFile: ['cat'], readFile: ['cat'], writeFileSizeLimit: 1024, readFileSizeLimit: 1024 },
+        loadMessageAttachments: () => undefined,
+        messageExists: () => true,
+        downloadMessageMedia: async () => undefined,
+        resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock' }),
+        backgroundTask: {
+          startTask: () => 0,
+          killTask: () => ({ ok: true }),
+          getActiveTasks: () => [],
+          readTaskOutput: async () => ({ content: '', totalLines: 0, truncated: false }),
+        },
+        logger,
+      },
+    );
+
+    driver.handleEvent('-100124', buildRC());
+
+    // 1 probe + 1 primary (end_turn) + 1 fallback (send_message) = 3
+    await vi.waitFor(() => expect(mockCallLlm).toHaveBeenCalledTimes(3), { timeout: 1000, interval: 10 });
+
+    expect(primaryCallCount).toBe(2);
+    expect(fallbackCall).toBeDefined();
+    // Fallback call's config carries the specific tool_choice constraint.
+    expect(fallbackCall![0]!.forceToolChoice).toEqual({ name: 'send_message' });
+    // Actual TG send happened once (the fallback message).
+    expect(sendMessageCalls).toEqual([{ text: 'forced fallback message' }]);
 
     driver.stop();
   });

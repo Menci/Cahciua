@@ -76,6 +76,70 @@ const trHasToolCalls = (tr: TurnResponseV2): boolean =>
   tr.entries.some(e => e.kind === 'message' && e.role === 'assistant'
     && e.parts.some(p => p.kind === 'toolCall'));
 
+const trHasToolCallNamed = (tr: TurnResponseV2, name: string): boolean =>
+  tr.entries.some(e => e.kind === 'message' && e.role === 'assistant'
+    && e.parts.some(p => p.kind === 'toolCall' && p.name === name));
+
+/** Was end_turn called in this TR? */
+export const wasEndTurnCalled = (tr: TurnResponseV2): boolean =>
+  trHasToolCallNamed(tr, 'end_turn');
+
+/** Was send_message called in this TR? */
+export const wasSendMessageCalled = (tr: TurnResponseV2): boolean =>
+  trHasToolCallNamed(tr, 'send_message');
+
+/**
+ * Determine whether the most recent ReAct loop ended with end_turn but
+ * contained no send_message anywhere — indicating the bot exhausted its
+ * action options without speaking. The driver uses this to schedule a
+ * fallback forced-send_message round.
+ *
+ * Loop boundary: the loop ends at the latest TR that called end_turn. The
+ * loop START is the most recent of:
+ *  - the TR immediately after the previous end_turn (chain boundary), and
+ *  - the latest probe activation timestamp (a fresh "should_act = true" trigger).
+ * Whichever is more recent wins.
+ *
+ * Returns false if no end_turn TR exists yet, or if any TR in the loop
+ * called send_message.
+ */
+export const loopEndedWithoutSendMessage = (
+  trs: TurnResponseV2[],
+  probeActivationsMs: number[],
+): boolean => {
+  // Find the latest end_turn TR.
+  let endIdx = -1;
+  for (let i = trs.length - 1; i >= 0; i--) {
+    if (wasEndTurnCalled(trs[i]!)) { endIdx = i; break; }
+  }
+  if (endIdx < 0) return false;
+  const endMs = trs[endIdx]!.requestedAtMs;
+
+  // Walk back to find the previous end_turn — anything after it is part of
+  // the current loop's chain.
+  let prevEndTurnMs = 0;
+  for (let i = endIdx - 1; i >= 0; i--) {
+    if (wasEndTurnCalled(trs[i]!)) { prevEndTurnMs = trs[i]!.requestedAtMs; break; }
+  }
+
+  // The latest probe activation strictly between prevEndTurnMs and endMs is
+  // the cleanest "trigger" anchor. If there is no probe activation (mention /
+  // replied / interrupted bypass), the chain anchor (prevEndTurnMs) stands.
+  const latestProbeMs = probeActivationsMs
+    .filter(t => t > prevEndTurnMs && t < endMs)
+    .reduce((a, b) => Math.max(a, b), 0);
+
+  const loopStartMs = Math.max(prevEndTurnMs, latestProbeMs);
+
+  // Did any TR in (loopStartMs, endMs] call send_message?
+  for (let i = endIdx; i >= 0; i--) {
+    const tr = trs[i]!;
+    if (tr.requestedAtMs <= loopStartMs) break;
+    if (wasSendMessageCalled(tr)) return false;
+  }
+  return true;
+};
+
 /** Was the last TR interrupted? (ends with a requiresFollowUp ToolResult) */
 export const wasToolLoopInterrupted = (trs: TurnResponseV2[]): boolean => {
   if (trs.length === 0) return false;

@@ -1,6 +1,6 @@
 import type { Logger } from '@guiiai/logg';
 
-import { callLlm, type LlmCallConfig, type LlmCallResult, type LlmCallUsage, type ToolSchema } from './call-llm';
+import { callLlm, type ForceToolChoice, type LlmCallConfig, type LlmCallResult, type LlmCallUsage, type ToolSchema } from './call-llm';
 import { ensureDumpDir } from './constants';
 import type { CahciuaTool } from './tools';
 import { executeToolCall, extractToolCalls } from './tools';
@@ -12,10 +12,10 @@ import type {
 ensureDumpDir();
 
 // RunnerConfig is the per-endpoint identity used as the runner cache key.
-// Per-call concerns like forceToolCall live on StepLoopParams so two chats
-// using the same endpoint with different forceToolCall settings can share
+// Per-call concerns like forceToolChoice live on StepLoopParams so two chats
+// using the same endpoint with different forceToolChoice settings can share
 // a runner instance.
-export interface RunnerConfig extends Omit<LlmCallConfig, 'forceToolCall'> {}
+export interface RunnerConfig extends Omit<LlmCallConfig, 'forceToolChoice'> {}
 
 interface StepLoopParams {
   chatId: string;
@@ -24,7 +24,7 @@ interface StepLoopParams {
   tools: CahciuaTool[];
   maxSteps: number;
   maxImagesAllowed?: number;
-  forceToolCall?: boolean;
+  forceToolChoice?: ForceToolChoice;
   onStepComplete: (
     stepEntries: ConversationEntry[],
     usage: LlmCallUsage,
@@ -55,15 +55,16 @@ export const createRunner = (config: RunnerConfig) => {
     const toolSchemas = params.tools.map(toToolSchema);
 
     // tool_choice hints are not a hard constraint — models may ignore them.
-    // When forceToolCall is set, retry (capped) until the model emits a tool call.
+    // When forceToolChoice is set, retry (capped) until the requirement is met:
+    // 'any' → at least one tool call. {name} → that specific tool was called.
     const MAX_FORCE_TOOL_RETRIES = 3;
-    const maxAttempts = params.forceToolCall ? MAX_FORCE_TOOL_RETRIES + 1 : 1;
+    const maxAttempts = params.forceToolChoice ? MAX_FORCE_TOOL_RETRIES + 1 : 1;
 
     let result!: LlmCallResult;
     let usage: LlmCallUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      result = await callLlm({ ...config, forceToolCall: params.forceToolCall }, workingEntries, params.system, toolSchemas, {
+      result = await callLlm({ ...config, forceToolChoice: params.forceToolChoice }, workingEntries, params.system, toolSchemas, {
         log: params.log,
         label: `step:${step}`,
         dumpId: params.chatId,
@@ -77,12 +78,18 @@ export const createRunner = (config: RunnerConfig) => {
         cacheWriteTokens: usage.cacheWriteTokens + result.usage.cacheWriteTokens,
       };
 
-      if (!params.forceToolCall) break;
-      if (extractToolCalls(result.entries).length > 0) break;
+      if (!params.forceToolChoice) break;
+      const choice = params.forceToolChoice;
+      const toolCallsThisAttempt = extractToolCalls(result.entries);
+      const requirementMet = choice === 'any'
+        ? toolCallsThisAttempt.length > 0
+        : toolCallsThisAttempt.some(tc => tc.name === choice.name);
+      if (requirementMet) break;
       if (attempt < MAX_FORCE_TOOL_RETRIES)
         params.log.withFields({
           chatId: params.chatId, step, attempt: attempt + 1, maxRetries: MAX_FORCE_TOOL_RETRIES,
-        }).log('forceToolCall: model returned no tool calls, retrying');
+          forceToolChoice: choice,
+        }).log('forceToolChoice: requirement not met, retrying');
     }
 
     if (result.entries.length === 0)

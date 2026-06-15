@@ -22,7 +22,7 @@ export interface ChatCompletionsParams {
   tools?: ToolSchema[];
   timeoutSec?: number;
   thinking?: ThinkingConfig;
-  forceToolCall?: boolean;
+  forceToolChoice?: 'any' | { name: string };
   onRequestBody?: (body: unknown) => void;
   log: Logger;
   label: string;
@@ -67,7 +67,11 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
         ...params.messages,
       ],
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-      ...(params.forceToolCall && params.tools && params.tools.length > 0 ? { tool_choice: 'required' } : {}),
+      ...(params.forceToolChoice && params.tools && params.tools.length > 0
+        ? { tool_choice: params.forceToolChoice === 'any'
+          ? 'required'
+          : { type: 'function' as const, function: { name: params.forceToolChoice.name } } }
+        : {}),
       // Chat Completions takes the flat `reasoning_effort` field. type === 'disabled' or
       // no thinking config → omit the field entirely; standard OpenAI rejects 'none', and
       // unknown values like 'disabled' get silently ignored (still activating thinking),

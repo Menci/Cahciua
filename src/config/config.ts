@@ -39,7 +39,6 @@ const RuntimeSchema = v.object({
 const ChatConfigSchema = v.object({
   primary: v.optional(v.object({
     model: v.optional(v.string(), 'primary'),
-    forceToolCall: v.optional(v.boolean(), false),
   }), {}),
   systemFiles: v.optional(v.array(v.string()), []),
   sendTypingAction: v.optional(v.boolean(), true),
@@ -55,7 +54,6 @@ const ChatConfigSchema = v.object({
   }), {}),
   probe: v.optional(v.object({
     model: v.optional(v.string()),
-    forceToolCall: v.optional(v.boolean(), false),
   }), {}),
   imageToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
@@ -95,7 +93,6 @@ const ChatConfigSchema = v.object({
 const ChatOverrideSchema = v.optional(v.partial(v.object({
   primary: v.partial(v.object({
     model: v.string(),
-    forceToolCall: v.boolean(),
   })),
   systemFiles: v.array(v.string()),
   sendTypingAction: v.boolean(),
@@ -111,7 +108,6 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   })),
   probe: v.partial(v.object({
     model: v.string(),
-    forceToolCall: v.boolean(),
   })),
   imageToText: v.partial(v.object({
     enabled: v.boolean(),
@@ -190,12 +186,12 @@ export interface BackgroundTasksConfig {
 }
 
 export interface ResolvedChatConfig {
-  primary: { model: LlmEndpoint; apiFormat: ProviderFormat; forceToolCall: boolean };
+  primary: { model: LlmEndpoint; apiFormat: ProviderFormat };
   systemFiles: { filename: string; content: string }[];
   sendTypingAction: boolean;
   debounce: DebounceConfig;
   compaction: CompactionConfig;
-  probe: { model: LlmEndpoint; forceToolCall: boolean };
+  probe: { model: LlmEndpoint };
   imageToText: { enabled: boolean; model?: string; maxConcurrency: number };
   animationToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
@@ -267,7 +263,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
   }
 
   return {
-    primary: { model: primaryModel, apiFormat: primaryApiFormat, forceToolCall: merged.primary.forceToolCall },
+    primary: { model: primaryModel, apiFormat: primaryApiFormat },
     systemFiles: merged.systemFiles.map(path => ({
       filename: basename(path),
       content: readFileSync(path, 'utf-8').trim(),
@@ -280,7 +276,6 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     },
     probe: {
       model: merged.probe.model ? resolveModel(config, merged.probe.model) : primaryModel,
-      forceToolCall: merged.probe.forceToolCall,
     },
     imageToText: {
       enabled: merged.imageToText.enabled,

@@ -20,6 +20,11 @@ import type { ChatCompletionsAssistantMessage } from '../unified-api/chat-types'
 import type { ResponsesAssistantItem } from '../unified-api/responses-types';
 import type { ConversationEntry } from '../unified-api/types';
 
+/** Force the model to call a tool. `'any'` requires at least one tool call but
+ * leaves the choice to the model (and allows multiple parallel calls). `{name}`
+ * forces exactly that tool — providers reject parallel calls in this mode. */
+export type ForceToolChoice = 'any' | { name: string };
+
 export interface LlmCallConfig {
   apiBaseUrl: string;
   apiKey: string;
@@ -27,7 +32,7 @@ export interface LlmCallConfig {
   apiFormat?: ProviderFormat;
   timeoutSec?: number;
   thinking?: ThinkingConfig;
-  forceToolCall?: boolean;
+  forceToolChoice?: ForceToolChoice;
 }
 
 export interface ToolSchema {
@@ -100,7 +105,7 @@ export const callLlm = async (
     const response = await responsesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
-      thinking: config.thinking, forceToolCall: config.forceToolCall,
+      thinking: config.thinking, forceToolChoice: config.forceToolChoice,
       onRequestBody: body => dump(options?.dumpId, 'request', body),
       log: log!, label, timeoutSec: config.timeoutSec,
     });
@@ -123,7 +128,7 @@ export const callLlm = async (
     const response = await messagesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
-      thinking: config.thinking, forceToolCall: config.forceToolCall,
+      thinking: config.thinking, forceToolChoice: config.forceToolChoice,
       onRequestBody: body => dump(options?.dumpId, 'request', body),
       log: log!, label, timeoutSec: config.timeoutSec,
     });
@@ -142,7 +147,7 @@ export const callLlm = async (
   const response = await chatCompletions({
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
-    thinking: config.thinking, forceToolCall: config.forceToolCall,
+    thinking: config.thinking, forceToolChoice: config.forceToolChoice,
     onRequestBody: body => dump(options?.dumpId, 'request', body),
     log: log!, label, timeoutSec: config.timeoutSec,
   });
