@@ -481,7 +481,10 @@ export const createReactTool = (
     const targetEmoji = remove ? undefined : emoji;
     if (!remove && !emoji) throw new Error('emoji is required when remove is not true');
     await setReaction(messageIdNum, targetEmoji);
-    return { content: JSON.stringify({ ok: true }), requiresFollowUp: false };
+    // Reactions are a lightweight ack, NOT a turn-ender — the bot may still
+    // want to follow up (send a message, run a tool, or explicitly call
+    // end_turn). Returning requiresFollowUp=true keeps the loop going.
+    return { content: JSON.stringify({ ok: true }), requiresFollowUp: true };
   },
 });
 
