@@ -54,7 +54,7 @@ Active background tasks:
 </template>
 <template v-else-if="mode === 'probe'">
 
-Evaluate the chat as it stands and call the `decide` tool exactly once with your judgement. Read the latest events carefully — pay attention to whether the bot was mentioned or directly addressed, whether a `<runtime-event>` is awaiting follow-up, and whether anything genuinely calls for the bot's voice. When in doubt, prefer `should_act = false`; filler activity is worse than missing a turn.
+You are the outside judge, not the bot. Your only output is one `decide` tool call. Evaluate the chat as it stands and judge whether the bot should take any action this turn — read the latest events carefully, paying attention to whether the bot was mentioned or directly addressed, whether a `<runtime-event>` is awaiting follow-up, and whether anything genuinely calls for the bot's voice. When in doubt, prefer `should_act = false`; filler activity is worse than missing a turn.
 
 <template v-if="backgroundTasksXml">
 

@@ -73,7 +73,7 @@ describe('system.velin.md (mode=primary)', () => {
     });
     expect(rendered).toContain('I am a test bot.');
     expect(rendered).toContain('Be helpful.');
-    expect(rendered).not.toContain('Background on the bot');
+    expect(rendered).not.toContain('the bot\'s own self-description');
   });
 
   it('shows full primary tool list', async () => {
@@ -150,13 +150,21 @@ describe('system.velin.md (mode=probe)', () => {
     expect(rendered).toContain('When the bot should stay silent');
   });
 
-  it('relabels system files as bot background', async () => {
+  it('wraps system files with strong third-party reframing', async () => {
     const rendered = await renderSystem({
       ...baseProps,
-      systemFiles: [{ filename: 'IDENTITY.md', content: 'I am a test bot.' }],
+      systemFiles: [{ filename: 'IDENTITY.md', content: '你是 Cahciua。你的开发者是 Menci。' }],
     });
-    expect(rendered).toContain('Background on the bot you are evaluating: IDENTITY.md');
-    expect(rendered).toContain('I am a test bot.');
+    // Wrapper text reframes the second-person voice.
+    expect(rendered).toContain('the bot\'s own self-description');
+    expect(rendered).toContain('addressed to the bot itself');
+    expect(rendered).toContain('NOT instructions to you');
+    // Closing reminder reasserts the judge role.
+    expect(rendered).toContain('outside judge');
+    expect(rendered).toContain('decide');
+    // The verbatim file content is still included.
+    expect(rendered).toContain('你是 Cahciua');
+    expect(rendered).toContain('IDENTITY.md');
   });
 });
 
@@ -217,7 +225,7 @@ describe('late-binding.velin.md (mode=probe)', () => {
     const rendered = await renderLateBinding(baseProps);
     expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
     expect(rendered).toContain('`decide`');
-    expect(rendered).toContain('exactly once');
+    expect(rendered).toContain('outside judge, not the bot');
     expect(rendered).toContain('should_act = false');
     assertNoVueSyntaxLeak(rendered);
   });
