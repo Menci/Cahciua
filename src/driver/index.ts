@@ -380,29 +380,11 @@ export const createDriver = (config: DriverConfig, deps: {
               probeReason = decision?.reason;
             }
 
-            const system = await renderSystemPrompt({
-              mode: 'primary',
-              currentChannel: 'telegram',
-              modelName: chatConfig.primary.model.model,
-              chatId,
-              chatTitle: deps.getChatTitle(chatId),
-              systemFiles: chatConfig.systemFiles,
-            });
-
-            injectLateBindingPrompt(ctx.entries, await renderLateBindingPrompt({
-              mode: 'primary',
-              timeNow,
-              isInterrupted,
-              activeBackgroundTasks,
-              ...(probeReason ? { probeReason } : {}),
-            }));
-
-            const primaryTools = tools;
-
-            const runner = getOrCreateRunner(chatConfig.primary.model);
-
-            // Show a "typing…" action while the model works, refreshed every 5s
-            // (Telegram clears it after ~5s). Best-effort — failures are ignored.
+            // We are committed to running primary now (probe passed, or was
+            // skipped due to a de-facto act trigger). Start the "typing…"
+            // action here — it covers the prep render + runStepLoop + the
+            // optional fallback round. Refreshed every 5s since Telegram
+            // clears the indicator after ~5s. Best-effort.
             let typingInterval: ReturnType<typeof setInterval> | undefined;
             if (deps.sendTypingAction && chatConfig.sendTypingAction) {
               void deps.sendTypingAction(chatId).catch(() => {});
@@ -412,6 +394,27 @@ export const createDriver = (config: DriverConfig, deps: {
             }
 
             try {
+              const system = await renderSystemPrompt({
+                mode: 'primary',
+                currentChannel: 'telegram',
+                modelName: chatConfig.primary.model.model,
+                chatId,
+                chatTitle: deps.getChatTitle(chatId),
+                systemFiles: chatConfig.systemFiles,
+              });
+
+              injectLateBindingPrompt(ctx.entries, await renderLateBindingPrompt({
+                mode: 'primary',
+                timeNow,
+                isInterrupted,
+                activeBackgroundTasks,
+                ...(probeReason ? { probeReason } : {}),
+              }));
+
+              const primaryTools = tools;
+
+              const runner = getOrCreateRunner(chatConfig.primary.model);
+
               await runner.runStepLoop({
                 chatId,
                 entries: ctx.entries,
