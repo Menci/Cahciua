@@ -55,6 +55,63 @@ describe('renderMarkdownToTelegramHTML', () => {
     const out = renderMarkdownToTelegramHTML('$a < b & c > d$');
     expect(out).toContain('<tg-math>a &lt; b &amp; c &gt; d</tg-math>');
   });
+
+  describe('backslash escaping renders the literal character (no markup)', () => {
+    it('escapes $ so prices do not trigger inline math', () => {
+      const out = renderMarkdownToTelegramHTML('it costs \\$5 to \\$10');
+      expect(out).toBe('it costs $5 to $10');
+      expect(out).not.toContain('<tg-math');
+    });
+
+    it('escapes $$ so it does not trigger block math', () => {
+      const out = renderMarkdownToTelegramHTML('use \\$\\$NAME\\$\\$ as a placeholder');
+      expect(out).toBe('use $$NAME$$ as a placeholder');
+      expect(out).not.toContain('<tg-math');
+    });
+
+    it('escapes * and _ so they stay literal', () => {
+      expect(renderMarkdownToTelegramHTML('\\*literal\\*')).toBe('*literal*');
+      expect(renderMarkdownToTelegramHTML('snake\\_case\\_var')).toBe('snake_case_var');
+    });
+
+    it('escapes || so it does not turn into a spoiler', () => {
+      const out = renderMarkdownToTelegramHTML('\\|\\|not spoiler\\|\\|');
+      expect(out).toBe('||not spoiler||');
+      expect(out).not.toContain('<tg-spoiler');
+    });
+
+    it('escapes ~~ so it does not turn into strikethrough', () => {
+      const out = renderMarkdownToTelegramHTML('\\~\\~not strike\\~\\~');
+      expect(out).toBe('~~not strike~~');
+      expect(out).not.toContain('<s>');
+    });
+
+    it('escapes [ ] so they do not start a link', () => {
+      expect(renderMarkdownToTelegramHTML('\\[brackets\\]')).toBe('[brackets]');
+    });
+
+    it('escapes backtick so it does not open inline code', () => {
+      const out = renderMarkdownToTelegramHTML('\\`raw backtick\\`');
+      expect(out).toBe('`raw backtick`');
+      expect(out).not.toContain('<code>');
+    });
+
+    it('HTML-escapes < > inside the message body', () => {
+      // Whether the bot writes literal `<tag>` or `\<tag\>`, the entity grammar
+      // (HTML) requires < and > to be escaped — both forms must end up as &lt;/&gt;.
+      expect(renderMarkdownToTelegramHTML('\\<tag\\>')).toBe('&lt;tag&gt;');
+      expect(renderMarkdownToTelegramHTML('<not a tag>')).toBe('&lt;not a tag&gt;');
+    });
+
+    it('a single backslash escapes itself', () => {
+      expect(renderMarkdownToTelegramHTML('back\\\\slash')).toBe('back\\slash');
+    });
+
+    it('does not break legitimate formatting next to escaped characters', () => {
+      const out = renderMarkdownToTelegramHTML('the price is \\$5, and **this** is bold');
+      expect(out).toBe('the price is $5, and <b>this</b> is bold');
+    });
+  });
 });
 
 describe('hasRichOnlyMarkup', () => {

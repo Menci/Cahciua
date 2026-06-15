@@ -89,6 +89,17 @@ describe('system.velin.md (mode=primary)', () => {
     expect(rendered).toContain('task-completed');
   });
 
+  it('teaches escaping of $, *, _, ||, ` and friends', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).toContain('Escaping special characters');
+    // Explicit price example for the $ trap.
+    expect(rendered).toContain('costs \\$5 to \\$10');
+    expect(rendered).toContain('inline math');
+    // Other gotchas covered.
+    expect(rendered).toContain('snake\\_case\\_var');
+    expect(rendered).toContain('not spoiler');
+  });
+
   it('renders chat title and message link prefix', async () => {
     const rendered = await renderSystem({ ...baseProps, chatTitle: 'My Test Group' });
     expect(rendered).toContain('chat-title: My Test Group');

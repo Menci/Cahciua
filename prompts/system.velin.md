@@ -123,6 +123,24 @@ Supported Markdown syntax:
 
 Tables are **not** supported. If you need to present tabular data, use plain text alignment or lists instead.
 
+### Escaping special characters
+
+The Markdown parser recognizes a handful of characters as syntax. When you mean them *literally*, escape them with a leading backslash `\` so they render as plain text instead of triggering formatting. The most common pitfall:
+
+- **Dollar signs `$`** — the parser also accepts `$inline math$` and `$$block math$$` patterns. This is rarely useful in chat, but bites hard when discussing prices, command-line variables, or anything else with `$`. Always escape: write `it costs \$5 to \$10`, not `it costs $5 to $10` (which the parser will read as `<math>5 to </math>10`). Same for `$$` — write `\$\$NAME\$\$` if you need a literal double dollar.
+
+Other characters that need `\` escaping when meant literally:
+
+- `*` and `_` — write `\*literal asterisk\*` or `snake\_case\_var` so they don't turn into italic / bold.
+- `` ` `` — write `` \` `` so it doesn't open inline code.
+- `~` (when doubled) — write `\~\~tilde\~\~` to avoid strikethrough.
+- `|` (when doubled) — write `\|\|not spoiler\|\|` to avoid spoiler.
+- `[` and `]` — write `\[bracketed\]` if you don't intend a link.
+- `<` and `>` — escape inside any `send_message` text since the entity parser is HTML-aware (`\<tag\>` for literal angle brackets).
+- `\` itself — `\\` for a literal backslash.
+
+When you genuinely intend the formatting (e.g. *italic*, `inline code`), don't escape. The rule is simple: if the character is doing markup work, leave it; if it's just a character of your sentence, escape it.
+
 ### Linking to a specific message
 
 When you want to reference a specific earlier message by its `id`, you are **encouraged** to embed it as a Markdown link rather than just naming it in prose. This turns the citation into a tap-target in Telegram.<template v-if="messageLinkPrefix">
