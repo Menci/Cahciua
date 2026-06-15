@@ -120,39 +120,46 @@ md.renderer.rules.em_open = () => '<i>';
 md.renderer.rules.em_close = () => '</i>';
 md.renderer.rules.hardbreak = () => '\n';
 
-// --- Blocks: emit Rich-Message-supported HTML tags. Headings, lists, tables,
-// hr and math are rich-only — their presence in the rendered HTML automatically
-// promotes the message to inputMessageRichMessage (see hasRichOnlyMarkup).
-// Plain-only sinks (inputMessageText) reject these tags, so the send path must
-// dispatch based on the rich-only detection.
+// --- Blocks: prefer plain-mode HTML (parseTextEntities-acceptable) over
+// rich-only tags. Headings, lists, and hr have natural plain renderings —
+// emit those so the message dispatches via inputMessageText instead of
+// inputMessageRichMessage. Tables and math have no good plain alternative
+// and stay as rich-only tags (the send path detects them and routes through
+// inputMessageRichMessage). See hasRichOnlyMarkup.
 
 md.renderer.rules.paragraph_open = () => '';
 md.renderer.rules.paragraph_close = (tokens, idx) =>
   tokens[idx]!.hidden ? '' : '\n';
 
-md.renderer.rules.heading_open = (tokens, idx) => `<${tokens[idx]!.tag}>`;
-md.renderer.rules.heading_close = (tokens, idx) => `</${tokens[idx]!.tag}>\n`;
+// Headings → bold + newline. Telegram entities don't have a hierarchy concept,
+// so all levels degrade to bold; the trailing newline gives separation.
+md.renderer.rules.heading_open = () => '<b>';
+md.renderer.rules.heading_close = () => '</b>\n';
 
 md.renderer.rules.blockquote_open = () => '<blockquote>';
 md.renderer.rules.blockquote_close = () => '</blockquote>\n';
 
-md.renderer.rules.bullet_list_open = () => { listDepth++; return '<ul>'; };
-md.renderer.rules.bullet_list_close = () => { listDepth--; return '</ul>\n'; };
-md.renderer.rules.ordered_list_open = (tokens, idx) => {
-  listDepth++;
-  const start = tokens[idx]!.attrGet('start');
-  return start ? `<ol start="${md.utils.escapeHtml(start)}">` : '<ol>';
-};
-md.renderer.rules.ordered_list_close = () => { listDepth--; return '</ol>\n'; };
+// Lists → plain-text bullets / numbers. A leading newline is emitted only when
+// nesting (depth > 0) to start the inner list on its own line under the
+// parent item. The list-level open/close are otherwise empty — the surrounding
+// item's `\n` handles separation.
+md.renderer.rules.bullet_list_open = () => { const nested = listDepth > 0; listDepth++; return nested ? '\n' : ''; };
+md.renderer.rules.bullet_list_close = () => { listDepth--; return ''; };
+md.renderer.rules.ordered_list_open = () => { const nested = listDepth > 0; listDepth++; return nested ? '\n' : ''; };
+md.renderer.rules.ordered_list_close = () => { listDepth--; return ''; };
 
 md.renderer.rules.list_item_open = (tokens, idx) => {
-  const token = tokens[idx]!;
-  const value = token.attrGet('value');
-  return value ? `<li value="${md.utils.escapeHtml(value)}">` : '<li>';
+  const indent = '  '.repeat(listDepth - 1);
+  // For ordered lists, token.info holds the literal item number ("1", "5", etc.).
+  // For bullets it's empty.
+  const info = tokens[idx]!.info;
+  return info ? `${indent}${info}. ` : `${indent}• `;
 };
-md.renderer.rules.list_item_close = () => '</li>';
+md.renderer.rules.list_item_close = () => '\n';
 
-md.renderer.rules.hr = () => '<hr/>\n';
+// HR → plain divider line. Three em-dashes read as a section break in plain
+// text and are accepted by the entity grammar as a literal string.
+md.renderer.rules.hr = () => '———\n';
 
 // --- Code blocks ---
 
@@ -214,7 +221,11 @@ export const renderMarkdownToTelegramHTML = (markdown: string): string => {
 // (parseTextEntities). When the rendered HTML contains any of these, the
 // caller must dispatch through inputMessageRichMessage; otherwise the
 // rendered HTML is a subset that parseTextEntities accepts.
-const RICH_ONLY_TAGS = /<(?:tg-math|tg-math-block|h[1-6]|ul|ol|table|hr|p\b|mark|sub|sup|details|footer|aside|figure|img|video|audio)\b/;
+//
+// Headings, lists, and hr are intentionally NOT in this set — they degrade
+// to plain-mode renderings (bold, bullet/number prefixes, em-dash divider).
+// Tables and math have no good plain-mode equivalent and remain rich-only.
+const RICH_ONLY_TAGS = /<(?:tg-math|tg-math-block|table|p\b|mark|sub|sup|details|footer|aside|figure|img|video|audio)\b/;
 
 export const hasRichOnlyMarkup = (html: string): boolean =>
   RICH_ONLY_TAGS.test(html);

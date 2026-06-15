@@ -11,34 +11,41 @@ describe('renderMarkdownToTelegramHTML', () => {
     expect(renderMarkdownToTelegramHTML('hi ||secret|| world')).toBe('hi <tg-spoiler>secret</tg-spoiler> world');
   });
 
-  it('renders headings as <hN> (rich-only)', () => {
-    expect(renderMarkdownToTelegramHTML('# H1')).toContain('<h1>H1</h1>');
-    expect(renderMarkdownToTelegramHTML('### H3')).toContain('<h3>H3</h3>');
+  it('renders headings as plain-mode bold (no rich-only <hN>)', () => {
+    expect(renderMarkdownToTelegramHTML('# H1')).toBe('<b>H1</b>');
+    expect(renderMarkdownToTelegramHTML('### H3')).toBe('<b>H3</b>');
+    expect(hasRichOnlyMarkup(renderMarkdownToTelegramHTML('# H1'))).toBe(false);
   });
 
-  it('renders unordered list as <ul><li>', () => {
-    const out = renderMarkdownToTelegramHTML('- a\n- b');
-    expect(out).toContain('<ul>');
-    expect(out).toContain('<li>a</li>');
-    expect(out).toContain('<li>b</li>');
-    expect(out).toContain('</ul>');
+  it('renders unordered list as plain-text bullets', () => {
+    expect(renderMarkdownToTelegramHTML('- a\n- b')).toBe('• a\n• b');
+    expect(hasRichOnlyMarkup(renderMarkdownToTelegramHTML('- a\n- b'))).toBe(false);
   });
 
-  it('renders ordered list as <ol><li>', () => {
-    const out = renderMarkdownToTelegramHTML('1. first\n2. second');
-    expect(out).toContain('<ol>');
-    expect(out).toContain('<li>first</li>');
+  it('renders ordered list as plain-text numbers', () => {
+    expect(renderMarkdownToTelegramHTML('1. first\n2. second')).toBe('1. first\n2. second');
+    expect(hasRichOnlyMarkup(renderMarkdownToTelegramHTML('1. first\n2. second'))).toBe(false);
   });
 
-  it('renders tables as <table>', () => {
+  it('honors literal item numbers on ordered lists', () => {
+    expect(renderMarkdownToTelegramHTML('5. five\n6. six')).toBe('5. five\n6. six');
+  });
+
+  it('renders nested lists with depth-based indentation', () => {
+    expect(renderMarkdownToTelegramHTML('- a\n  - b\n- c')).toBe('• a\n  • b\n\n• c');
+  });
+
+  it('renders tables as <table> (rich-only — kept for tabular fidelity)', () => {
     const out = renderMarkdownToTelegramHTML('| A | B |\n|---|---|\n| 1 | 2 |');
     expect(out).toContain('<table>');
     expect(out).toContain('<th>A</th>');
     expect(out).toContain('<td>1</td>');
+    expect(hasRichOnlyMarkup(out)).toBe(true);
   });
 
-  it('renders hr as <hr/>', () => {
-    expect(renderMarkdownToTelegramHTML('---')).toContain('<hr/>');
+  it('renders hr as a plain em-dash divider', () => {
+    expect(renderMarkdownToTelegramHTML('before\n\n---\n\nafter')).toBe('before\n———\nafter');
+    expect(hasRichOnlyMarkup(renderMarkdownToTelegramHTML('---'))).toBe(false);
   });
 
   it('renders inline math as <tg-math>', () => {
@@ -122,16 +129,15 @@ describe('hasRichOnlyMarkup', () => {
     expect(hasRichOnlyMarkup('<blockquote>q</blockquote>')).toBe(false);
     expect(hasRichOnlyMarkup('<a href="x">link</a>')).toBe(false);
     expect(hasRichOnlyMarkup('<tg-spoiler>s</tg-spoiler>')).toBe(false);
+    // Headings, lists, hr now degrade to plain text — never appear as rich tags.
+    expect(hasRichOnlyMarkup('• bullet item')).toBe(false);
+    expect(hasRichOnlyMarkup('1. numbered')).toBe(false);
+    expect(hasRichOnlyMarkup('a ——— b')).toBe(false);
   });
 
-  it('returns true for any rich-only tag', () => {
-    expect(hasRichOnlyMarkup('<h1>H</h1>')).toBe(true);
-    expect(hasRichOnlyMarkup('<h6>H</h6>')).toBe(true);
-    expect(hasRichOnlyMarkup('<ul><li>a</li></ul>')).toBe(true);
-    expect(hasRichOnlyMarkup('<ol><li>a</li></ol>')).toBe(true);
-    expect(hasRichOnlyMarkup('<table><tr><td>x</td></tr></table>')).toBe(true);
-    expect(hasRichOnlyMarkup('<hr/>')).toBe(true);
+  it('returns true for the remaining rich-only tags (math, tables)', () => {
     expect(hasRichOnlyMarkup('text <tg-math>x</tg-math>')).toBe(true);
     expect(hasRichOnlyMarkup('<tg-math-block>x</tg-math-block>')).toBe(true);
+    expect(hasRichOnlyMarkup('<table><tr><td>x</td></tr></table>')).toBe(true);
   });
 });
