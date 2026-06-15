@@ -161,6 +161,26 @@ describe('system.velin.md (mode=probe)', () => {
     expect(rendered).toContain('When the bot should stay silent');
   });
 
+  it('act rubric covers nickname/sticker/social-engagement cues', async () => {
+    const rendered = await renderSystem(baseProps);
+    // Broad "addressed" definition — not just @mention
+    expect(rendered).toContain('broader than `@mention`');
+    expect(rendered).toContain('nicknames');
+    expect(rendered).toContain('stickers / custom-emoji');
+    // Affectionate / playful engagement
+    expect(rendered).toContain('Affectionate or social engagement');
+    expect(rendered).toContain('NOT "filler agreement"');
+  });
+
+  it('silent rubric scopes flooding to send_message and excludes social registers', async () => {
+    const rendered = await renderSystem(baseProps);
+    // Filler-agreement carve-out for non-text registers
+    expect(rendered).toContain('Stickers, custom-emoji, `react`');
+    expect(rendered).toContain('NOT filler agreement');
+    // Flooding scoped to send_message, not react
+    expect(rendered).toContain('does NOT count as flooding');
+  });
+
   it('wraps system files with strong third-party reframing', async () => {
     const rendered = await renderSystem({
       ...baseProps,
