@@ -72,13 +72,22 @@ const buildTRs = (): TurnResponseV2[] => [{
     {
       kind: 'message',
       role: 'assistant',
-      parts: [{ kind: 'toolCall', callId: 'call1', name: 'send_message', args: JSON.stringify({ text: 'hi alice' }) }],
+      parts: [
+        { kind: 'toolCall', callId: 'call1', name: 'send_message', args: JSON.stringify({ text: 'hi alice' }) },
+        { kind: 'toolCall', callId: 'call2', name: 'bash', args: JSON.stringify({ command: 'date', timeout_seconds: 5 }) },
+      ],
       reasoning: undefined,
     },
     {
       kind: 'toolResult',
       callId: 'call1',
       payload: JSON.stringify({ ok: true, message_id: '2' }),
+      requiresFollowUp: false,
+    },
+    {
+      kind: 'toolResult',
+      callId: 'call2',
+      payload: JSON.stringify({ exit_code: 0, output: 'Mon Jan  1 00:00:02 UTC 2025\n' }),
       requiresFollowUp: false,
     },
   ],
@@ -178,17 +187,27 @@ describe('probe vs primary view of bot\'s own messages', () => {
     expect(probeUserText).toContain('hello bot');
     expect(probeUserText).toContain('how are you?');
 
+    // Probe sees non-send-message tool calls as <tool-call> XML elements.
+    expect(probeUserText).toContain('<tool-call name="bash"');
+    expect(probeUserText).toContain('Mon Jan  1 00:00:02 UTC 2025');
+    // send_message is NOT rendered as <tool-call> — it's already in the chat as <message>.
+    expect(probeUserText).not.toContain('<tool-call name="send_message"');
+
     // Primary does NOT see the bot's outgoing message as user-side XML.
     expect(primaryUserText).not.toContain('myself="true"');
     expect(primaryUserText).not.toContain('hi alice');
     expect(primaryUserText).toContain('hello bot');
     expect(primaryUserText).toContain('how are you?');
+    // Primary doesn't see <tool-call> XML either — that's a probe-only synthesis.
+    expect(primaryUserText).not.toContain('<tool-call');
 
-    // Primary DOES see the assistant's send_message tool call.
+    // Primary DOES see the assistant's send_message tool call (real assistant entry).
     const primaryAssistantToolCalls = collectAssistantToolCallNames(primaryCall![1]);
     expect(primaryAssistantToolCalls).toContain('send_message');
+    expect(primaryAssistantToolCalls).toContain('bash');
 
-    // Probe sees no assistant tool calls in its context (all TRs stripped).
+    // Probe sees no real assistant tool calls in its context — all TRs are
+    // stripped; the only tool-call signal is the <tool-call> XML in user text.
     const probeAssistantToolCalls = collectAssistantToolCallNames(probeCall![1]);
     expect(probeAssistantToolCalls).toEqual([]);
 

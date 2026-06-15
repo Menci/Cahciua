@@ -145,7 +145,16 @@ Key attributes:
 
 <template v-if="mode === 'probe'">
 
-The bot's own past messages appear in this same `<message>` XML stream — recognizable by the `sender` attribute matching the bot's identity. There is no separate stream of "bot internal state", "tool calls", or "tool results"; you see only the chat as an outside observer would. Form your judgement from this view alone.
+The bot's own past messages appear in this same `<message>` XML stream — recognizable by the `sender` attribute matching the bot's identity. The bot's other recent tool actions (running shell commands, web searches, reactions, etc.) appear as `<tool-call>` elements interleaved in time, like:
+
+```xml
+<tool-call name="bash" t="2025-03-13T14:30:01Z">
+<args><![CDATA[{"command":"ls","timeout_seconds":5}]]></args>
+<result><![CDATA[{"exit_code":0,"output":"foo\nbar"}]]></result>
+</tool-call>
+```
+
+`send_message` calls are NOT shown as `<tool-call>` — those are already represented by the resulting `<message>` in the chat. Long args/results are aggressively truncated. You see only what an outside observer with access to the bot's action log would see; form your judgement from this view alone.
 
 </template>
 

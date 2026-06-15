@@ -321,7 +321,7 @@ export const createDriver = (config: DriverConfig, deps: {
             if (!skipProbe) {
               log.withFields({ chatId, lastProcessedMs: lastProcessedMs() }).log('Running probe');
 
-              const probeCtx = composeProbeContext(rcAtStart, chatConfig.compaction.maxContextEstTokens, sum);
+              const probeCtx = composeProbeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, sum);
               if (!probeCtx) return;
 
               const probeSystem = await renderSystemPrompt({

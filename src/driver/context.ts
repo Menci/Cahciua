@@ -268,18 +268,88 @@ export const composeContext = (
 };
 
 /**
- * Probe sees an outside-judge view: pure chat history, no tool calls, no
- * tool results. The bot's own messages that the primary side normally
- * sources from TRs are taken from the RC instead — so isSelfSent segments
- * stay in (filterSelfSentSegments is NOT applied), and TRs are excluded
- * entirely. Compact summary still rides along for context.
+ * Probe sees an outside-judge view: chat history as XML, plus a compact
+ * XML rendering of past tool calls (excluding `send_message`, which is
+ * already represented by the bot's own message in the chat). Each
+ * toolCall/toolResult pair becomes one `<tool-call>` element, aggressively
+ * truncated. The bot's `isSelfSent` segments stay (filterSelfSentSegments
+ * is NOT applied) so the bot's outgoing messages show up as `<message>`.
+ * Compact summary rides along for context.
  */
+const PROBE_TOOL_CALL_TRUNCATE = 1024;
+
+const truncateForProbe = (s: string): string => {
+  if (s.length <= PROBE_TOOL_CALL_TRUNCATE) return s;
+  const head = Math.floor(PROBE_TOOL_CALL_TRUNCATE * 0.4);
+  const tail = Math.floor(PROBE_TOOL_CALL_TRUNCATE * 0.4);
+  return `${s.slice(0, head)}\n... [truncated ${s.length - head - tail} chars] ...\n${s.slice(-tail)}`;
+};
+
+const formatToolResultPayload = (payload: string | InputPart[]): string => {
+  if (typeof payload === 'string') return payload;
+  const texts: string[] = [];
+  let imageCount = 0;
+  for (const p of payload) {
+    if (p.kind === 'text') texts.push(p.text);
+    else if (p.kind === 'image') imageCount++;
+  }
+  let s = texts.join('\n');
+  if (imageCount > 0) s += `${s ? '\n' : ''}[${imageCount} image${imageCount > 1 ? 's' : ''} attached]`;
+  return s;
+};
+
+// Wrap arbitrary text in CDATA, escaping the only sequence CDATA can't hold.
+const cdata = (s: string): string =>
+  `<![CDATA[${s.replace(/]]>/g, ']]]]><![CDATA[>')}]]>`;
+
+const xmlEscapeAttr = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+export const synthesizeToolCallSegments = (trs: TurnResponseV2[]): { receivedAtMs: number; content: { type: 'text'; text: string }[] }[] => {
+  const segments: { receivedAtMs: number; content: { type: 'text'; text: string }[] }[] = [];
+  for (const tr of trs) {
+    const results = new Map<string, ToolResult>();
+    for (const e of tr.entries) {
+      if (e.kind === 'toolResult') results.set(e.callId, e);
+    }
+    for (const e of tr.entries) {
+      if (e.kind !== 'message' || e.role !== 'assistant') continue;
+      for (const p of e.parts) {
+        if (p.kind !== 'toolCall') continue;
+        // send_message is already represented as the bot's own <message> in the
+        // chat XML — skip to avoid duplicate signal.
+        if (p.name === 'send_message') continue;
+        const result = results.get(p.callId);
+        const argsTrunc = truncateForProbe(p.args);
+        const resultTrunc = result ? truncateForProbe(formatToolResultPayload(result.payload)) : null;
+        const t = new Date(tr.requestedAtMs).toISOString();
+        const inner = resultTrunc != null
+          ? `<args>${cdata(argsTrunc)}</args>\n<result>${cdata(resultTrunc)}</result>`
+          : `<args>${cdata(argsTrunc)}</args>\n<result>[no result — interrupted]</result>`;
+        const xml = `<tool-call name="${xmlEscapeAttr(p.name)}" t="${t}">\n${inner}\n</tool-call>`;
+        segments.push({
+          receivedAtMs: tr.requestedAtMs,
+          content: [{ type: 'text', text: xml }],
+        });
+      }
+    }
+  }
+  return segments;
+};
+
 export const composeProbeContext = (
   rc: RenderedContext,
+  trs: TurnResponseV2[],
   maxTokens: number,
   compactSummary?: string,
 ): { entries: ConversationEntry[]; estimatedTokens: number; rawEstimatedTokens: number } | null => {
-  const merged = mergeContext(rc, []);
+  // Synthesize tool-call XML segments and merge them with RC by timestamp.
+  // No real TRs go in — mergeContext receives [] for the trs side, so the
+  // probe sees only XML user-message text (no assistant entries, no tool
+  // results, no reasoning).
+  const synthSegments = synthesizeToolCallSegments(trs);
+  const augmentedRC: RenderedContext = [...rc, ...synthSegments];
+  const merged = mergeContext(augmentedRC, []);
   if (merged.length === 0 && !compactSummary) return null;
 
   const entries: ConversationEntry[] = compactSummary
