@@ -120,7 +120,10 @@ describe('probe vs primary view of bot\'s own messages', () => {
             kind: 'toolCall',
             callId: 'probe1',
             name: 'decide',
-            args: JSON.stringify({ should_act: true, reason: 'directly addressed by user' }),
+            args: JSON.stringify({
+              should_act: true,
+              reason: 'Alice asked the bot directly. Plausible: (a) react 👀 to acknowledge, (b) reply with a brief comment, (c) search for current info first.',
+            }),
           }],
           reasoning: undefined,
         }];
@@ -205,6 +208,11 @@ describe('probe vs primary view of bot\'s own messages', () => {
     const primaryAssistantToolCalls = collectAssistantToolCallNames(primaryCall![1]);
     expect(primaryAssistantToolCalls).toContain('send_message');
     expect(primaryAssistantToolCalls).toContain('bash');
+
+    // Primary's late-binding embeds the probe's reason as advisory.
+    expect(primaryUserText).toContain('evaluator\'s notes');
+    expect(primaryUserText).toContain('advisory only');
+    expect(primaryUserText).toContain('Plausible: (a) react 👀');
 
     // Probe sees no real assistant tool calls in its context — all TRs are
     // stripped; the only tool-call signal is the <tool-call> XML in user text.

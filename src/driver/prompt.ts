@@ -46,6 +46,7 @@ export const renderLateBindingPrompt = async (params: {
   timeNow: string;
   isInterrupted?: boolean;
   activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
+  probeReason?: string;
 }) => {
   const { rendered } = await renderMarkdownString(lateBindingTemplate, params, basePath);
   return cleanVelinOutput(rendered);

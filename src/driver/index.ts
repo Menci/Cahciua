@@ -316,6 +316,10 @@ export const createDriver = (config: DriverConfig, deps: {
 
             const activeBackgroundTasks = deps.backgroundTask.getActiveTasks(chatId);
             const timeNow = localTimeNow();
+            // The probe's reason, when probe gated this primary call. Forwarded
+            // to primary's late-binding as advisory context. Stays undefined
+            // when probe was skipped (mention/replied/interrupted).
+            let probeReason: string | undefined;
 
             // --- Probe gate ---
             if (!skipProbe) {
@@ -371,6 +375,7 @@ export const createDriver = (config: DriverConfig, deps: {
               lastProcessedMs(probeRequestedAt);
 
               if (!shouldAct) return;
+              probeReason = decision?.reason;
             }
 
             const system = await renderSystemPrompt({
@@ -387,6 +392,7 @@ export const createDriver = (config: DriverConfig, deps: {
               timeNow,
               isInterrupted,
               activeBackgroundTasks,
+              ...(probeReason ? { probeReason } : {}),
             }));
 
             const primaryTools = tools;

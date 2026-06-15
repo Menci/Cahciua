@@ -120,6 +120,13 @@ describe('system.velin.md (mode=probe)', () => {
     expect(rendered).toContain('reason');
   });
 
+  it('asks probe to enumerate plausible actions when several are available', async () => {
+    const rendered = await renderSystem(baseProps);
+    expect(rendered).toContain('forwarded to the bot');
+    expect(rendered).toContain('several are plausible');
+    expect(rendered).toContain('not a directive');
+  });
+
   it('omits primary-only sections', async () => {
     const rendered = await renderSystem(baseProps);
     expect(rendered).not.toContain('You just woke up');
@@ -196,6 +203,23 @@ describe('late-binding.velin.md (mode=primary)', () => {
   it('renders interrupted hint', async () => {
     const rendered = await renderLateBinding({ ...baseProps, isInterrupted: true });
     expect(rendered).toContain('interrupted by new messages');
+  });
+
+  it('embeds probe reason as advisory when provided', async () => {
+    const rendered = await renderLateBinding({
+      ...baseProps,
+      probeReason: 'The bot was directly asked about npm version. Plausible actions: (a) brief web_search then quote, (b) react with 👀 to acknowledge.',
+    });
+    expect(rendered).toContain('evaluator\'s notes');
+    expect(rendered).toContain('advisory only');
+    expect(rendered).toContain('act differently');
+    expect(rendered).toContain('directly asked about npm version');
+    expect(rendered).toContain('Plausible actions');
+  });
+
+  it('omits probe reason block when probeReason is empty', async () => {
+    const rendered = await renderLateBinding(baseProps);
+    expect(rendered).not.toContain('evaluator\'s notes');
   });
 
   it('omits interrupted hint by default', async () => {
