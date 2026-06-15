@@ -138,10 +138,14 @@ describe('system.velin.md (mode=probe)', () => {
     expect(rendered).not.toContain('kill_task');
   });
 
-  it('keeps political-topic guidance adapted to judge view', async () => {
+  it('keeps political/sexual guidance adapted to judge view + topic-scoped silence', async () => {
     const rendered = await renderSystem(baseProps);
-    expect(rendered).toContain('politically sensitive topics');
+    expect(rendered).toContain('politically sensitive');
+    expect(rendered).toContain('Sexual content');
     expect(rendered).toContain('should_act = false');
+    // Topic-scoped silence — bot can engage with unrelated discussion in the same chat.
+    expect(rendered).toContain('not the *chat*');
+    expect(rendered).toContain('unrelated tech');
   });
 
   it('includes when-to-act and when-to-stay-silent rubric', async () => {
@@ -183,7 +187,7 @@ describe('late-binding.velin.md (mode=primary)', () => {
     const rendered = await renderLateBinding(baseProps);
     expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
     expect(rendered).toContain('judged that you should take action');
-    expect(rendered).toContain('no political topics');
+    expect(rendered).toContain('no political or sexual content');
     expect(rendered).toContain('no agreement, no echoing');
     expect(rendered).not.toContain('decide');
     assertNoVueSyntaxLeak(rendered);
@@ -226,7 +230,6 @@ describe('late-binding.velin.md (mode=probe)', () => {
     expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
     expect(rendered).toContain('`decide`');
     expect(rendered).toContain('outside judge, not the bot');
-    expect(rendered).toContain('should_act = false');
     assertNoVueSyntaxLeak(rendered);
   });
 
