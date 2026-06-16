@@ -6,9 +6,16 @@ models:
     # apiFormat: "responses"        # optional: 'openai-chat' (default), 'responses', or 'anthropic-messages'
     # timeoutSec: 120                # optional: abort requests that stream for too long
     # maxImagesAllowed: 100     # optional: drop oldest images when context exceeds this limit
-    # thinking:                      # optional: per-model reasoning budget
-    #   type: "enabled"              # 'enabled' (default when present) or 'disabled'
-    #   effort: "high"               # 'high' or 'max' (anthropic budget_tokens 5000/10000; openai reasoning_effort; responses output_config.effort)
+    # extraBody:                     # optional: shallow-merged into the provider request body. Schema is
+    #                                # the raw provider schema — match it to apiFormat above. Examples:
+    #   reasoning_effort: "high"     #   openai-chat: GPT/DeepSeek/Kimi reasoning knob.
+    #   thinking:                    #   anthropic-messages: enable Claude thinking; bump max_tokens accordingly.
+    #     type: "enabled"
+    #     budget_tokens: 10000
+    #   max_tokens: 16000
+    #   reasoning:                   #   responses: GPT effort + summary opt-in (summary is required to surface reasoning text).
+    #     effort: "low"
+    #     summary: "auto"
   probe:
     apiBaseUrl: ""
     apiKey: ""

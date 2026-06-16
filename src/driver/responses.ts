@@ -3,10 +3,10 @@ import type { Logger } from '@guiiai/logg';
 import type {
   ResponseOutputItem,
   ResponseOutputMessage,
+  ResponseOutputReasoning,
   ResponseTool,
   ResponsesResult,
 } from './responses-types';
-import type { ThinkingConfig } from './types';
 
 export interface ResponsesApiParams {
   baseURL: string;
@@ -16,7 +16,7 @@ export interface ResponsesApiParams {
   instructions?: string;
   tools?: ResponseTool[];
   timeoutSec?: number;
-  thinking?: ThinkingConfig;
+  extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
   onRequestBody?: (body: unknown) => void;
   log: Logger;
@@ -52,7 +52,7 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
           ? 'required'
           : { type: 'function' as const, name: params.forceToolChoice.name } }
         : {}),
-      ...(params.thinking?.effort ? { output_config: { effort: params.thinking.effort } } : {}),
+      ...(params.extraBody ?? {}),
     };
     params.onRequestBody?.(requestBody);
     const body = JSON.stringify(requestBody);
@@ -86,6 +86,9 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
         let args: unknown = item.arguments;
         try { args = JSON.parse(item.arguments); } catch { /* keep raw string */ }
         log.withFields({ label, tool: item.name, args }).log('tool call');
+      } else if (item.type === 'reasoning') {
+        const reasoning = (item as ResponseOutputReasoning).summary.map(s => s.text).join('\n');
+        if (reasoning) log.withFields({ label, reasoning }).log('reasoning');
       }
     }
 

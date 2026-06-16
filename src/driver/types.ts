@@ -25,11 +25,6 @@ export interface ProbeResponseV2 {
   createdAt: number;
 }
 
-export interface ThinkingConfig {
-  type?: 'enabled' | 'disabled';
-  effort?: string;
-}
-
 export interface LlmEndpoint {
   apiBaseUrl: string;
   apiKey: string;
@@ -37,7 +32,12 @@ export interface LlmEndpoint {
   apiFormat?: ProviderFormat;
   maxImagesAllowed?: number;
   timeoutSec?: number;
-  thinking?: ThinkingConfig;
+  /** Extra fields shallow-merged into the request body. The endpoint's apiFormat
+   * decides whether this is OpenAI Chat (`reasoning_effort`, `temperature`, ...),
+   * Anthropic Messages (`thinking`, `max_tokens`, ...), or OpenAI Responses
+   * (`reasoning`, `text`, ...). Caller is responsible for not stomping on
+   * structural fields we set (model, messages, tools, etc.). */
+  extraBody?: Record<string, unknown>;
 }
 
 export interface DriverConfig {

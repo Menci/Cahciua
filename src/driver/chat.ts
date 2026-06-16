@@ -1,6 +1,5 @@
 import type { Logger } from '@guiiai/logg';
 
-import type { ThinkingConfig } from './types';
 import type { ChatCompletionsAssistantMessage } from '../unified-api/chat-types';
 
 interface ToolSchema {
@@ -21,7 +20,7 @@ export interface ChatCompletionsParams {
   system?: string;
   tools?: ToolSchema[];
   timeoutSec?: number;
-  thinking?: ThinkingConfig;
+  extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
   onRequestBody?: (body: unknown) => void;
   log: Logger;
@@ -72,13 +71,7 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
           ? 'required'
           : { type: 'function' as const, function: { name: params.forceToolChoice.name } } }
         : {}),
-      // Chat Completions takes the flat `reasoning_effort` field. type === 'disabled' or
-      // no thinking config → omit the field entirely; standard OpenAI rejects 'none', and
-      // unknown values like 'disabled' get silently ignored (still activating thinking),
-      // so the safe off switch is to not send the field at all.
-      ...(params.thinking && params.thinking.type !== 'disabled' && params.thinking.effort
-        ? { reasoning_effort: params.thinking.effort }
-        : {}),
+      ...(params.extraBody ?? {}),
     };
     params.onRequestBody?.(requestBody);
     const body = JSON.stringify(requestBody);

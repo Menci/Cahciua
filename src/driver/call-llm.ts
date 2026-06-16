@@ -7,7 +7,7 @@ import { DUMP_DIR } from './constants';
 import { trimImages } from './context';
 import { applyAnthropicCachePoints, messagesApi } from './messages';
 import { responsesApi } from './responses';
-import type { ProviderFormat, ThinkingConfig } from './types';
+import type { ProviderFormat } from './types';
 import {
   fromChatCompletionsOutput,
   fromMessagesOutput,
@@ -31,7 +31,7 @@ export interface LlmCallConfig {
   model: string;
   apiFormat?: ProviderFormat;
   timeoutSec?: number;
-  thinking?: ThinkingConfig;
+  extraBody?: Record<string, unknown>;
   forceToolChoice?: ForceToolChoice;
 }
 
@@ -105,7 +105,7 @@ export const callLlm = async (
     const response = await responsesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
-      thinking: config.thinking, forceToolChoice: config.forceToolChoice,
+      extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
       onRequestBody: body => dump(options?.dumpId, 'request', body),
       log: log!, label, timeoutSec: config.timeoutSec,
     });
@@ -128,7 +128,7 @@ export const callLlm = async (
     const response = await messagesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
-      thinking: config.thinking, forceToolChoice: config.forceToolChoice,
+      extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
       onRequestBody: body => dump(options?.dumpId, 'request', body),
       log: log!, label, timeoutSec: config.timeoutSec,
     });
@@ -147,7 +147,7 @@ export const callLlm = async (
   const response = await chatCompletions({
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
-    thinking: config.thinking, forceToolChoice: config.forceToolChoice,
+    extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
     onRequestBody: body => dump(options?.dumpId, 'request', body),
     log: log!, label, timeoutSec: config.timeoutSec,
   });

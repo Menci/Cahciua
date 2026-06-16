@@ -16,10 +16,7 @@ const llmEndpointEntries = {
   apiFormat: v.optional(v.picklist(['openai-chat', 'responses', 'anthropic-messages'])),
   maxImagesAllowed: v.optional(v.number()),
   timeoutSec: v.optional(v.number()),
-  thinking: v.optional(v.object({
-    type: v.optional(v.picklist(['enabled', 'disabled'])),
-    effort: v.optional(v.string()),
-  })),
+  extraBody: v.optional(v.record(v.string(), v.unknown())),
 };
 
 // --- Runtime config schema (top-level, global) ---
