@@ -80,14 +80,14 @@ const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent)
   };
   if (event.replyToMessageId) {
     message.replyToMessageId = event.replyToMessageId;
+    if (event.replyQuoteContent && event.replyQuoteContent.length > 0) {
+      message.replyQuoteContent = event.replyQuoteContent;
+    }
     // Snapshot reply target's sender + preview from current IC state
     const targetIdx = findMessageIndex(draft.nodes, event.replyToMessageId);
     if (targetIdx !== -1) {
       const target = draft.nodes[targetIdx] as ICMessage;
       message.replyToSender = target.sender;
-      if (event.replyQuoteText != null) {
-        message.replyQuoteText = truncate(event.replyQuoteText, REPLY_PREVIEW_MAX);
-      }
       const plain = contentToPlainText(target.content);
       if (plain) message.replyToPreview = truncate(plain, REPLY_PREVIEW_MAX);
       if (target.content.length > 0) message.replyToContent = target.content;

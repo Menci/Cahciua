@@ -146,11 +146,16 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
   if (msg.replyToMessageId) {
     const replyAttrs = [`id="${escapeXml(msg.replyToMessageId)}"`];
     if (msg.replyToSender) replyAttrs.push(`sender="${escapeXml(formatSender(msg.replyToSender, params.contactNames))}"`);
-    if (msg.replyQuoteText != null) replyAttrs.push(`quote="${escapeXml(msg.replyQuoteText)}"`);
-    const preview = msg.replyToContent
-      ? truncateXml(renderContent(msg.replyToContent), REPLY_PREVIEW_MAX_CHARS)
-      : (msg.replyToPreview ? escapeXml(msg.replyToPreview) : '');
-    parts.push(`<in-reply-to ${replyAttrs.join(' ')}>${preview}</in-reply-to>`);
+    let inner: string;
+    if (msg.replyQuoteContent) {
+      replyAttrs.push('quoted');
+      inner = truncateXml(renderContent(msg.replyQuoteContent), REPLY_PREVIEW_MAX_CHARS);
+    } else if (msg.replyToContent) {
+      inner = truncateXml(renderContent(msg.replyToContent), REPLY_PREVIEW_MAX_CHARS);
+    } else {
+      inner = msg.replyToPreview ? escapeXml(msg.replyToPreview) : '';
+    }
+    parts.push(`<in-reply-to ${replyAttrs.join(' ')}>${inner}</in-reply-to>`);
   }
 
   const body = renderContent(msg.content);

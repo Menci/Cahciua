@@ -230,6 +230,30 @@ describe('render', () => {
       expect(result).toContain('<in-reply-to id="99">');
       expect(result).not.toContain('<in-reply-to id="99" sender=');
     });
+
+    it('renders quoted reply with sender and quote content (entities preserved)', () => {
+      const result = xml(render(ic([message({
+        replyToMessageId: '99',
+        replyToSender: bob,
+        replyToPreview: 'previous message',
+        replyToContent: [{ type: 'text', text: 'previous message' }],
+        replyQuoteContent: [
+          { type: 'bold', children: [{ type: 'text', text: 'Model routing' }] },
+          { type: 'text', text: ' — one interface' },
+        ],
+      })])));
+      expect(result).toContain('<in-reply-to id="99" sender="Bob" quoted><b>Model routing</b> — one interface</in-reply-to>');
+      // quoted form replaces, not augments, the full-message preview
+      expect(result).not.toContain('previous message');
+    });
+
+    it('renders quoted reply even when target sender is unknown', () => {
+      const result = xml(render(ic([message({
+        replyToMessageId: '99',
+        replyQuoteContent: [{ type: 'text', text: 'snippet' }],
+      })])));
+      expect(result).toContain('<in-reply-to id="99" quoted>snippet</in-reply-to>');
+    });
   });
 
   describe('forward', () => {

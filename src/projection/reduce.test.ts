@@ -122,6 +122,31 @@ describe('reduce', () => {
       expect(node.replyToPreview).toBeUndefined();
     });
 
+    it('preserves replyQuoteContent regardless of target presence', () => {
+      const quote = [{ type: 'text' as const, text: 'snippet' }];
+
+      // Target absent — quote still flows through
+      const orphan = reduce(createEmptyIC('chat1'), msg({
+        replyToMessageId: '999',
+        replyQuoteContent: quote,
+      }));
+      expect((orphan.nodes[0] as ICMessage).replyQuoteContent).toEqual(quote);
+
+      // Target present — quote co-exists with replyToSender/Preview
+      let ic = reduce(createEmptyIC('chat1'), msg());
+      ic = reduce(ic, msg({
+        messageId: '2',
+        sender: bob,
+        receivedAtMs: 2000,
+        timestampSec: 2,
+        replyToMessageId: '1',
+        replyQuoteContent: quote,
+      }));
+      const reply = ic.nodes[1] as ICMessage;
+      expect(reply.replyQuoteContent).toEqual(quote);
+      expect(reply.replyToSender).toEqual(alice);
+    });
+
     it('truncates long reply preview', () => {
       const longText = 'a'.repeat(200);
       let ic = reduce(createEmptyIC('chat1'), msg({

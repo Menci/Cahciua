@@ -54,7 +54,7 @@ export interface CanonicalMessageEvent {
   utcOffsetMin: number;
   content: ContentNode[];
   replyToMessageId?: string;
-  replyQuoteText?: string;
+  replyQuoteContent?: ContentNode[];
   forwardInfo?: CanonicalForwardInfo;
   attachments: CanonicalAttachment[];
   isSelfSent?: boolean;

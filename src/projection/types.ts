@@ -11,7 +11,7 @@ export interface ICMessage {
   replyToMessageId?: string;
   replyToSender?: CanonicalUser;
   replyToPreview?: string;
-  replyQuoteText?: string;
+  replyQuoteContent?: ContentNode[];
   replyToContent?: ContentNode[];
   forwardInfo?: CanonicalForwardInfo;
   attachments: CanonicalAttachment[];

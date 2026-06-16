@@ -407,6 +407,7 @@ const SERVICE_CONTENT_TYPES = new Set([
 
 export const fromTdMessage = (cache: EntityCache, msg: Td.message): TelegramMessage | null => {
   const replyTo = msg.reply_to?._ === 'messageReplyToMessage' ? msg.reply_to : undefined;
+  const quote = replyTo?.quote;
   const base: Omit<TelegramMessage, 'source'> = {
     messageId: tdLibToServerMessageId(msg.id),
     chatId: chatIdToString(msg.chat_id),
@@ -415,6 +416,9 @@ export const fromTdMessage = (cache: EntityCache, msg: Td.message): TelegramMess
     editDate: msg.edit_date || undefined,
     text: '',
     replyToMessageId: replyTo?.message_id ? tdLibToServerMessageId(replyTo.message_id) : undefined,
+    replyQuote: quote
+      ? { text: quote.text.text, entities: convertEntities(quote.text.entities) }
+      : undefined,
     forwardInfo: convertForwardInfo(cache, msg.forward_info),
     mediaGroupId: msg.media_album_id && msg.media_album_id !== '0' ? msg.media_album_id : undefined,
     viaBotId: msg.via_bot_user_id ? String(msg.via_bot_user_id) : undefined,

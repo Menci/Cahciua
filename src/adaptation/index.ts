@@ -209,7 +209,7 @@ export const adaptMessage = (msg: TelegramMessage): CanonicalMessageEvent => {
   };
   if (msg.sender) event.sender = adaptUser(msg.sender);
   if (msg.replyToMessageId != null) event.replyToMessageId = String(msg.replyToMessageId);
-  if (msg.replyQuoteText != null) event.replyQuoteText = msg.replyQuoteText;
+  if (msg.replyQuote) event.replyQuoteContent = parseContent(msg.replyQuote.text, msg.replyQuote.entities);
   const forwardInfo = adaptForwardInfo(msg.forwardInfo);
   if (forwardInfo) event.forwardInfo = forwardInfo;
   return event;
