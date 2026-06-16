@@ -201,12 +201,13 @@ describe('probe vs primary view of bot\'s own messages', () => {
     expect(probeUserText).not.toContain('<tool-call name="send_message"');
 
     // Primary does NOT see the bot's outgoing message as user-side XML.
-    expect(primaryUserText).not.toContain('myself="true"');
+    // (`hi alice` is the bot's sent content — present in probe RC, absent in primary RC.)
     expect(primaryUserText).not.toContain('hi alice');
     expect(primaryUserText).toContain('hello bot');
     expect(primaryUserText).toContain('how are you?');
-    // Primary doesn't see <tool-call> XML either — that's a probe-only synthesis.
-    expect(primaryUserText).not.toContain('<tool-call');
+    // Primary doesn't see the rendered bash tool-call output either — that's a probe-only synthesis.
+    // (Late-binding mentions the `<tool-call>` markup by name, so we assert on the unique result string.)
+    expect(primaryUserText).not.toContain('Mon Jan  1 00:00:02 UTC 2025');
 
     // Primary DOES see the assistant's send_message tool call (real assistant entry).
     const primaryAssistantToolCalls = collectAssistantToolCallNames(primaryCall![1]);

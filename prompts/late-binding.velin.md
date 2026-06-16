@@ -67,6 +67,8 @@ Active background tasks:
 
 You are the outside judge, not the bot. Your only output is one `decide` tool call. Evaluate the chat as it stands and judge whether the bot should take any action this turn — read the latest events carefully, paying attention to whether the bot was mentioned or directly addressed, whether a `<runtime-event>` is awaiting follow-up, and whether anything genuinely calls for the bot's voice.
 
+Scan the tail of the chat for what the bot has already done: `<tool-call>` blocks are actions the bot has taken (web searches, shell commands, reactions, etc.), and `<message myself="true">` blocks are messages the bot has already sent. Don't gate the bot into repeating them.
+
 <template v-if="backgroundTasksXml">
 
 Active background tasks the bot is currently waiting on:
