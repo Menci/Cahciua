@@ -54,7 +54,6 @@ export const createDriver = (config: DriverConfig, deps: {
   onDebounceStateChange?: (chatId: string, isDebouncing: boolean) => void;
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
   loadLastProbeTime: (chatId: string) => number;
-  loadProbeActivations: (chatId: string, sinceMs?: number) => number[];
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
   setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
   getChatTitle: (chatId: string) => string | undefined;
@@ -447,8 +446,7 @@ export const createDriver = (config: DriverConfig, deps: {
               // The bot is not told this is happening — same prompt, same
               // entries; only tool_choice differs at the API boundary.
               const latestTRs = await loadTRs(chatId, cursor);
-              const probeActivations = deps.loadProbeActivations(chatId, cursor);
-              if (loopEndedWithoutSendMessage(latestTRs, probeActivations)) {
+              if (loopEndedWithoutSendMessage(latestTRs)) {
                 log.withFields({ chatId }).log('Loop ended without send_message — running forced fallback');
                 await runner.runStepLoop({
                   chatId,

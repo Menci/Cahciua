@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 
 import type { DB } from './client';
 import { codec } from './codec';
@@ -407,23 +407,6 @@ export const loadLastProbeTime = (db: DB, chatId: string): number => {
     .limit(1)
     .get();
   return row?.requestedAt ?? 0;
-};
-
-/** Load timestamps of probe activations (`isActivated = true`) for a chat,
- * optionally bounded below by `sinceMs`. Used by the loop-boundary inference
- * to detect "should_act = true" triggers that anchor the start of a ReAct loop. */
-export const loadProbeActivations = (db: DB, chatId: string, sinceMs?: number): number[] => {
-  const conds = [
-    eq(probeResponsesV2.chatId, chatId),
-    eq(probeResponsesV2.isActivated, true),
-    ...(sinceMs != null ? [gt(probeResponsesV2.requestedAt, sinceMs)] : []),
-  ];
-  const rows = db.select({ requestedAt: probeResponsesV2.requestedAt })
-    .from(probeResponsesV2)
-    .where(and(...conds))
-    .orderBy(probeResponsesV2.requestedAt)
-    .all();
-  return rows.map(r => r.requestedAt);
 };
 
 const reconstructImageAltTextRecord = (row: typeof imageAltTexts.$inferSelect): ImageAltTextRecord => ({

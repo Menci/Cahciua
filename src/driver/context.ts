@@ -88,61 +88,52 @@ export const wasEndTurnCalled = (tr: TurnResponseV2): boolean =>
 export const wasSendMessageCalled = (tr: TurnResponseV2): boolean =>
   trHasToolCallNamed(tr, 'send_message');
 
+/** Did this TR exit via interrupt-style continuation? — i.e. at least one of
+ * its toolResults had requiresFollowUp=true, meaning the runner intended to
+ * keep going. Per-TR variant of `wasToolLoopInterrupted` (which only checks
+ * the latest TR). */
+const trWasInterrupted = (tr: TurnResponseV2): boolean => {
+  for (const e of tr.entries)
+    if (e.kind === 'toolResult' && e.requiresFollowUp) return true;
+  return false;
+};
+
 /**
- * Determine whether the **just-completed** ReAct loop ended with end_turn but
- * contained no send_message anywhere — indicating the bot exhausted its
- * action options without speaking. The driver uses this to schedule a
- * fallback forced-send_message round.
+ * Determine whether the just-completed ReAct loop ended with end_turn but
+ * contained no send_message anywhere — indicating the bot ran out of moves
+ * without speaking. The driver uses this to schedule a fallback forced
+ * send_message round.
  *
- * Critical: only fires when the LATEST TR is itself an end_turn. A cycle that
- * exited normally via send_message — or was interrupted mid-loop by new
- * external messages — is not eligible. Walking back through history to find
- * "the most recent end_turn ever" wrongly re-evaluates old loops on every
- * cycle exit and triggers spurious duplicate sends.
+ * Loop membership is structural, not time-based: a loop is the chain of TRs
+ * connected by interrupt-continuation. Walking back from the end_turn:
  *
- * Loop boundary: the loop ends at the latest TR (which IS the end_turn). The
- * loop START is the most recent of:
- *  - the TR immediately after the previous end_turn (chain boundary), and
- *  - the latest probe activation timestamp (a fresh "should_act = true" trigger).
- * Whichever is more recent wins.
+ *  - Cross any boundary where the previous TR is interrupted (its
+ *    toolResults include fwup=true) — the next TR is its resumed
+ *    continuation, same loop.
+ *  - Stop at the first boundary where the previous TR exited cleanly
+ *    (no fwup=true toolResults) — the next TR was a fresh trigger
+ *    (probe activation OR a mention/replied skip-probe), starting a new
+ *    loop. Anything earlier is in a previous, separately-evaluated loop.
  *
- * Returns false if the latest TR is not end_turn, or if any TR in the loop
- * called send_message.
+ * Gate: the latest TR must itself be end_turn. A cycle that exited via
+ * send_message (clean) or was interrupted mid-non-end-turn-step is not
+ * eligible — fallback only fires for cycles the bot deliberately ended.
+ *
+ * Returns false if the latest TR is not end_turn, or if any TR in the
+ * walked loop called send_message.
  */
-export const loopEndedWithoutSendMessage = (
-  trs: TurnResponseV2[],
-  probeActivationsMs: number[],
-): boolean => {
+export const loopEndedWithoutSendMessage = (trs: TurnResponseV2[]): boolean => {
   if (trs.length === 0) return false;
   const endIdx = trs.length - 1;
-  // Gate on "the cycle that just exited ended with end_turn". If the latest
-  // TR is anything else (send_message, an interrupted bash/react/etc. step,
-  // a non-tool text response), this isn't an end_turn-completed loop and the
-  // fallback round must not fire.
   if (!wasEndTurnCalled(trs[endIdx]!)) return false;
-  const endMs = trs[endIdx]!.requestedAtMs;
 
-  // Walk back to find the previous end_turn — anything after it is part of
-  // the current loop's chain.
-  let prevEndTurnMs = 0;
-  for (let i = endIdx - 1; i >= 0; i--) {
-    if (wasEndTurnCalled(trs[i]!)) { prevEndTurnMs = trs[i]!.requestedAtMs; break; }
-  }
-
-  // The latest probe activation strictly between prevEndTurnMs and endMs is
-  // the cleanest "trigger" anchor. If there is no probe activation (mention /
-  // replied / interrupted bypass), the chain anchor (prevEndTurnMs) stands.
-  const latestProbeMs = probeActivationsMs
-    .filter(t => t > prevEndTurnMs && t < endMs)
-    .reduce((a, b) => Math.max(a, b), 0);
-
-  const loopStartMs = Math.max(prevEndTurnMs, latestProbeMs);
-
-  // Did any TR in (loopStartMs, endMs] call send_message?
   for (let i = endIdx; i >= 0; i--) {
-    const tr = trs[i]!;
-    if (tr.requestedAtMs <= loopStartMs) break;
-    if (wasSendMessageCalled(tr)) return false;
+    if (wasSendMessageCalled(trs[i]!)) return false;
+    if (i === 0) break;
+    // The previous TR is in this loop only if it was interrupted (i.e. the
+    // current TR is its continuation). Otherwise it belongs to an earlier,
+    // already-completed loop and is not relevant here.
+    if (!trWasInterrupted(trs[i - 1]!)) break;
   }
   return true;
 };
