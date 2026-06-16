@@ -9,6 +9,7 @@ import type * as Td from 'tdlib-types';
 import type { EntityCache } from './entity-cache';
 import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
+import { decideLinkPreviewOptions } from './link-preview';
 import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
 import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
@@ -228,11 +229,15 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
           },
           clear_draft: true,
         }
-      : {
-          _: 'inputMessageText',
-          text: formattedFromHtml(html, opts?.parseMode ?? 'HTML'),
-          clear_draft: true,
-        };
+      : (() => {
+          const formatted = formattedFromHtml(html, opts?.parseMode ?? 'HTML');
+          return {
+            _: 'inputMessageText' as const,
+            text: formatted,
+            link_preview_options: decideLinkPreviewOptions(formatted.text ?? '', formatted.entities ?? []),
+            clear_draft: true,
+          };
+        })();
 
     const sent = await client.invoke({
       _: 'sendMessage',
