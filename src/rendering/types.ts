@@ -2,6 +2,13 @@ export interface RenderParams {
   compactCursorMs?: number;
   botUserId?: string;
   contactNames?: Map<string, string>;
+  // Users whose messages should render as a self-closing `<message blocked="true"/>`
+  // with no content. Sender info is kept so the model can see who was blocked.
+  // Blocked messages also suppress `mentionsMe` / `repliesToMe`, so they can't
+  // trick the bot into responding. Lookup is per-chat, computed lazily at render
+  // time — so toggling a user in/out of the block list takes effect on next
+  // re-render (e.g. after restart). Nothing is filtered at ingress or in storage.
+  blockedUserIds?: ReadonlySet<string>;
 }
 
 import type { Sharp } from 'sharp';

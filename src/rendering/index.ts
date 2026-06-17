@@ -115,8 +115,11 @@ const hasMention = (nodes: ContentNode[], userId: string): boolean =>
 const renderMessage = (msg: ICMessage, params: RenderParams): { content: RenderedContentPiece[]; senderId?: string; isMyself: boolean; isSelfSent: boolean; mentionsMe: boolean; repliesToMe: boolean } => {
   const isMyself = !!(params.botUserId && msg.sender?.id === params.botUserId);
   const isSelfSent = !!msg.isSelfSent;
-  const mentionsMe = !!(params.botUserId && hasMention(msg.content, params.botUserId));
-  const repliesToMe = !!(params.botUserId && msg.replyToSender?.id === params.botUserId);
+  const isBlocked = !!(msg.sender?.id && params.blockedUserIds?.has(msg.sender.id));
+  // Blocked senders can't reach the bot — suppress mention / reply-to-bot
+  // triggers regardless of content, so the message can't sneak past the probe gate.
+  const mentionsMe = !isBlocked && !!(params.botUserId && hasMention(msg.content, params.botUserId));
+  const repliesToMe = !isBlocked && !!(params.botUserId && msg.replyToSender?.id === params.botUserId);
   const attrs: string[] = [
     `id="${escapeXml(msg.messageId)}"`,
   ];
@@ -134,6 +137,15 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
       ?? (msg.forwardInfo.fromChatId ? `chat:${msg.forwardInfo.fromChatId}` : undefined)
       ?? 'unknown';
     attrs.push(`forwarded_from="${escapeXml(from)}"`);
+  }
+
+  // Blocked senders: render as a self-closing tag with sender info intact but no
+  // content. Same shape as the `deleted` case — the model sees who spoke but
+  // nothing of what they said. Reversing the block in config + restart restores
+  // the original content (it was never dropped from the DB).
+  if (isBlocked) {
+    attrs.push('blocked="true"');
+    return { content: [{ type: 'text', text: `<message ${attrs.join(' ')}/>` }], senderId: msg.sender?.id, isMyself, isSelfSent, mentionsMe, repliesToMe };
   }
 
   if (msg.deleted) {

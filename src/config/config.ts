@@ -39,6 +39,7 @@ const ChatConfigSchema = v.object({
   }), {}),
   systemFiles: v.optional(v.array(v.string()), []),
   sendTypingAction: v.optional(v.boolean(), true),
+  blockedUserIds: v.optional(v.array(v.string()), []),
   debounce: v.optional(v.object({
     initialDelayMs: v.optional(v.number(), 1000),
     typingExtendMs: v.optional(v.number(), 5000),
@@ -93,6 +94,7 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   })),
   systemFiles: v.array(v.string()),
   sendTypingAction: v.boolean(),
+  blockedUserIds: v.array(v.string()),
   debounce: v.partial(v.object({
     initialDelayMs: v.number(),
     typingExtendMs: v.number(),
@@ -186,6 +188,7 @@ export interface ResolvedChatConfig {
   primary: { model: LlmEndpoint; apiFormat: ProviderFormat };
   systemFiles: { filename: string; content: string }[];
   sendTypingAction: boolean;
+  blockedUserIds: string[];
   debounce: DebounceConfig;
   compaction: CompactionConfig;
   probe: { model: LlmEndpoint };
@@ -267,6 +270,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     })),
     debounce: merged.debounce,
     sendTypingAction: merged.sendTypingAction,
+    blockedUserIds: merged.blockedUserIds,
     compaction: {
       ...merged.compaction,
       model: merged.compaction.model ? resolveModel(config, merged.compaction.model) : undefined,

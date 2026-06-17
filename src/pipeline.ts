@@ -10,7 +10,15 @@ export type { PipelineEvent } from './projection';
 
 // Per-chat IC/RC state manager. Encapsulates the Projection → Rendering
 // pipeline, debug dumping, and diff logging.
-export const createPipeline = (renderParams: RenderParams) => {
+//
+// `getBlockedUserIds` is looked up per render so that a config-driven block
+// change takes effect on the next re-render without any state migration —
+// nothing is filtered at ingress or in storage; the rendering layer simply
+// masks blocked senders' messages.
+export const createPipeline = (
+  renderParams: RenderParams,
+  getBlockedUserIds: (chatId: string) => ReadonlySet<string> | undefined = () => undefined,
+) => {
   const logger = useLogger('pipeline');
   const renderLogger = useLogger('rendering');
 
@@ -18,10 +26,15 @@ export const createPipeline = (renderParams: RenderParams) => {
   const renderedSessions = new Map<string, RenderedContext>();
   const cursors = new Map<string, number>();
 
-  // Compute effective RenderParams for a chat, merging per-chat cursor with base params.
+  // Compute effective RenderParams for a chat, merging per-chat cursor + block list with base params.
   const effectiveParams = (chatId: string): RenderParams => {
     const cursor = cursors.get(chatId);
-    return cursor != null ? { ...renderParams, compactCursorMs: cursor } : renderParams;
+    const blockedUserIds = getBlockedUserIds(chatId);
+    return {
+      ...renderParams,
+      ...(cursor != null ? { compactCursorMs: cursor } : {}),
+      ...(blockedUserIds?.size ? { blockedUserIds } : {}),
+    };
   };
 
   const logRendering = (sessionId: string, oldRC: RenderedContext | undefined, newRC: RenderedContext) => {

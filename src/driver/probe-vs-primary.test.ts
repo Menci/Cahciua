@@ -28,6 +28,7 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   },
   systemFiles: [],
   sendTypingAction: false,
+  blockedUserIds: [],
   debounce: { initialDelayMs: 1, typingExtendMs: 1, maxDelayMs: 50 },
   compaction: { maxContextEstTokens: 200000, workingWindowEstTokens: 8000 },
   probe: {

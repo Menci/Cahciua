@@ -178,7 +178,15 @@ const main = async () => {
   const contactNames = loadContacts(logger);
   const renderParams: RenderParams = { botUserId, contactNames };
 
-  const pipeline = createPipeline(renderParams);
+  // Per-chat blocked-user lookup. Built once at startup from current config;
+  // changes require a restart (matches the rendering-layer design — nothing is
+  // dropped at ingress, so restarting with an updated block list immediately
+  // restores or hides messages on the next re-render).
+  const blockedUserIdsByChat = new Map(
+    chatIds.map(id => [id, new Set(resolveChatConfig(config, id).blockedUserIds)] as const),
+  );
+
+  const pipeline = createPipeline(renderParams, chatId => blockedUserIdsByChat.get(chatId));
 
   // Cold-start: replay events per chat to rebuild IC + RC.
   // If a compaction cursor exists, only load events from that point onward —
