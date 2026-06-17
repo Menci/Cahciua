@@ -1,7 +1,7 @@
 import { Format, initLogger, LogLevel, useLogger } from '@guiiai/logg';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('./call-llm', async (importOriginal) => {
+vi.mock('./call-llm', async importOriginal => {
   const actual = await importOriginal<typeof import('./call-llm')>();
   return {
     ...actual,
@@ -96,15 +96,13 @@ const collectUserText = (entries: ConversationEntry[]): string =>
   entries.flatMap(e =>
     e.kind === 'message' && e.role === 'user'
       ? e.parts.flatMap(p => p.kind === 'text' ? [p.text] : [])
-      : [],
-  ).join('\n');
+      : []).join('\n');
 
 const collectAssistantToolCallNames = (entries: ConversationEntry[]): string[] =>
   entries.flatMap(e =>
     e.kind === 'message' && e.role === 'assistant'
       ? e.parts.flatMap(p => p.kind === 'toolCall' ? [p.name] : [])
-      : [],
-  );
+      : []);
 
 describe('probe vs primary view of bot\'s own messages', () => {
   it('probe sees bot xml in chat history; primary sees only the assistant tool call', async () => {
@@ -120,8 +118,8 @@ describe('probe vs primary view of bot\'s own messages', () => {
             callId: 'probe1',
             name: 'decide',
             args: JSON.stringify({
-              should_act: true,
-              reason: 'Alice asked the bot directly. Plausible: (a) react 👀 to acknowledge, (b) reply with a brief comment, (c) search for current info first.',
+              should_act: 'send_message',
+              reason: 'Alice asked the bot directly. Plausible: (a) react 👀 to acknowledge then reply, (b) reply with a brief comment, (c) search for current info first then send the findings.',
             }),
           }],
           reasoning: undefined,
@@ -244,7 +242,7 @@ describe('probe vs primary view of bot\'s own messages', () => {
             kind: 'message', role: 'assistant', reasoning: undefined,
             parts: [{
               kind: 'toolCall', callId: 'p1', name: 'decide',
-              args: JSON.stringify({ should_act: true, reason: 'addressed' }),
+              args: JSON.stringify({ should_act: 'send_message', reason: 'addressed' }),
             }],
           }],
           usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },

@@ -169,18 +169,18 @@ Output: structured plain-text summary, prepended as a synthetic first user messa
 
 ### Probe / activate gate
 
-Mandatory two-step pipeline: every reply turn first runs **probe** (an outside-judge LLM call), and only proceeds to **primary** (the bot itself) when probe judges `should_act = true`.
+Mandatory two-step pipeline: every reply turn first runs **probe** (an outside-judge LLM call), and only proceeds to **primary** (the bot itself) when probe judges `should_act = "send_message"`.
 
 Probe and primary share `prompts/system.velin.md` and `prompts/late-binding.velin.md` via a `mode: 'primary' | 'probe'` prop:
 
-- **Probe mode** frames the model as a third-party judge with knowledge of the bot's identity (systemFiles are relabeled as background on the bot). It receives a single tool, `decide(should_act, reason)`, and the tool call args ARE the probe result. Anything else the model emits is discarded. Reason language is unconstrained.
-- **Primary mode** is the bot in first person. The system prompt opens by stating that an outside evaluator has already judged the bot should act this turn, so primary chooses *which* actions, not *whether* to act. There is no `stay_silent` tool — primary may still skip `send_message` for a turn (e.g. `react` only), but cannot back out via a dedicated silence tool. The primary's `forceToolCall` config still applies and is independent of probe's.
+- **Probe mode** frames the model as a third-party judge with knowledge of the bot's identity (systemFiles are relabeled as background on the bot). It receives a single tool, `decide(should_act, reason)`, and the tool call args ARE the probe result. `should_act` is a string enum: `"send_message"` (the wake-up should happen and the bot MUST end up calling `send_message` at least once) or `"no_action"` (the wake-up should not happen at all — no message, no reaction, no tool call). There is no third "react only" option: a wake-up that would only react and never message maps to `"no_action"`. Anything else the model emits is discarded. Reason language is unconstrained.
+- **Primary mode** is the bot in first person. The system prompt opens by stating an outside evaluator has already judged this wake-up calls for at least one message, and hard-requires that the wake-up end with ≥1 `send_message` call. Other tool calls (`react`, `web_search`, `bash`, …) are free to chain before it across multiple turns — the requirement is on the wake-up as a whole, not each individual turn. There is no `stay_silent` tool. The primary's `forceToolCall` config still applies and is independent of probe's.
 
 Probe is **skipped** when there's a strong de-facto act signal: the bot was mentioned, replied to, or the previous tool loop was interrupted. Runtime events (background task completion) DO go through probe — the judge decides whether the result genuinely warrants surfacing to the chat.
 
-If probe fails to emit a valid `decide` call (e.g. model didn't call the tool despite forceToolCall), the gate fails closed: treated as `should_act = false`, primary does not run.
+If probe fails to emit a valid `decide` call (e.g. model didn't call the tool despite forceToolCall), the gate fails closed: treated as `"no_action"`, primary does not run.
 
-Probe responses are stored in `probe_responses_v2` (dedicated table). The `isActivated` column mirrors `should_act`. The `reason` lives inside the persisted `entries` JSON (the decide tool call's args) — no separate column. Probe responses **never** enter `composeContext` — debug/analysis only.
+Probe responses are stored in `probe_responses_v2` (dedicated table). The `isActivated` column mirrors `should_act === "send_message"`. The `reason` (and the enum value itself) lives inside the persisted `entries` JSON (the decide tool call's args) — no separate column. Probe responses **never** enter `composeContext` — debug/analysis only.
 
 ### Media-to-text transforms
 

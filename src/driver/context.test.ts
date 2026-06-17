@@ -191,10 +191,12 @@ describe('loopEndedWithoutSendMessage', () => {
   // continues to the next step). Models the user's t+80 hypothetical: bot
   // speaks AND queues another action in the same step.
   const sendMsgPlusBashTr = (ts: number): TurnResponseV2 => tr(ts, [
-    { kind: 'message', role: 'assistant', parts: [
-      { kind: 'toolCall', callId: `c${ts}a`, name: 'send_message', args: '{"text":"hi"}' },
-      { kind: 'toolCall', callId: `c${ts}b`, name: 'bash', args: '{"command":"ls","timeout_seconds":5}' },
-    ], reasoning: undefined },
+    {
+      kind: 'message', role: 'assistant', parts: [
+        { kind: 'toolCall', callId: `c${ts}a`, name: 'send_message', args: '{"text":"hi"}' },
+        { kind: 'toolCall', callId: `c${ts}b`, name: 'bash', args: '{"command":"ls","timeout_seconds":5}' },
+      ], reasoning: undefined,
+    },
     { kind: 'toolResult', callId: `c${ts}a`, payload: '{"ok":true}', requiresFollowUp: false },
     { kind: 'toolResult', callId: `c${ts}b`, payload: '{"ok":true}', requiresFollowUp: true },
   ]);

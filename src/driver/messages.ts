@@ -97,9 +97,11 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
       messages: params.messages,
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
       ...(params.forceToolChoice && params.tools && params.tools.length > 0
-        ? { tool_choice: params.forceToolChoice === 'any'
-          ? { type: 'any' as const }
-          : { type: 'tool' as const, name: params.forceToolChoice.name } }
+        ? {
+            tool_choice: params.forceToolChoice === 'any'
+              ? { type: 'any' as const }
+              : { type: 'tool' as const, name: params.forceToolChoice.name },
+          }
         : {}),
       ...(params.extraBody ?? {}),
     };

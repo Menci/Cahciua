@@ -1,8 +1,8 @@
 import MarkdownIt from 'markdown-it';
 // markdown-it-math-loose is a CommonJS plugin without bundled types.
 // @ts-expect-error - no types published
-import MarkdownItMath from 'markdown-it-math-loose';
 import type StateInline from 'markdown-it/lib/rules_inline/state_inline.mjs';
+import MarkdownItMath from 'markdown-it-math-loose';
 
 const md = new MarkdownIt({ linkify: true });
 

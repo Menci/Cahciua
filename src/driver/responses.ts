@@ -48,9 +48,11 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
       ...(params.instructions ? { instructions: params.instructions } : {}),
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
       ...(params.forceToolChoice && params.tools && params.tools.length > 0
-        ? { tool_choice: params.forceToolChoice === 'any'
-          ? 'required'
-          : { type: 'function' as const, name: params.forceToolChoice.name } }
+        ? {
+            tool_choice: params.forceToolChoice === 'any'
+              ? 'required'
+              : { type: 'function' as const, name: params.forceToolChoice.name },
+          }
         : {}),
       ...(params.extraBody ?? {}),
     };

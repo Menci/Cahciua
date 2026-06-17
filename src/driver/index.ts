@@ -357,7 +357,7 @@ export const createDriver = (config: DriverConfig, deps: {
               const decision = extractDecideResult(probeResult.entries);
               // No decide call (model failed to call the only tool) is treated as
               // silence — fail closed rather than activating primary on garbage.
-              const shouldAct = decision?.should_act === true;
+              const shouldAct = decision?.should_act === 'send_message';
 
               log.withFields({ chatId, shouldAct, reason: decision?.reason }).log('Probe result');
 

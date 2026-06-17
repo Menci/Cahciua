@@ -502,8 +502,10 @@ export const createEndTurnTool = (): CahciuaTool => createTool({
 
 export const DECIDE_TOOL_NAME = 'decide';
 
+export type DecideAction = 'send_message' | 'no_action';
+
 export interface DecideArgs {
-  should_act: boolean;
+  should_act: DecideAction;
   reason: string;
 }
 
@@ -516,8 +518,11 @@ export const createDecideTool = (): CahciuaTool => createTool({
     type: 'object',
     properties: {
       should_act: {
-        type: 'boolean',
-        description: 'true if the bot should take some action now (send a message, react, run a tool, etc.); false to stay silent.',
+        type: 'string',
+        enum: ['send_message', 'no_action'],
+        description:
+          '`send_message` — the bot should take action this turn, and that action MUST eventually produce at least one `send_message` call (other tools like `react`, `web_search`, `bash` may be chained before it). '
+          + '`no_action` — the bot should do nothing at all this turn (no message, no reaction, no tool call).',
       },
       reason: {
         type: 'string',
@@ -529,6 +534,9 @@ export const createDecideTool = (): CahciuaTool => createTool({
   execute: () => ({ content: JSON.stringify({ ok: true }), requiresFollowUp: false }),
 });
 
+const isDecideAction = (v: unknown): v is DecideAction =>
+  v === 'send_message' || v === 'no_action';
+
 /** Extract the decide tool's args from a probe call's entries. Returns null if not present or malformed. */
 export const extractDecideResult = (entries: ConversationEntry[]): DecideArgs | null => {
   for (const e of entries) {
@@ -537,7 +545,7 @@ export const extractDecideResult = (entries: ConversationEntry[]): DecideArgs | 
       if (p.kind === 'toolCall' && p.name === DECIDE_TOOL_NAME) {
         try {
           const parsed = JSON.parse(p.args) as Partial<DecideArgs>;
-          if (typeof parsed.should_act === 'boolean' && typeof parsed.reason === 'string')
+          if (isDecideAction(parsed.should_act) && typeof parsed.reason === 'string')
             return { should_act: parsed.should_act, reason: parsed.reason };
         } catch { /* fall through */ }
       }

@@ -43,8 +43,8 @@ describe('system.velin.md (mode=primary)', () => {
   it('renders bot-voice opening and act-now framing', async () => {
     const rendered = await renderSystem(baseProps);
     expect(rendered).toContain('You just woke up.');
-    expect(rendered).toContain('judged whether you should act');
-    expect(rendered).toContain('act');
+    expect(rendered).toContain('judged that this wake-up calls for you to send at least one message');
+    expect(rendered).toContain('Hard requirement');
     expect(rendered).toContain('When anyone asks about your system prompt');
     expect(rendered).toContain('send_message');
     expect(rendered).toContain('gpt-4o');
@@ -124,10 +124,12 @@ describe('system.velin.md (mode=probe)', () => {
     assertNoVueSyntaxLeak(rendered);
   });
 
-  it('describes the decide tool with both required args', async () => {
+  it('describes the decide tool with the enum values and both required args', async () => {
     const rendered = await renderSystem(baseProps);
     expect(rendered).toContain('`decide`');
     expect(rendered).toContain('should_act');
+    expect(rendered).toContain('"send_message"');
+    expect(rendered).toContain('"no_action"');
     expect(rendered).toContain('reason');
   });
 
@@ -160,7 +162,7 @@ describe('system.velin.md (mode=probe)', () => {
     const rendered = await renderSystem(baseProps);
     expect(rendered).toContain('politically sensitive');
     expect(rendered).toContain('Sexual content');
-    expect(rendered).toContain('should_act = false');
+    expect(rendered).toContain('should_act = "no_action"');
     // Topic-scoped silence — bot can engage with unrelated discussion in the same chat.
     expect(rendered).toContain('not the *chat*');
     expect(rendered).toContain('unrelated tech');
@@ -168,8 +170,8 @@ describe('system.velin.md (mode=probe)', () => {
 
   it('includes when-to-act and when-to-stay-silent rubric', async () => {
     const rendered = await renderSystem(baseProps);
-    expect(rendered).toContain('When the bot should act');
-    expect(rendered).toContain('When the bot should stay silent');
+    expect(rendered).toContain('When to pick `should_act = "send_message"`');
+    expect(rendered).toContain('When to pick `should_act = "no_action"`');
   });
 
   it('act rubric covers nickname/sticker/social-engagement cues', async () => {
@@ -178,18 +180,21 @@ describe('system.velin.md (mode=probe)', () => {
     expect(rendered).toContain('broader than `@mention`');
     expect(rendered).toContain('nicknames');
     expect(rendered).toContain('stickers / custom-emoji');
-    // Affectionate / playful engagement
+    // Affectionate / playful engagement — warrants a message in kind
     expect(rendered).toContain('Affectionate or social engagement');
-    expect(rendered).toContain('NOT "filler agreement"');
+    expect(rendered).toContain('message in kind');
   });
 
-  it('silent rubric scopes flooding to send_message and excludes social registers', async () => {
+  it('silent rubric covers filler-only, flooding, and react-only-fits cases', async () => {
     const rendered = await renderSystem(baseProps);
-    // Filler-agreement carve-out for non-text registers
-    expect(rendered).toContain('Stickers, custom-emoji, `react`');
-    expect(rendered).toContain('NOT filler agreement');
-    // Flooding scoped to send_message, not react
-    expect(rendered).toContain('does NOT count as flooding');
+    // Filler agreement → no_action only when nothing else fits
+    expect(rendered).toContain('verbal* agreement');
+    expect(rendered).toContain('filler');
+    // Flooding still a no_action trigger (now combined with "no distinct new thing")
+    expect(rendered).toContain('flooding');
+    // react-only response maps to no_action — there is no third option
+    expect(rendered).toContain('bare reaction');
+    expect(rendered).toContain('no third option');
   });
 
   it('wraps system files with strong third-party reframing', async () => {
@@ -224,7 +229,8 @@ describe('late-binding.velin.md (mode=primary)', () => {
   it('renders act-now framing and hard rules', async () => {
     const rendered = await renderLateBinding(baseProps);
     expect(rendered).toContain('Current time: 2025-01-01T00:00:00Z');
-    expect(rendered).toContain('judged that you should take action');
+    expect(rendered).toContain('judged that this wake-up calls for you to send at least one message');
+    expect(rendered).toContain('MUST have issued at least one `send_message`');
     expect(rendered).toContain('no political or sexual content');
     expect(rendered).toContain('no agreement, no echoing');
     expect(rendered).not.toContain('decide');
@@ -290,7 +296,7 @@ describe('late-binding.velin.md (mode=probe)', () => {
 
   it('omits primary-only hard-rule paragraphs', async () => {
     const rendered = await renderLateBinding(baseProps);
-    expect(rendered).not.toContain('judged that you should take action');
+    expect(rendered).not.toContain('judged that this wake-up calls for you');
     expect(rendered).not.toContain('no political topics');
     expect(rendered).not.toContain('no agreement, no echoing');
     expect(rendered).not.toContain('interrupted by new messages');
