@@ -1,7 +1,32 @@
+import { jsonrepair, JSONRepairError } from 'jsonrepair';
 import { type Sharp } from 'sharp';
 
 import type { ChatCompletionsContentPart, ResponsesInputContent } from './chat-types';
 import type { Extra, ExtraSource, ImagePart, InputPart } from './types';
+
+/**
+ * Normalize a raw tool-call args string coming off the wire. LLMs occasionally
+ * emit malformed JSON (unquoted keys, trailing commas, empty payloads for
+ * no-arg tools). We run it through jsonrepair so the IR always carries a
+ * parseable JSON object — replay back to the LLM then sends the repaired
+ * version. Final fallback to `{}` covers the case where repair itself fails
+ * (e.g. truly empty string for a no-arg tool).
+ */
+export const repairToolArgs = (raw: string): string => {
+  let repaired: string;
+  try {
+    repaired = jsonrepair(raw);
+  } catch (err) {
+    if (err instanceof JSONRepairError) return '{}';
+    throw err;
+  }
+  try {
+    JSON.parse(repaired);
+    return repaired;
+  } catch {
+    return '{}';
+  }
+};
 
 /** Capture `obj` keys outside `coreKeys` into `Extra.fields` so unknown
  *  provider extensions round-trip without being mistaken for modeled fields. */

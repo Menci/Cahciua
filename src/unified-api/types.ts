@@ -10,9 +10,11 @@ import type { Sharp } from 'sharp';
  *   are invalid and rejected at emit time (`assertSystemTextOnly`).
  * - `ToolResult` is a user-side entry — it never appears in `from-*Output`
  *   responses. Historical decoding of stored tool results lives in `migrations.ts`.
- * - `ToolCallPart.args` is the raw wire JSON string. Only the Anthropic emitter
- *   boundary parses it (falling back to `{}` on invalid JSON, since Anthropic's
- *   schema requires an object `input`).
+ * - `ToolCallPart.args` is a JSON string. Wire input runs through
+ *   `repairToolArgs` at the `from-*Output` boundary, so the IR invariant is
+ *   stronger than "raw wire string": args always parses, though it may parse
+ *   to a non-object value. The Anthropic emitter additionally requires an
+ *   object — non-objects fall back to `{}` there.
  * - `Extra<S>` is source-tagged: an emitter applies `extra.fields` only when
  *   `extra.source` matches its own target format; otherwise the fields are
  *   dropped. `Extra` lives on model-output nodes only — never on client-authored
@@ -81,8 +83,9 @@ export interface ToolCallPart {
   kind: 'toolCall';
   callId: string;
   name: string;
-  /** Raw JSON string from the wire. Anthropic input is stringified at the boundary;
-   *  emission back to Anthropic parses and falls back to `{}` on invalid JSON. */
+  /** JSON string, guaranteed parseable (`repairToolArgs` runs at the
+   *  `from-*Output` boundary). May parse to a non-object — Anthropic emission
+   *  enforces the object shape with a `{}` fallback. */
   args: string;
   extra?: Extra;
 }

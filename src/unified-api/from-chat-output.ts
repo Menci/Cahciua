@@ -2,7 +2,7 @@ import type {
   ChatCompletionsAssistantMessage,
   ChatCompletionsContentPart,
 } from './chat-types';
-import { pickExtra } from './shared';
+import { pickExtra, repairToolArgs } from './shared';
 import type {
   ConversationEntry,
   MessageReasoning,
@@ -43,7 +43,7 @@ const assistantToMessage = (entry: ChatCompletionsAssistantMessage): OutputMessa
       kind: 'toolCall',
       callId: tc.id,
       name: tc.function.name,
-      args: tc.function.arguments,
+      args: repairToolArgs(tc.function.arguments),
     };
     const extra = pickExtra('openaiChatCompletion', tc, TOOL_CALL_CORE);
     if (extra !== undefined) part.extra = extra;

@@ -3,7 +3,7 @@ import type {
   ResponsesOutputFunctionCall,
   ResponsesOutputMessage,
 } from './responses-types';
-import { pickExtra } from './shared';
+import { pickExtra, repairToolArgs } from './shared';
 import type {
   ConversationEntry,
   OutputMessage,
@@ -79,7 +79,7 @@ const functionCallToPart = (fc: ResponsesOutputFunctionCall): ToolCallPart => {
     kind: 'toolCall',
     callId: fc.call_id,
     name: fc.name,
-    args: fc.arguments,
+    args: repairToolArgs(fc.arguments),
   };
   const extra = pickExtra('openaiResponses', fc, FUNCTION_CALL_CORE);
   if (extra !== undefined) part.extra = extra;

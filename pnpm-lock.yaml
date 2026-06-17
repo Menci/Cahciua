@@ -52,6 +52,9 @@ importers:
       immer:
         specifier: ^10.1.1
         version: 10.2.0
+      jsonrepair:
+        specifier: ^3.14.0
+        version: 3.14.0
       lottie-frame:
         specifier: ^1.1.0
         version: 1.1.0(patch_hash=a5331038d607898e392a41c32a0d97f8a82daaed70f384a9646cf78f476171f1)
@@ -2318,6 +2321,10 @@ packages:
 
   json5@1.0.2:
     resolution: {integrity: sha512-g1MWMLBiz8FKi1e4w0UyVL3w+iJceWAFBAaBnnGKOpNa5f8TLktkbre1+s6oICydWAm+HRUGTmI+//xv2hvXYA==}
+    hasBin: true
+
+  jsonrepair@3.14.0:
+    resolution: {integrity: sha512-tWPGKMZf/8UPim+fcW2EfcQ/d/7aKUrP6IECz9G3Tu6Q5dX0orSleqJ9z6sSw7qrQkjF8/Edo4DvsWBZ8H+HNg==}
     hasBin: true
 
   keyv@4.5.4:
@@ -5369,6 +5376,8 @@ snapshots:
   json5@1.0.2:
     dependencies:
       minimist: 1.2.8
+
+  jsonrepair@3.14.0: {}
 
   keyv@4.5.4:
     dependencies:
