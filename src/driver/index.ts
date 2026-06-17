@@ -305,21 +305,22 @@ export const createDriver = (config: DriverConfig, deps: {
             tools.push(createSleepTool());
             tools.push(createEndTurnTool());
 
-            // --- Compute mention/reply/interrupt state from RC + TRs ---
-            const rcVal = rcAtStart;
+            // --- Compute interrupt state from TRs ---
             const isInterrupted = wasToolLoopInterrupted(trs);
-            // mention/reply skip the probe — those are de facto "should act" signals.
-            // runtime events (background task completion) DO go through probe; the
-            // judge can decide whether the result genuinely warrants surfacing.
-            const isMentioned = rcVal.some(seg => seg.mentionsMe && seg.receivedAtMs > lastProcessedMs());
-            const isReplied = rcVal.some(seg => seg.repliesToMe && seg.receivedAtMs > lastProcessedMs());
-            const skipProbe = isInterrupted || isMentioned || isReplied;
+            // Only a mid-loop interrupt skips the probe — that means the bot
+            // was already mid-reply and got cut off by new user input, so
+            // re-entering the reply flow is clearly warranted. Everything
+            // else — including @mentions and direct replies — goes through
+            // probe; the judge decides whether the wake-up actually calls
+            // for a message (e.g. an @ that's just ending a discussion does
+            // not).
+            const skipProbe = isInterrupted;
 
             const activeBackgroundTasks = deps.backgroundTask.getActiveTasks(chatId);
             const timeNow = localTimeNow();
             // The probe's reason, when probe gated this primary call. Forwarded
             // to primary's late-binding as advisory context. Stays undefined
-            // when probe was skipped (mention/replied/interrupted).
+            // when probe was skipped (interrupted).
             let probeReason: string | undefined;
 
             // --- Probe gate ---
