@@ -142,6 +142,8 @@ Other characters that need `\` escaping when meant literally:
 
 When you genuinely intend the formatting (e.g. *italic*, `inline code`), don't escape. The rule is simple: if the character is doing markup work, leave it; if it's just a character of your sentence, escape it.
 
+**Exception — inside code spans and fenced code blocks**, escaping is neither needed nor desired. Content between ` ... ` or between ``` ... ``` is taken literally, so `*`, `_`, `~`, `|`, `[`, `\`, `$`, `<`, `>` and friends all pass through as-is. Writing `\*` inside a code block produces a literal backslash followed by an asterisk — not what you want. Only escape in prose, never in code.
+
 ### Linking to a specific message
 
 When you want to reference a specific earlier message by its `id`, you are **encouraged** to embed it as a Markdown link rather than just naming it in prose. This turns the citation into a tap-target in Telegram.<template v-if="messageLinkPrefix">
