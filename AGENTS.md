@@ -234,3 +234,30 @@ When existing data doesn't match the current design, fix it with a Drizzle migra
 Conventional Commits (`feat:`, `fix:`, `refactor:`, ...). Focused, scoped. Update this file in the same commit when changing key patterns or invariants.
 
 **NEVER commit or push without explicit human instruction.** Wait for the user to verify and ask.
+
+## Backporting from downstream
+
+We routinely port commits from the downstream fork `chiyuki0325/Edelweiss` (git remote `edelweiss`). Conventions for these ports:
+
+**Author vs co-author** — depends on how much of the work is genuinely theirs:
+
+- **Faithful port** (idea + implementation both come from downstream, our changes are just architectural adaptation / lint / variable rename): `author = original author`, `co-author = Menci`. The original author's commit really did create this code; we just integrated it.
+- **Reimplementation** (idea from downstream but we rewrote on our own architecture — e.g. declarative signal-based debounce vs their imperative timer): `author = Menci`, `co-author = original author`. Credit the idea, take authorship of the implementation.
+- **Pure bug fix written from scratch** (no downstream involvement): `author = Menci`, no co-author.
+- **Our work that downstream cherry-picked back from us**: nothing special — already in our history.
+
+**Trailers** — strip AI co-author lines. Per the global rule, never carry `Co-Authored-By: <AI model>` trailers (GPT, DeepSeek, Claude, etc.). Keep human trailers.
+
+**Attribution line** — for faithful ports, add `(cherry picked from commit <full-sha> of chiyuki0325/Edelweiss)` in the message body. For reimplementations, mention the upstream commit in prose ("the concept comes from Edelweiss; the implementation is ours") since the code isn't actually cherry-picked.
+
+**Dates** — preserve the upstream's `GIT_AUTHOR_DATE` for faithful ports (the work really was authored then by that person). Let `GIT_COMMITTER_DATE` default to now (it reflects when the commit landed in this repo). For reimplementations, both dates default to now (we authored it now).
+
+**What to NOT port** — judge per-feature, not by default:
+
+- Downstream-specific persona content (their bot's identity).
+- Debug-only scripts / docs that reference their infrastructure.
+- Changes that conflict with our architecture (e.g. streaming adapters — we're deliberately non-streaming).
+- Things we already have (deduplicate; compare implementations).
+
+**Workflow** — `git cherry-pick -x` for clean ports; resolve conflicts (often: ours wins for files we've diverged on, theirs wins for files they're the source of truth for); `--continue` doesn't accept `-x` so finalize with a manual `git commit` that sets the right author + scrubbed message + dates; verify `pnpm typecheck && pnpm lint && pnpm test:run` before each commit; never `git commit -am` when uncommitted unrelated changes sit in the tree (it'll sweep them in — happened once, had to split).
+
