@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isConfiguredChat, selectStartupReplayChatIds } from './startup';
+import { isConfiguredChat, selectStartupReplayChatIds } from './chat-selection';
 
 describe('startup chat selection', () => {
   it('replays only chats that are both known in the DB and configured', () => {
