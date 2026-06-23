@@ -11,17 +11,19 @@ import { setupLogger, useLogger } from './config/logger';
 import { loadContacts } from './contacts';
 import { createDatabase, loadCompaction, loadEvents, loadEventsWithId, loadImageAltTextByHash, loadKnownChatIds, loadLastProbeTime, loadLatestMessageContent, loadMessageAttachments, loadTurnResponses, lookupChatId, messageExists, migrateV1ToV2, persistCompaction, persistEvent, persistImageAltText, persistMessage, persistMessageDelete, persistMessageEdit, persistProbeResponse, persistTurnResponse, runMigrations, updateEventAttachments } from './db';
 import { createDriver } from './driver';
+import type { SendMessageAttachment } from './driver/tools';
 import { createPipeline } from './pipeline';
 import type { PipelineEvent } from './pipeline';
 import type { RenderParams } from './rendering';
 import { isConfiguredChat, selectStartupReplayChatIds } from './startup';
 import { createTelegramManager } from './telegram';
 import { createAnimationToTextResolver } from './telegram/animation-to-text';
+import type { SentMessage } from './telegram/bot';
 import { createCustomEmojiToTextResolver, emojiCacheKey } from './telegram/custom-emoji-to-text';
 import { canExtractFrames, extractFrames } from './telegram/frame-extractor';
 import { computeThumbnailHash, createImageToTextResolver } from './telegram/image-to-text';
 import { renderMarkdownToTelegramHTML } from './telegram/markdown';
-import type { Attachment } from './telegram/message/types';
+import type { Attachment, TelegramMessage } from './telegram/message/types';
 import { resolveTdjson } from './telegram/tdjson';
 import { resolveBotDataDir, resolveUserbotDataDir } from './telegram/tdlib-paths';
 
@@ -264,6 +266,50 @@ const main = async () => {
     }
   };
 
+  // Synthesize a CanonicalMessageEvent for a message we just sent and inject it
+  // into the pipeline immediately. The userbot will deliver the same message
+  // back through ingress shortly; Projection's messageId-keyed dedup keeps
+  // whichever event arrives first and merges `isSelfSent` onto the existing
+  // node. Without this, a probe triggered in the gap between send-success and
+  // userbot-echo would judge the wake-up without seeing the bot's just-sent
+  // reply, leading to spurious activations on conversational closers.
+  const injectSyntheticEvent = (
+    chatId: string,
+    sent: SentMessage,
+    replyToMessageId?: number,
+    attachments?: SendMessageAttachment[],
+  ) => {
+    const info = telegram.bot.botInfo();
+    const syntheticMsg: TelegramMessage = {
+      messageId: sent.messageId,
+      chatId,
+      sender: {
+        id: botUserId,
+        firstName: info?.firstName ?? 'Bot',
+        username: info?.username,
+        isBot: true,
+        isPremium: false,
+      },
+      date: sent.date,
+      text: sent.text,
+      replyToMessageId,
+      attachments: attachments?.map((a): Attachment => ({
+        type: a.type === 'video_note' ? 'video_note' : a.type,
+        fileName: a.file_name,
+      })),
+      source: 'bot',
+      receivedAtMs: Date.now(),
+    };
+    const event = adaptMessage(syntheticMsg);
+    event.isSelfSent = true;
+
+    persistEvent(db, event);
+    if (isConfiguredChat(configuredChatIds, chatId)) {
+      hydrateAltTextFromCache(event);
+      pipeline.pushEvent(chatId, event);
+    }
+  };
+
   // Background task manager — created before driver, wired via lazy ref.
   const driverRef: { handleEvent?: (chatId: string, rc: import('./rendering/types').RenderedContext) => void } = {};
   const backgroundTaskManager = createBackgroundTaskManager({
@@ -298,7 +344,9 @@ const main = async () => {
     sendMessage: async (chatId, text, replyToMessageId, attachments) => {
       // --- Text-only message ---
       if (!attachments || attachments.length === 0) {
-        return await telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined);
+        const sent = await telegram.sendMessage(chatId, text, replyToMessageId ? { replyToMessageId } : undefined);
+        injectSyntheticEvent(chatId, sent, replyToMessageId);
+        return sent;
       }
 
       // --- Message with attachments ---
@@ -312,7 +360,9 @@ const main = async () => {
       if (attachments.length === 1) {
         // Single attachment — use type-specific send method
         const att = attachments[0]!;
-        return await sendSingleMedia(chatId, att.type, buffers[0]!, htmlCaption, replyToMessageId, att.file_name);
+        const sent = await sendSingleMedia(chatId, att.type, buffers[0]!, htmlCaption, replyToMessageId, att.file_name);
+        injectSyntheticEvent(chatId, sent, replyToMessageId, attachments);
+        return sent;
       }
 
       // Multiple attachments — use sendMediaGroup
@@ -328,8 +378,14 @@ const main = async () => {
 
       const sentMessages = await telegram.sendMediaGroup(chatId, media, replyToMessageId ? { replyToMessageId } : undefined);
 
-      // Return the first message's info — the rest will appear in IC via the
-      // ingress source naturally and get filtered by isSelfSent at compose time.
+      // Inject one synthetic event per sent message. Caption rides on the first
+      // (matching how Telegram delivers the album back through ingress); the
+      // rest carry their own attachment slice with no text.
+      sentMessages.forEach((sent, i) => {
+        const slice = [attachments[i]!];
+        injectSyntheticEvent(chatId, sent, replyToMessageId, slice);
+      });
+
       return sentMessages[0]!;
     },
     loadCompaction: chatId => loadCompaction(db, chatId),
