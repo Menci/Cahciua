@@ -1,13 +1,13 @@
 import type { Logger } from '@guiiai/logg';
 import sharp from 'sharp';
 
-import type { CustomEmojiInfo } from './bot';
 import { renderCustomEmojiToTextSystemPrompt } from './custom-emoji-to-text-prompt';
 import { deduplicateFrames, extractFrames } from './frame-extractor';
 import type { ImageAltTextRecord } from './image-to-text';
 import { callDescriptionLlm, createSemaphore } from './llm-description';
-import type { Attachment } from './message';
 import type { LlmEndpoint } from '../llm/types';
+import type { CustomEmojiInfo } from '../telegram/bot';
+import type { Attachment } from '../telegram/message';
 
 const EMOJI_MAX_EDGE = 512;
 

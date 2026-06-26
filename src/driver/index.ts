@@ -14,9 +14,9 @@ import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import { callLlm, type ToolSchema } from '../llm/call';
 import type { LlmEndpoint } from '../llm/types';
+import { renderImageToTextSystemPrompt } from '../media/image-to-text-prompt';
+import { callDescriptionLlm } from '../media/llm-description';
 import type { RenderedContext } from '../rendering/types';
-import { renderImageToTextSystemPrompt } from '../telegram/image-to-text-prompt';
-import { callDescriptionLlm } from '../telegram/llm-description';
 import type { Attachment } from '../telegram/message/types';
 
 /** Format current time in local timezone as ISO 8601 with offset (e.g. 2025-03-13T22:30:00+08:00). */

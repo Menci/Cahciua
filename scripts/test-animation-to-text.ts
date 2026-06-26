@@ -10,8 +10,8 @@ import { useGlobalLogger, useLogger } from '@guiiai/logg';
 import { parse as parseYaml } from 'yaml';
 
 import { httpGetBuffer } from '../src/http';
-import { createAnimationToTextResolver } from '../src/telegram/animation-to-text';
-import { canExtractFrames, extractFrames } from '../src/telegram/frame-extractor';
+import { createAnimationToTextResolver } from '../src/media/animation-to-text';
+import { canExtractFrames, extractFrames } from '../src/media/frame-extractor';
 import type { Attachment } from '../src/telegram/message/types';
 
 const { Bot } = await import('grammy');

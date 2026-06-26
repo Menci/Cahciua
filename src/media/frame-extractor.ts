@@ -8,7 +8,7 @@ import { gunzipSync } from 'node:zlib';
 
 import sharp from 'sharp';
 
-import type { Attachment } from './message';
+import type { Attachment } from '../telegram/message';
 
 const execFileAsync = promisify(execFile);
 

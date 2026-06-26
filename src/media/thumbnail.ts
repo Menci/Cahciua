@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 
-import type { Attachment } from './message';
+import type { Attachment } from '../telegram/message';
 
 // Target ~100 tokens per image under Claude's formula: tokens = ceil(w*h / 750).
 // 100 * 750 = 75,000 max pixels. For a square that's ~274px per side.

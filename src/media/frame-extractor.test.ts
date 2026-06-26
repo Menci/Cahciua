@@ -9,7 +9,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { describe, expect, it } from 'vitest';
 
 import { canExtractFrames, extractFrames } from './frame-extractor';
-import type { Attachment } from './message/types';
+import type { Attachment } from '../telegram/message/types';
 
 const exec = promisify(execFile);
 
