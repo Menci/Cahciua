@@ -163,9 +163,18 @@ const trimStaleNoToolCallTRs = (trs: TurnResponseV2[]): TurnResponseV2[] => {
 const TOOL_RESULT_TRIM_THRESHOLD = 512;
 const TOOL_RESULT_KEEP_RECENT_OVERSIZED = 5;
 
-const trimLongText = (text: string): string =>
-  text.length <= TOOL_RESULT_TRIM_THRESHOLD ? text
-    : `${text.slice(0, 200)}\n... [trimmed ${text.length} chars] ...\n${text.slice(-200)}`;
+const trimLongText = (text: string): string => {
+  if (text.length <= TOOL_RESULT_TRIM_THRESHOLD) return text;
+  let prefix = text.slice(0, 200);
+  // Don't split a surrogate pair — step back if the last char is a high surrogate.
+  if (prefix.length > 0 && (prefix.charCodeAt(prefix.length - 1) & 0xFC00) === 0xD800)
+    prefix = prefix.slice(0, -1);
+  let suffix = text.slice(-200);
+  // Don't start mid-surrogate — step forward if the first char is a low surrogate.
+  if (suffix.length > 0 && (suffix.charCodeAt(0) & 0xFC00) === 0xDC00)
+    suffix = suffix.slice(1);
+  return `${prefix}\n... [trimmed ${text.length} chars] ...\n${suffix}`;
+};
 
 const joinToolResultText = (parts: InputPart[]): string =>
   parts.flatMap(p => p.kind === 'text' ? [p.text] : []).join('\n');
