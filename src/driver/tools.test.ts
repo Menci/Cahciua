@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createReadImageTool, createTool, executeToolCall } from './tools';
+import { createBashTool, createReadImageTool, createTool, executeToolCall } from './tools';
+import type { RuntimeConfig } from '../config/config';
 
 const createTinyPng = async (): Promise<Buffer> => {
   const { default: sharp } = await import('sharp');
@@ -61,6 +62,35 @@ describe('createReadImageTool', () => {
       requiresFollowUp: true,
       content: [{ kind: 'image', detail: 'low' }],
     });
+  });
+});
+
+describe('createBashTool', () => {
+  it('does not split a surrogate pair when truncating output', async () => {
+    const runtime: RuntimeConfig = {
+      shell: [process.execPath, '-e'],
+      writeFile: [],
+      readFile: [],
+      writeFileSizeLimit: 0,
+      readFileSizeLimit: 0,
+    };
+    const tool = createBashTool(runtime, {
+      startTask: vi.fn(),
+      sessionId: 'chat',
+      backgroundThresholdSec: 10,
+    });
+
+    const result = await tool.execute({
+      command: "process.stdout.write('x'.repeat(4095) + '😀')",
+      timeout_seconds: 1,
+    }, { toolCallId: 'call' });
+    const payload = JSON.parse(result.content as string) as {
+      output: string;
+      truncated: boolean;
+    };
+
+    expect(payload.truncated).toBe(true);
+    expect(payload.output.charCodeAt(payload.output.length - 1)).not.toBeGreaterThanOrEqual(0xD800);
   });
 });
 
