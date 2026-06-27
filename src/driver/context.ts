@@ -163,9 +163,26 @@ const trimStaleNoToolCallTRs = (trs: TurnResponseV2[]): TurnResponseV2[] => {
 const TOOL_RESULT_TRIM_THRESHOLD = 512;
 const TOOL_RESULT_KEEP_RECENT_OVERSIZED = 5;
 
-const trimLongText = (text: string): string =>
-  text.length <= TOOL_RESULT_TRIM_THRESHOLD ? text
-    : `${text.slice(0, 200)}\n... [trimmed ${text.length} chars] ...\n${text.slice(-200)}`;
+const safePrefix = (text: string, length: number): string => {
+  const prefix = text.slice(0, length);
+  return (prefix.charCodeAt(prefix.length - 1) & 0xFC00) === 0xD800
+    ? prefix.slice(0, -1)
+    : prefix;
+};
+
+const safeSuffix = (text: string, length: number): string => {
+  const suffix = text.slice(-length);
+  return (suffix.charCodeAt(0) & 0xFC00) === 0xDC00
+    ? suffix.slice(1)
+    : suffix;
+};
+
+const trimLongText = (text: string): string => {
+  if (text.length <= TOOL_RESULT_TRIM_THRESHOLD) return text;
+  const prefix = safePrefix(text, 200);
+  const suffix = safeSuffix(text, 200);
+  return `${prefix}\n... [trimmed ${text.length} chars] ...\n${suffix}`;
+};
 
 const joinToolResultText = (parts: InputPart[]): string =>
   parts.flatMap(p => p.kind === 'text' ? [p.text] : []).join('\n');
@@ -344,7 +361,7 @@ const truncateForProbe = (s: string): string => {
   if (s.length <= PROBE_TOOL_CALL_TRUNCATE) return s;
   const head = Math.floor(PROBE_TOOL_CALL_TRUNCATE * 0.4);
   const tail = Math.floor(PROBE_TOOL_CALL_TRUNCATE * 0.4);
-  return `${s.slice(0, head)}\n... [truncated ${s.length - head - tail} chars] ...\n${s.slice(-tail)}`;
+  return `${safePrefix(s, head)}\n... [truncated ${s.length - head - tail} chars] ...\n${safeSuffix(s, tail)}`;
 };
 
 const formatToolResultPayload = (payload: string | InputPart[]): string => {

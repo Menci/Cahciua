@@ -48,6 +48,20 @@ const longText = (label: string): string => `${label}:${'x'.repeat(1000)}`;
 const getToolResults = (entries: ConversationEntry[]): ToolResult[] =>
   entries.filter((e): e is ToolResult => e.kind === 'toolResult');
 
+const hasLoneSurrogate = (text: string): boolean => {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = text.charCodeAt(i + 1);
+      if (next < 0xDC00 || next > 0xDFFF) return true;
+      i++;
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      return true;
+    }
+  }
+  return false;
+};
+
 describe('composeContext — trimToolResults', () => {
   it('keeps only the last 5 oversized tool results untrimmed', () => {
     const rc: RenderedContext = [textSeg(100, 'hi')];
@@ -88,6 +102,20 @@ describe('composeContext — trimToolResults', () => {
     expect(trimmed).toContain('HEAD');
     expect(trimmed).toContain('TAIL');
     expect(trimmed).toContain('[trimmed');
+  });
+
+  it('does not split surrogate pairs at either trim boundary', () => {
+    const content = `${'x'.repeat(199)}😀${'y'.repeat(400)}😀${'z'.repeat(199)}`;
+    const rc: RenderedContext = [textSeg(100, 'hi')];
+    const trs: TurnResponseV2[] = [
+      tr(200, [assistantToolCall('tc0'), toolResult('tc0', content)]),
+      ...Array.from({ length: 5 }, (_, i) =>
+        tr(300 + i * 100, [assistantToolCall(`tc${i + 1}`), toolResult(`tc${i + 1}`, longText(`r${i + 1}`))])),
+    ];
+
+    const result = composeContext(rc, trs, 100_000, CURRENT_MODEL);
+    const trimmed = getToolResults(result!.entries)[0]!.payload as string;
+    expect(hasLoneSurrogate(trimmed)).toBe(false);
   });
 
   it('preserves assistant entries when trimming older oversized tool results', () => {
