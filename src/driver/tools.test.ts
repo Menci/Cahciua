@@ -67,14 +67,14 @@ describe('createReadImageTool', () => {
 });
 
 describe('createSendMessageTool', () => {
-  it('uses await_response as the follow-up contract', async () => {
+  it('uses still_working as the follow-up contract', async () => {
     const send = vi.fn(async () => ({ messageId: '42' }));
     const tool = createSendMessageTool(send, () => true);
     const properties = (tool.parameters as { properties: Record<string, unknown> }).properties;
 
-    expect(properties).toHaveProperty('await_response');
-    expect(properties).not.toHaveProperty('still_working');
-    await expect(tool.execute({ text: 'working', await_response: true }))
+    expect(properties).toHaveProperty('still_working');
+    expect(properties).not.toHaveProperty('await_response');
+    await expect(tool.execute({ text: 'working', still_working: true }))
       .resolves.toMatchObject({ requiresFollowUp: true });
     await expect(tool.execute({ text: 'done' }))
       .resolves.toMatchObject({ requiresFollowUp: false });

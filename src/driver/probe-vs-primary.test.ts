@@ -126,7 +126,7 @@ describe('probe vs primary view of bot\'s own messages', () => {
         return { entries: out, usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 } };
       }
       // primary: returns a send_message tool call so the runner accepts and
-      // exits (send_message defaults to await_response=false, so there is no follow-up).
+      // exits (send_message defaults to still_working=false, so there is no follow-up).
       const out: ConversationEntry[] = [{
         kind: 'message',
         role: 'assistant',

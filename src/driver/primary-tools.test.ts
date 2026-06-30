@@ -141,7 +141,7 @@ describe('createPrimaryTools', () => {
     const react = findTool(tools, 'react');
 
     expect(sendMessage.parameters).toMatchObject({
-      properties: { await_response: { type: 'boolean' } },
+      properties: { still_working: { type: 'boolean' } },
       required: ['text'],
     });
     await expect(sendMessage.execute(
@@ -156,7 +156,7 @@ describe('createPrimaryTools', () => {
     const text = 'x'.repeat(101);
     const attachments = [{ type: 'photo' as const, path: 'image.png' }];
     await expect(sendMessage.execute(
-      { text, reply_to: '42', await_response: true, attachments },
+      { text, reply_to: '42', still_working: true, attachments },
     )).resolves.toEqual({
       content: JSON.stringify({ ok: true, message_id: '77' }),
       requiresFollowUp: true,

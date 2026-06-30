@@ -225,6 +225,13 @@
 			"when": 1783969270100,
 			"tag": "0031_backfill_sticker_format",
 			"breakpoints": true
+		},
+		{
+			"idx": 32,
+			"version": "6",
+			"when": 1784006862434,
+			"tag": "0032_rename_await_response_to_still_working",
+			"breakpoints": true
 		}
 	]
 }
