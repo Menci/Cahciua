@@ -11,7 +11,7 @@ import type {
   OutputMessage,
 } from '../unified-api/types';
 
-export interface CompactionParams extends LlmCallConfig {
+export interface CompactionParams extends Omit<LlmCallConfig, 'forceToolChoice'> {
   chatId: string;
   rcWindow: RenderedContext;
   trsWindow: TurnResponseV2[];
@@ -47,9 +47,10 @@ export const runCompaction = async (params: CompactionParams): Promise<Compactio
     params.rcWindow, params.trsWindow, COMPACT_MAX_TOKENS,
     params.model, params.existingSummary,
   );
+  if (!ctx) throw new Error('compaction window is empty');
 
   const entries: ConversationEntry[] = [
-    ...(ctx?.entries ?? []),
+    ...ctx.entries,
     { kind: 'message', role: 'user', parts: [{ kind: 'text', text: compactUserInstruction }] } satisfies InputMessage,
   ];
 
@@ -67,10 +68,10 @@ export const runCompaction = async (params: CompactionParams): Promise<Compactio
       maxImagesAllowed: params.maxImagesAllowed,
     });
     summary = extractAssistantText(result.entries);
-    inputTokens = result.usage.inputTokens;
-    outputTokens = result.usage.outputTokens;
-    cacheReadTokens = result.usage.cacheReadTokens;
-    cacheWriteTokens = result.usage.cacheWriteTokens;
+    inputTokens += result.usage.inputTokens;
+    outputTokens += result.usage.outputTokens;
+    cacheReadTokens += result.usage.cacheReadTokens;
+    cacheWriteTokens += result.usage.cacheWriteTokens;
     if (summary) break;
     params.log.withFields({ chatId: params.chatId, attempt, maxRetries: MAX_RETRIES })
       .warn('Compaction LLM returned empty content, retrying');

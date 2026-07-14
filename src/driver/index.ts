@@ -1,8 +1,8 @@
 import type { Logger } from '@guiiai/logg';
 import { computed, effect, signal } from 'alien-signals';
 
-import { runCompaction } from './compaction';
-import { composeContext, composeProbeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
+import { createCompactionController } from './compaction-controller';
+import { composeContext, composeProbeContext, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { createPrimaryTools } from './primary-tools';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
@@ -157,19 +157,17 @@ export const createDriver = (config: DriverConfig, deps: {
       deps.loadCompaction(chatId),
     );
 
-    // Derived values for convenience
-    const cursorMs = computed(() => compactionMeta()?.newCursorMs);
-    const summary = computed(() => compactionMeta()?.summary);
-
-    // --- Auto-apply cursor to pipeline when compaction state changes ---
-    // When compactionMeta updates (from cold start init or compaction completion),
-    // tell the pipeline to re-render RC excluding nodes before the cursor.
-    const disposeCursorEffect = effect(() => {
-      const cursor = cursorMs();
-      if (cursor == null) return;
-      const newRC = deps.setCompactCursor(chatId, cursor);
-      if (newRC) rc(newRC);
+    const compaction = createCompactionController({
+      chatId,
+      chatConfig,
+      context: rc,
+      compactionMeta,
+      loadTurnResponses: deps.loadTurnResponses,
+      persistCompaction: deps.persistCompaction,
+      setCompactCursor: deps.setCompactCursor,
+      log,
     });
+    const { cursorMs, summary } = compaction;
 
     // --- Main LLM reply effect ---
     // Typing-aware debounce: after new external messages arrive, wait
@@ -425,87 +423,11 @@ export const createDriver = (config: DriverConfig, deps: {
       }, Math.max(0, fireAtMs - now));
     });
 
-    // --- Independent compaction effect ---
-    let compactionRunning = false;
-    let compactionTimer: ReturnType<typeof setTimeout> | undefined;
-    let lastCheckedRc: RenderedContext | null = null;
-
-    const disposeCompactionEffect = effect(() => {
-      const rcVal = rc();
-      if (rcVal.length === 0) return;
-
-      if (compactionTimer) { clearTimeout(compactionTimer); compactionTimer = undefined; }
-      if (compactionRunning) return;
-      if (rcVal === lastCheckedRc) return;
-
-      compactionTimer = setTimeout(() => {
-        lastCheckedRc = rc();
-        compactionRunning = true;
-
-        void (async () => {
-          try {
-            const cursor = cursorMs();
-            const sum = summary();
-            const compactEndpoint = chatConfig.compaction.model ?? chatConfig.primary.model;
-
-            const trs = await loadTRs(chatId, cursor);
-            const ctx = composeContext(rc(), trs, chatConfig.compaction.maxContextEstTokens, compactEndpoint.model);
-            if (!ctx) return;
-            if (ctx.rawEstimatedTokens <= chatConfig.compaction.maxContextEstTokens) return;
-
-            const newCursorMs = findWorkingWindowCursor(rc(), trs, chatConfig.compaction.workingWindowEstTokens);
-
-            log.withFields({
-              chatId,
-              oldCursorMs: cursor ?? 0,
-              newCursorMs,
-              rawEstimatedTokens: ctx.rawEstimatedTokens,
-              triggerAt: chatConfig.compaction.maxContextEstTokens,
-              retainBudget: chatConfig.compaction.workingWindowEstTokens,
-            }).log('Triggering compaction');
-
-            const newMeta = await runCompaction({
-              apiBaseUrl: compactEndpoint.apiBaseUrl,
-              apiKey: compactEndpoint.apiKey,
-              model: compactEndpoint.model,
-              apiFormat: compactEndpoint.apiFormat,
-              timeoutSec: compactEndpoint.timeoutSec,
-              extraBody: compactEndpoint.extraBody,
-              chatId,
-              rcWindow: rc().filter(s => s.receivedAtMs >= (cursor ?? 0) && s.receivedAtMs < newCursorMs),
-              trsWindow: trs.filter(t => t.requestedAtMs >= (cursor ?? 0) && t.requestedAtMs < newCursorMs),
-              existingSummary: sum,
-              oldCursorMs: cursor ?? 0,
-              newCursorMs,
-              maxImagesAllowed: compactEndpoint.maxImagesAllowed,
-              log,
-            });
-
-            deps.persistCompaction(chatId, newMeta);
-
-            log.withFields({
-              chatId,
-              newCursorMs,
-              summaryLength: newMeta.summary.length,
-            }).log('Compaction complete');
-
-            compactionMeta(newMeta);
-          } catch (err) {
-            log.withError(err).withFields({ chatId }).error('Compaction failed');
-          } finally {
-            compactionRunning = false;
-          }
-        })();
-      }, 0);
-    });
-
     const cleanup = () => {
       if (timer) clearTimeout(timer);
-      if (compactionTimer) clearTimeout(compactionTimer);
       setDebouncing(false);
-      disposeCursorEffect();
       disposeReplyEffect();
-      disposeCompactionEffect();
+      compaction.dispose();
     };
 
     const entry = { rc, lastTypingMs, cleanup };
