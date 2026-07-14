@@ -144,16 +144,20 @@ try {
   let persisted = 0;
   let services = 0;
   for (const msg of collected) {
-    msg.receivedAtMs = msg.date * 1000;
-    msg.utcOffsetMin = utcOffsetMin;
+    const enriched = {
+      ...msg,
+      receivedAtMs: msg.date * 1000,
+      utcOffsetMin,
+    };
 
-    if (isServiceMessage(msg)) {
-      const ev = adaptServiceEvent(msg);
-      if (ev) { persistEvent(db, ev); services++; }
+    if (isServiceMessage(enriched)) {
+      const ev = adaptServiceEvent(enriched);
+      persistEvent(db, ev);
+      services++;
     } else {
-      persistEvent(db, adaptMessage(msg));
+      persistEvent(db, adaptMessage(enriched));
     }
-    try { persistMessage(db, msg); } catch (err) { logger.withError(err).warn('persistMessage failed'); }
+    try { persistMessage(db, enriched); } catch (err) { logger.withError(err).warn('persistMessage failed'); }
     persisted++;
   }
 

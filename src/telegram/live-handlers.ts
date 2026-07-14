@@ -5,7 +5,7 @@ import type { TelegramEventSink } from './event-sink';
 import type { IngressTelegramMessageDelete } from './ingress-meta';
 import type { TelegramManager } from './manager';
 import { contentToPlainText } from '../adaptation/content';
-import type { CanonicalIMEvent, CanonicalServiceEvent, ContentNode } from '../adaptation/types';
+import type { CanonicalIMEvent, ContentNode } from '../adaptation/types';
 import type { Attachment, TelegramMessage, TelegramMessageEdit } from './message/types';
 
 export interface TelegramMessageStore {
@@ -54,11 +54,7 @@ export const createTelegramLiveHandlers = (deps: {
   const start = (): void => {
     deps.manager.onMessage(message => {
       if (isServiceMessage(message)) {
-        const event = canonicalEvent(message, (): CanonicalServiceEvent => {
-          const adapted = adaptServiceEvent(message);
-          if (!adapted) throw new Error('Service message produced no canonical event');
-          return adapted;
-        });
+        const event = canonicalEvent(message, () => adaptServiceEvent(message));
         deps.logger.withFields({
           source: message.source,
           chatId: message.chatId,

@@ -38,7 +38,6 @@ const downloadFile = async (fileId: string): Promise<Buffer> => {
 
 // Create resolver (no persistence, just test the LLM call)
 const resolver = createAnimationToTextResolver({
-  enabled: true,
   model: { ...model, apiFormat: model.apiFormat ?? 'openai-chat' },
   logger,
   lookupByHash: () => null,
