@@ -24,7 +24,7 @@ const adaptUser = (user: TelegramUser): CanonicalUser => {
   };
 };
 
-const adaptAttachment = ({ type, mimeType, fileName, width, height, duration, thumbnailWebp, animationHash, stickerSetId, stickerSetName }: Attachment): CanonicalAttachment => ({
+const adaptAttachment = ({ type, mimeType, fileName, width, height, duration, thumbnailWebp, animationHash, stickerSetId, stickerSetName, isAnimatedSticker, isVideoSticker }: Attachment): CanonicalAttachment => ({
   type,
   ...mimeType && { mimeType },
   ...fileName && { fileName },
@@ -35,6 +35,9 @@ const adaptAttachment = ({ type, mimeType, fileName, width, height, duration, th
   ...animationHash && { animationHash },
   ...stickerSetId && { stickerSetId },
   ...stickerSetName && { stickerSetName },
+  ...type === 'sticker' && {
+    format: isAnimatedSticker ? 'animated' as const : isVideoSticker ? 'video' as const : 'static' as const,
+  },
 });
 
 const adaptAttachments = (attachments?: Attachment[]): CanonicalAttachment[] => {

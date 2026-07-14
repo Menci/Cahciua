@@ -16,6 +16,7 @@ export interface CanonicalAttachment {
   animationHash?: string;
   stickerSetId?: string;
   stickerSetName?: string;
+  format?: 'static' | 'animated' | 'video';
   altText?: string;
 }
 

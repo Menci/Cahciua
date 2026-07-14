@@ -44,8 +44,9 @@ export const createTelegramPostStartupTasks = (deps: {
           if (attachment.animationHash && deps.hasAltText(attachment.animationHash)) continue;
           if (attachment.type === 'photo') continue;
           const isAnimation = attachment.type === 'animation';
-          const isLikelyAnimatedSticker = attachment.type === 'sticker' && !attachment.thumbnailWebp;
-          if (!isAnimation && !isLikelyAnimatedSticker) continue;
+          const isAnimatedSticker = attachment.type === 'sticker'
+            && (attachment.format === 'animated' || attachment.format === 'video');
+          if (!isAnimation && !isAnimatedSticker) continue;
 
           const caption = contentToPlainText(event.content);
           tasks.push((async () => {
@@ -59,7 +60,8 @@ export const createTelegramPostStartupTasks = (deps: {
 
               const source = {
                 type: attachment.type,
-                isVideoSticker: isLikelyAnimatedSticker,
+                isAnimatedSticker: attachment.format === 'animated',
+                isVideoSticker: attachment.format === 'video',
                 mimeType: attachment.mimeType,
               };
               const result = await extractFrames(buffer, source, maxFrames);

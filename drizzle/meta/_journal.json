@@ -218,6 +218,13 @@
 			"when": 1778524720298,
 			"tag": "0030_probe_should_act_enum",
 			"breakpoints": true
+		},
+		{
+			"idx": 31,
+			"version": "6",
+			"when": 1783969270100,
+			"tag": "0031_backfill_sticker_format",
+			"breakpoints": true
 		}
 	]
 }

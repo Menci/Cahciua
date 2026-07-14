@@ -347,6 +347,13 @@ describe('adaptMessage', () => {
     }]);
   });
 
+  it('persists the sticker format needed by historical media backfill', () => {
+    const event = adaptMessage(baseTelegramMessage({
+      attachments: [{ type: 'sticker', isAnimatedSticker: true }],
+    }));
+    expect(event.attachments).toEqual([{ type: 'sticker', format: 'animated' }]);
+  });
+
   it('preserves ingress timestamps when provided', () => {
     const event = adaptMessage(baseTelegramMessage({
       receivedAtMs: 123456789,
