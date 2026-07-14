@@ -1,8 +1,8 @@
 import type { Logger } from '@guiiai/logg';
 
 import type { CahciuaTool } from './tools';
-import { executeToolCall, extractToolCalls } from './tools';
-import { callLlm, type ForceToolChoice, type LlmCallConfig, type LlmCallResult, type LlmCallUsage, type ToolSchema } from '../llm/call';
+import { executeToolCall, extractToolCalls, toToolSchema } from './tools';
+import { callLlm, type ForceToolChoice, type LlmCallConfig, type LlmCallResult, type LlmCallUsage } from '../llm/call';
 import type {
   ConversationEntry,
   ToolResult,
@@ -30,12 +30,6 @@ interface StepLoopParams {
   checkInterrupt: () => boolean;
   log: Logger;
 }
-
-const toToolSchema = (t: CahciuaTool): ToolSchema => ({
-  name: t.function.name,
-  parameters: t.function.parameters,
-  ...(t.function.description ? { description: t.function.description } : {}),
-});
 
 export const createRunner = (config: RunnerConfig) => {
   const runOneStep = async (

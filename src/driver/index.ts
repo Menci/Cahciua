@@ -5,14 +5,14 @@ import { runCompaction } from './compaction';
 import { composeContext, composeProbeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createEndTurnTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult } from './tools';
+import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createEndTurnTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult, toToolSchema } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
 import { createWebSearcher } from './web-search';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
-import { callLlm, type ToolSchema } from '../llm/call';
+import { callLlm } from '../llm/call';
 import type { LlmEndpoint } from '../llm/types';
 import { renderImageToTextSystemPrompt } from '../media/image-to-text-prompt';
 import { callDescriptionLlm } from '../media/llm-description';
@@ -36,12 +36,6 @@ export type { DriverConfig, ProviderFormat } from './types';
 export type { TurnResponseV2, ProbeResponseV2 } from './types';
 
 const MAX_STEPS = Infinity;
-
-const toToolSchema = (t: CahciuaTool): ToolSchema => ({
-  name: t.function.name,
-  parameters: t.function.parameters,
-  ...(t.function.description ? { description: t.function.description } : {}),
-});
 
 export const createDriver = (config: DriverConfig, deps: {
   loadTurnResponses: (chatId: string, afterMs?: number) => Promise<TurnResponseV2[]>;

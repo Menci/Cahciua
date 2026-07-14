@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createBashTool, createReadImageTool, createTool, executeToolCall } from './tools';
+import { createBashTool, createReadImageTool, createSendMessageTool, executeToolCall } from './tools';
+import { createTool } from './tools/create-tool';
 import type { RuntimeConfig } from '../config/config';
 
 const createTinyPng = async (): Promise<Buffer> => {
@@ -23,10 +24,10 @@ describe('createReadImageTool', () => {
     const readFile = vi.fn(async () => tinyPng);
     const tool = createReadImageTool({ downloadAttachment, readFile, resolveImageToText });
 
-    expect(tool.function.description).toContain('filesystem');
-    expect((tool.function.parameters as any).properties.path).toMatchObject({ type: 'string' });
+    expect(tool.description).toContain('filesystem');
+    expect((tool.parameters as any).properties.path).toMatchObject({ type: 'string' });
 
-    const result = await tool.execute({ file_id: '1:0' }, { toolCallId: 'tc1' });
+    const result = await tool.execute({ file_id: '1:0' });
     expect(downloadAttachment).toHaveBeenCalledWith('1:0');
     expect(resolveImageToText).toHaveBeenCalled();
     expect(result).toEqual({
@@ -41,7 +42,7 @@ describe('createReadImageTool', () => {
       readFile: async () => await createTinyPng(),
     });
 
-    const result = await tool.execute({ file_id: '1:0', path: '/tmp/test.png' }, { toolCallId: 'tc1' });
+    const result = await tool.execute({ file_id: '1:0', path: '/tmp/test.png' });
     expect(result).toEqual({
       content: JSON.stringify({ error: 'Provide exactly one of file_id or path.' }),
       requiresFollowUp: true,
@@ -56,12 +57,27 @@ describe('createReadImageTool', () => {
       readFile,
     });
 
-    const result = await tool.execute({ path: '/tmp/test.png' }, { toolCallId: 'tc1' });
+    const result = await tool.execute({ path: '/tmp/test.png' });
     expect(readFile).toHaveBeenCalledWith('/tmp/test.png');
     expect(result).toMatchObject({
       requiresFollowUp: true,
       content: [{ kind: 'image', detail: 'low' }],
     });
+  });
+});
+
+describe('createSendMessageTool', () => {
+  it('uses await_response as the follow-up contract', async () => {
+    const send = vi.fn(async () => ({ messageId: '42' }));
+    const tool = createSendMessageTool(send, () => true);
+    const properties = (tool.parameters as { properties: Record<string, unknown> }).properties;
+
+    expect(properties).toHaveProperty('await_response');
+    expect(properties).not.toHaveProperty('still_working');
+    await expect(tool.execute({ text: 'working', await_response: true }))
+      .resolves.toMatchObject({ requiresFollowUp: true });
+    await expect(tool.execute({ text: 'done' }))
+      .resolves.toMatchObject({ requiresFollowUp: false });
   });
 });
 
@@ -75,16 +91,16 @@ describe('createBashTool', () => {
       readFileSizeLimit: 0,
     };
     const tool = createBashTool(runtime, {
-      startTask: vi.fn(),
-      sessionId: 'chat',
+      startTask: () => { throw new Error('unexpected background task'); },
+      sessionId: 'test',
       backgroundThresholdSec: 10,
     });
 
     const result = await tool.execute({
       command: "process.stdout.write('x'.repeat(4095) + '😀')",
       timeout_seconds: 1,
-    }, { toolCallId: 'call' });
-    const payload = JSON.parse(result.content as string) as {
+    });
+    const payload = JSON.parse((result as { content: string }).content) as {
       output: string;
       truncated: boolean;
     };
@@ -99,6 +115,7 @@ describe('executeToolCall', () => {
 
   const greetTool = createTool({
     name: 'greet',
+    description: 'Test tool.',
     parameters: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -139,7 +156,8 @@ describe('executeToolCall', () => {
   it('returns error when tool.execute throws', async () => {
     const throwingTool = createTool({
       name: 'greet',
-      parameters: greetTool.function.parameters,
+      description: 'Test tool.',
+      parameters: greetTool.parameters,
       execute: async () => { throw new Error('boom'); },
     });
     const result = await executeToolCall('id1', 'greet', '{"name": "x"}', [throwingTool], log);
