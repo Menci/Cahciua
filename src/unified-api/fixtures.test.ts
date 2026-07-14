@@ -97,7 +97,7 @@ const unhoistToolImages = (entries: unknown[]): unknown[] => {
     for (let j = toolStart; j < toolEnd; j++) {
       const tool = entries[j] as Record<string, unknown>;
       const callId = tool.tool_call_id as string | undefined;
-      const imageParts = (callId !== undefined && hoistByCallId.get(callId)) || [];
+      const imageParts = callId === undefined ? [] : (hoistByCallId.get(callId) ?? []);
       if (imageParts.length === 0) {
         out.push(tool);
         continue;

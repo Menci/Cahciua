@@ -132,6 +132,9 @@ const config: Linter.Config[] = [
       '**/dist/**',
       '**/build/**',
       '**/coverage/**',
+      'data/**',
+      '.tdlib-build/**',
+      'types/**',
       // Root config files (not in tsconfig include)
       'eslint.config.ts',
       'vitest.config.ts',
