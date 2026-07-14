@@ -7,12 +7,16 @@ export interface EventBus<T> {
   emit: (event: T) => void;
 }
 
-export const createEventBus = <T>(name: string, logger: Logger): EventBus<T> => {
+export const createEventBus = <T>(name: string, logger: Logger, propagateErrors = false): EventBus<T> => {
   const handlers: Handler<T>[] = [];
   return {
     on: handler => { handlers.push(handler); },
     emit: event => {
       for (const handler of handlers) {
+        if (propagateErrors) {
+          handler(event);
+          continue;
+        }
         try {
           handler(event);
         } catch (err) {
