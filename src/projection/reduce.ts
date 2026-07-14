@@ -8,16 +8,12 @@ import type {
   CanonicalIMEvent,
   CanonicalMessageEvent,
   CanonicalServiceEvent,
-  CanonicalUser,
 } from '../adaptation/types';
 import type { RuntimeEvent } from '../runtime-event';
 
 export type PipelineEvent = CanonicalIMEvent | RuntimeEvent;
 
 enableMapSet();
-
-const userChanged = (a: CanonicalUser, b: CanonicalUser): boolean =>
-  a.displayName !== b.displayName || (a.username ?? null) !== (b.username ?? null);
 
 const findMessageIndex = (nodes: readonly { type: string; messageId?: string }[], messageId: string): number => {
   for (let i = nodes.length - 1; i >= 0; i--) {
@@ -32,7 +28,7 @@ const REPLY_PREVIEW_MAX = 100;
 const truncate = (text: string, max: number): string => {
   if (text.length <= max) return text;
   let sliced = text.slice(0, max);
-  // Don't split a surrogate pair — step back if the char before cutAt is a high surrogate. (#1)
+  // Preserve UTF-16 surrogate pairs at the truncation boundary.
   if (sliced.length > 0 && (sliced.charCodeAt(sliced.length - 1) & 0xFC00) === 0xD800) {
     sliced = sliced.slice(0, -1);
   }
@@ -40,20 +36,31 @@ const truncate = (text: string, max: number): string => {
 };
 
 const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent) => {
-  // Dedup: skip if a message with the same ID already exists (bypass + userbot race).
-  // Merge isSelfSent from the late-arriving synthetic event into the existing node.
+  // Authoritative userbot echoes update synthetic payloads without moving local order.
   const existingIdx = findMessageIndex(draft.nodes, event.messageId);
   if (existingIdx !== -1) {
-    if (event.isSelfSent)
-      (draft.nodes[existingIdx] as ICMessage).isSelfSent = true;
+    const existing = draft.nodes[existingIdx] as ICMessage;
+    if (event.isSelfSent) existing.isSelfSent = true;
+    if (existing.isSelfSent && !event.isSelfSent) {
+      existing.sender = event.sender;
+      existing.timestampSec = event.timestampSec;
+      existing.utcOffsetMin = event.utcOffsetMin;
+      existing.content = event.content;
+      existing.attachments = event.attachments;
+      existing.replyToMessageId = event.replyToMessageId;
+      existing.replyQuoteContent = event.replyQuoteContent;
+      existing.forwardInfo = event.forwardInfo;
+    }
     return;
   }
 
-  // MetaReducer: detect user rename before appending the message
   if (event.sender) {
     const existing = draft.users.get(event.sender.id);
 
-    if (existing && userChanged(existing.user, event.sender)) {
+    if (existing && (
+      existing.user.displayName !== event.sender.displayName
+      || existing.user.username !== event.sender.username
+    )) {
       const systemEvent: ICSystemEvent = {
         type: 'system_event',
         kind: 'user_renamed',
@@ -97,7 +104,6 @@ const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent)
   if (event.isSelfSent) message.isSelfSent = true;
   draft.nodes.push(message);
 
-  // Update user state
   if (event.sender) {
     const existing = draft.users.get(event.sender.id);
     if (existing) {

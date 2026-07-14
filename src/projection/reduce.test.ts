@@ -84,6 +84,27 @@ describe('reduce', () => {
       expect(userState.messageCount).toBe(2);
     });
 
+    it('replaces synthetic payload with the authoritative echo while preserving isSelfSent', () => {
+      let ic = reduce(createEmptyIC('chat1'), msg({
+        isSelfSent: true,
+        content: [{ type: 'text', text: 'synthetic' }],
+        attachments: [{ type: 'photo' }],
+      }));
+      ic = reduce(ic, msg({
+        receivedAtMs: 2000,
+        content: [{ type: 'bold', children: [{ type: 'text', text: 'authoritative' }] }],
+        attachments: [{ type: 'photo', width: 100, height: 80 }],
+      }));
+
+      expect(ic.nodes).toHaveLength(1);
+      expect(ic.nodes[0]).toMatchObject({
+        isSelfSent: true,
+        receivedAtMs: 1000,
+        content: [{ type: 'bold', children: [{ type: 'text', text: 'authoritative' }] }],
+        attachments: [{ type: 'photo', width: 100, height: 80 }],
+      });
+    });
+
     it('sets replyToMessageId and forwardInfo when present', () => {
       const ic = reduce(createEmptyIC('chat1'), msg({
         replyToMessageId: '99',
