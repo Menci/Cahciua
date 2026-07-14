@@ -3,19 +3,16 @@ import { computed, effect, signal } from 'alien-signals';
 
 import { runCompaction } from './compaction';
 import { composeContext, composeProbeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
+import { createPrimaryTools } from './primary-tools';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createEndTurnTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult, toToolSchema } from './tools';
-import type { CahciuaTool, SendMessageAttachment } from './tools';
+import { createDecideTool, extractDecideResult, toToolSchema } from './tools';
+import type { SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, ProbeResponseV2, TurnResponseV2 } from './types';
-import { createWebFetcher } from './web-fetch';
-import { createWebSearcher } from './web-search';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import { callLlm } from '../llm/call';
 import type { LlmEndpoint } from '../llm/types';
-import { renderImageToTextSystemPrompt } from '../media/image-to-text-prompt';
-import { callDescriptionLlm } from '../media/llm-description';
 import type { RenderedContext } from '../rendering/types';
 import type { Attachment } from '../telegram/message/types';
 
@@ -111,6 +108,20 @@ export const createDriver = (config: DriverConfig, deps: {
 
     // Resolve per-chat config once per scope
     const chatConfig = config.resolveChatConfig(chatId);
+
+    const createTools = () => createPrimaryTools({
+      chatId,
+      chatConfig,
+      runtimeConfig: deps.runtimeConfig,
+      sendMessage: deps.sendMessage,
+      setMessageReaction: deps.setMessageReaction,
+      loadMessageAttachments: deps.loadMessageAttachments,
+      messageExists: deps.messageExists,
+      downloadMessageMedia: deps.downloadMessageMedia,
+      resolveModel: deps.resolveModel,
+      backgroundTask: deps.backgroundTask,
+      log,
+    });
 
     const rc = signal<RenderedContext>([]);
     const lastProcessedMs = signal(0);
@@ -219,85 +230,7 @@ export const createDriver = (config: DriverConfig, deps: {
               estimatedTokens: ctx.estimatedTokens,
             }).log('Triggering LLM call');
 
-            const messageExistsHere = (messageId: number) => deps.messageExists(chatId, messageId);
-
-            const sendMessageTool = createSendMessageTool(async (text, replyTo, attachments) => {
-              log.withFields({
-                chatId,
-                text: text.length > 100 ? `${text.slice(0, 100)}...` : text,
-                replyTo,
-                attachments: attachments?.length ?? 0,
-              }).log('send_message tool called');
-              const sent = await deps.sendMessage(chatId, text, replyTo ? Number(replyTo) : undefined, attachments);
-              return { messageId: String(sent.messageId) };
-            }, messageExistsHere);
-
-            const downloadAttachment = createAttachmentDownloader({
-              chatId,
-              loadMessageAttachments: deps.loadMessageAttachments,
-              downloadMessageMedia: deps.downloadMessageMedia,
-            });
-
-            const tools: CahciuaTool[] = [sendMessageTool, createReactTool((messageId, emoji) => deps.setMessageReaction(chatId, messageId, emoji), messageExistsHere)];
-            tools.push(createBashTool(deps.runtimeConfig, {
-              startTask: deps.backgroundTask.startTask,
-              sessionId: chatId,
-              backgroundThresholdSec: chatConfig.tools.bash.backgroundThresholdSec,
-            }));
-            if (chatConfig.tools.webSearch)
-              tools.push(createWebSearchTool(createWebSearcher(chatConfig.tools.webSearch)));
-            if (chatConfig.tools.webFetch)
-              tools.push(createWebFetchTool(createWebFetcher(chatConfig.tools.webFetch)));
-            tools.push(createDownloadFileTool({
-              downloadAttachment,
-              runtime: deps.runtimeConfig,
-            }));
-            {
-              const readFileCmd = deps.runtimeConfig.readFile;
-              const resolveImageToText = chatConfig.imageToText.enabled && chatConfig.imageToText.model
-                ? async (buffer: Buffer, detail: 'low' | 'high') => {
-                  const maxEdge = detail === 'high' ? 1024 : 512;
-                  const { default: sharp } = await import('sharp');
-                  const resized = await sharp(buffer)
-                    .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true })
-                    .png()
-                    .toBuffer();
-                  const system = await renderImageToTextSystemPrompt({ caption: '', detail });
-                  const model = deps.resolveModel(chatConfig.imageToText.model!);
-                  const result = await callDescriptionLlm({
-                    model, system,
-                    userText: 'Describe this image.',
-                    images: [resized],
-                    log, label: 'read-image',
-                  });
-                  return result.text.trim();
-                }
-                : undefined;
-
-              tools.push(createReadImageTool({
-                downloadAttachment,
-                readFile: async path => {
-                  const { execFile } = await import('node:child_process');
-                  return await new Promise<Buffer>((resolve, reject) => {
-                    const child = execFile(
-                      readFileCmd[0]!,
-                      [...readFileCmd.slice(1), path],
-                      { timeout: 60_000, maxBuffer: deps.runtimeConfig.readFileSizeLimit, encoding: 'buffer' as any },
-                      (error, stdout) => {
-                        if (error) reject(new Error(`Failed to read file: ${error.message}`));
-                        else resolve(stdout as unknown as Buffer);
-                      },
-                    );
-                    child.stdin?.end();
-                  });
-                },
-                resolveImageToText,
-              }));
-            }
-            tools.push(createKillTaskTool(taskId => deps.backgroundTask.killTask(taskId)));
-            tools.push(createReadTaskOutputTool((taskId, offset, limit) => deps.backgroundTask.readTaskOutput(taskId, offset, limit)));
-            tools.push(createSleepTool());
-            tools.push(createEndTurnTool());
+            const tools = createTools();
 
             // --- Compute interrupt state from TRs ---
             const isInterrupted = wasToolLoopInterrupted(trs);
