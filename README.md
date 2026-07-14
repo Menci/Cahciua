@@ -4,44 +4,65 @@
 
 <h1 align="center">Cahciua</h1>
 
-<p align="center">
-  基于 Deterministic Context Pipeline (DCP) 架构的 Telegram 群聊 AI Bot<br>
-  <a href="https://github.com/memohai/Memoh">Memoh</a> 的研究性附属项目
-</p>
+<p align="center">A Telegram group-chat bot built around the Deterministic Context Pipeline.</p>
 
----
+## Architecture
 
-Cahciua 是一个 Telegram 群聊机器人，通过 LLM 自主决定何时参与对话并生成回复。
+Cahciua reconstructs model context from durable inputs rather than maintaining a mutable chat transcript:
 
-## DCP — Deterministic Context Pipeline
+1. Telegram updates are adapted into canonical IM events.
+2. A pure reducer projects events into Intermediate Context.
+3. Rendering serializes Intermediate Context into provider-independent XML segments.
+4. Driver merges those segments with its own stored turn responses and orchestrates LLM/tool calls.
 
-> “如果人生的上下文可以倒带，可否让我用无尽的重载，去编排那个完美的未来？”
+The Driver uses a mandatory probe/primary gate. A small outside-judge call first decides `send_message` or `no_action`; malformed decisions fail closed. Activated primary turns may use tools across multiple steps but must eventually send at least one message.
 
-作为 Cahciua 的核心架构，DCP 是一条纯函数流水线，将平台事件确定性地转化为 LLM 上下文：
+Context compaction runs independently from reply scheduling. It summarizes old raw RC/TR content at a high water mark while retaining a configurable working window. Summaries are append-only and do not enter turn-response storage.
 
-1. **Adaptation** — 将从 IM（Telegram）收到的事件转换为平台无关的（Canonical IM Event）
-2. **Projection** — 纯函数 reducer，将事件流归约为结构化的中间上下文（Intermediate Context）
-3. **Rendering** — 将 Intermediate Context 序列化为分段的、provider 无关的 XML 渲染上下文（Rendered Context）
-4. **Driver** — 有状态的编排层，将 Rendered Context 与历史对话轮次（Turn Responses）按时间线合并，通过监视条件触发副作用来执行 LLM 调用
+Provider calls are non-streaming and support OpenAI Chat Completions, Anthropic Messages, and OpenAI Responses. Internal conversation history uses a provider-independent IR and converts only at the request boundary.
 
-不维护上下文，而是维护上下文的构造过程 —— 任何一部分都可以单独运行测试，甚至用于在备好的数据集上评测与迭代。冷启动重放与实时处理能够产生相同的上下文序列。  
-—— 这就是 *Deterministic* 的含义
+See [docs/dcp-design.md](docs/dcp-design.md) and [AGENTS.md](AGENTS.md).
 
-## 特性
+## Telegram Runtime
 
-- **DCP 四层流水线** — Adaptation → Projection → Rendering → Driver，通过外部事件和历史轮次编排出确定的 LLM 上下文
-- **自主回复决策** — Bot 通过 tool call 决定是否回复，而非被动触发
-- **KV Cache 友好** — append-only 历史、静态 system prompt、基于 epoch 的压缩设计
-- **消息防注入** — XML fencing 隔离用户消息内容，防止 prompt injection
+Both bot and optional userbot use TDLib through `tdl`. The userbot is the exclusive ingress source when enabled because Telegram bot accounts cannot observe complete group history or all updates. The bot always owns outbound sends.
 
-## 开始使用
+Ingress is ordered per chat. Enabled image, animation, and custom-emoji descriptions are blocking transforms: unresolved head events prevent later events from committing. Successful bot sends immediately inject a synthetic self-event so the probe sees the bot's action before userbot echo arrives.
 
-本项目提供了完善的 [`AGENTS.md`](AGENTS.md)，推荐使用 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex](https://openai.com/index/introducing-codex/) 等 coding agent 来调研、理解和使用本项目。
+## Setup
+
+Requirements: Node.js >=22, pnpm, `libpng-dev`, and `librlottie-dev`.
 
 ```bash
-# 克隆项目后，直接在项目目录启动 coding agent 即可
-claude   # Claude Code
-codex    # OpenAI Codex
+pnpm install
+cp config.example.yaml config.yaml
 ```
 
-Coding agent 会自动阅读 `AGENTS.md` 中的架构文档，理解项目结构与设计决策，并协助你完成配置、开发和调试。
+Fill `config.yaml`. To enable full-visibility userbot ingress, set `telegram.userbotEnabled: true`, then run:
+
+```bash
+pnpm login
+```
+
+Then start the bot:
+
+```bash
+pnpm start
+```
+
+Useful checks:
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm test:run
+pnpm build
+```
+
+Configuration is YAML-first. `CONFIG_PATH` may select a different file; `CONTACTS_PATH` may select a contact-name mapping.
+
+## Development
+
+The composition root uses statically imported, factory-only tsyringe registrars. Core services remain closure factories and do not receive the container. Startup explicitly owns replay, activation, and shutdown order.
+
+Do not commit or push generated TDLib types, local databases, sessions, request dumps, or configuration secrets.
