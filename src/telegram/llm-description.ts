@@ -1,8 +1,8 @@
 import type { Logger } from '@guiiai/logg';
 
-import { chatCompletions } from '../driver/chat';
-import { responsesApi } from '../driver/responses';
-import type { LlmEndpoint } from '../driver/types';
+import { chatCompletions } from '../llm/chat';
+import { responsesApi } from '../llm/responses';
+import type { LlmEndpoint } from '../llm/types';
 
 export const createSemaphore = (max: number) => {
   let current = 0;

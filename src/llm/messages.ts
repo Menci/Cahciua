@@ -62,7 +62,6 @@ export interface MessagesApiParams {
   system?: { type: 'text'; text: string; cache_control?: unknown }[];
   messages: MessagesMessage[];
   tools?: AnthropicTool[];
-  maxTokens?: number;
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
@@ -79,7 +78,6 @@ export interface MessagesApiResult {
     cacheReadTokens: number;
     cacheWriteTokens: number;
   };
-  stop_reason: MessagesResponse['stop_reason'];
 }
 
 export const messagesApi = async (params: MessagesApiParams): Promise<MessagesApiResult> => {
@@ -92,7 +90,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
   try {
     const requestBody = {
       model: params.model,
-      max_tokens: params.maxTokens ?? DEFAULT_MAX_TOKENS,
+      max_tokens: DEFAULT_MAX_TOKENS,
       ...(params.system ? { system: params.system } : {}),
       messages: params.messages,
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
@@ -103,7 +101,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
               : { type: 'tool' as const, name: params.forceToolChoice.name },
           }
         : {}),
-      ...(params.extraBody ?? {}),
+      ...params.extraBody,
     };
     params.onRequestBody?.(requestBody);
     const body = JSON.stringify(requestBody);
@@ -159,7 +157,6 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
         cacheReadTokens,
         cacheWriteTokens,
       },
-      stop_reason: json.stop_reason,
     };
   } finally {
     if (timeout) clearTimeout(timeout);

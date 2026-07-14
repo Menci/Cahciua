@@ -1,13 +1,11 @@
-import { writeFileSync } from 'node:fs';
-
 import type { Logger } from '@guiiai/logg';
 
 import { chatCompletions } from './chat';
-import { DUMP_DIR } from './constants';
-import { trimImages } from './context';
+import { trimImages } from './images';
 import { applyAnthropicCachePoints, messagesApi } from './messages';
+import { dumpLlmPayload } from './request-dump';
 import { responsesApi } from './responses';
-import type { ProviderFormat } from './types';
+import type { LlmEndpoint } from './types';
 import {
   fromChatCompletionsOutput,
   fromMessagesOutput,
@@ -17,7 +15,6 @@ import {
   toResponsesInput,
 } from '../unified-api';
 import type { ChatCompletionsAssistantMessage } from '../unified-api/chat-types';
-import type { ResponsesAssistantItem } from '../unified-api/responses-types';
 import type { ConversationEntry } from '../unified-api/types';
 
 /** Force the model to call a tool. `'any'` requires at least one tool call but
@@ -25,13 +22,7 @@ import type { ConversationEntry } from '../unified-api/types';
  * forces exactly that tool — providers reject parallel calls in this mode. */
 export type ForceToolChoice = 'any' | { name: string };
 
-export interface LlmCallConfig {
-  apiBaseUrl: string;
-  apiKey: string;
-  model: string;
-  apiFormat?: ProviderFormat;
-  timeoutSec?: number;
-  extraBody?: Record<string, unknown>;
+export interface LlmCallConfig extends Omit<LlmEndpoint, 'maxImagesAllowed'> {
   forceToolChoice?: ForceToolChoice;
 }
 
@@ -53,21 +44,24 @@ export interface LlmCallResult {
   usage: LlmCallUsage;
 }
 
-const dump = (dumpId: string | undefined, suffix: string, body: unknown) => {
-  if (dumpId) writeFileSync(`${DUMP_DIR}/${dumpId}.${suffix}.json`, JSON.stringify(body, null, 2));
-};
+export interface LlmCallOptions {
+  log: Logger;
+  label: string;
+  dumpId?: string;
+  maxImagesAllowed?: number;
+}
 
 const toResponsesToolSchema = (t: ToolSchema) => ({
   type: 'function' as const,
   name: t.name,
   parameters: t.parameters,
   strict: false,
-  ...(t.description ? { description: t.description } : {}),
+  description: t.description,
 });
 
 const toAnthropicToolSchema = (t: ToolSchema) => ({
   name: t.name,
-  ...(t.description ? { description: t.description } : {}),
+  description: t.description,
   input_schema: t.parameters,
 });
 
@@ -75,27 +69,26 @@ const toChatToolSchema = (t: ToolSchema) => ({
   type: 'function' as const,
   function: {
     name: t.name,
-    ...(t.description ? { description: t.description } : {}),
+    description: t.description,
     parameters: t.parameters,
   },
 });
 
 const optionalTools = <T>(mapped: T[] | undefined): T[] | undefined =>
-  mapped && mapped.length > 0 ? mapped : undefined;
+  mapped === undefined || mapped.length === 0 ? undefined : mapped;
 
 export const callLlm = async (
   config: LlmCallConfig,
   entries: ConversationEntry[],
   system: string,
-  tools?: ToolSchema[],
-  options?: { log: Logger; label: string; dumpId?: string; maxImagesAllowed?: number },
+  tools: ToolSchema[] | undefined,
+  options: LlmCallOptions,
 ): Promise<LlmCallResult> => {
-  const apiFormat: ProviderFormat = config.apiFormat ?? 'openai-chat';
-  const log = options?.log;
-  const label = options?.label ?? '';
+  const apiFormat = config.apiFormat ?? 'openai-chat';
+  const { log, label } = options;
 
   let prepared = entries;
-  if (options?.maxImagesAllowed != null)
+  if (options.maxImagesAllowed != null)
     prepared = trimImages(prepared, options.maxImagesAllowed);
 
   if (apiFormat === 'responses') {
@@ -106,12 +99,12 @@ export const callLlm = async (
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
       extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
-      onRequestBody: body => dump(options?.dumpId, 'request', body),
-      log: log!, label, timeoutSec: config.timeoutSec,
+      onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
+      log, label, timeoutSec: config.timeoutSec,
     });
-    dump(options?.dumpId, 'response', response);
+    dumpLlmPayload(options.dumpId, 'response', response);
 
-    const assistantItems = (response.output as unknown as ResponsesAssistantItem[]).filter(item =>
+    const assistantItems = response.output.filter(item =>
       item.type === 'message' || item.type === 'function_call' || item.type === 'reasoning');
     return {
       entries: fromResponsesOutput(assistantItems),
@@ -129,10 +122,10 @@ export const callLlm = async (
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
       extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
-      onRequestBody: body => dump(options?.dumpId, 'request', body),
-      log: log!, label, timeoutSec: config.timeoutSec,
+      onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
+      log, label, timeoutSec: config.timeoutSec,
     });
-    dump(options?.dumpId, 'response', response);
+    dumpLlmPayload(options.dumpId, 'response', response);
 
     return {
       entries: fromMessagesOutput(response.content),
@@ -140,7 +133,6 @@ export const callLlm = async (
     };
   }
 
-  // openai-chat (default)
   const chatMessages = await toChatCompletionsInput(prepared);
   const wireTools = optionalTools(tools?.map(toChatToolSchema));
 
@@ -148,10 +140,10 @@ export const callLlm = async (
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
     extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
-    onRequestBody: body => dump(options?.dumpId, 'request', body),
-    log: log!, label, timeoutSec: config.timeoutSec,
+    onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
+    log, label, timeoutSec: config.timeoutSec,
   });
-  dump(options?.dumpId, 'response', response);
+  dumpLlmPayload(options.dumpId, 'response', response);
 
   const choice = response.choices[0];
   if (!choice) return { entries: [], usage: response.usage };

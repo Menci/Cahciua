@@ -67,11 +67,13 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
       ],
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
       ...(params.forceToolChoice && params.tools && params.tools.length > 0
-        ? { tool_choice: params.forceToolChoice === 'any'
-          ? 'required'
-          : { type: 'function' as const, function: { name: params.forceToolChoice.name } } }
+        ? {
+            tool_choice: params.forceToolChoice === 'any'
+              ? 'required'
+              : { type: 'function' as const, function: { name: params.forceToolChoice.name } },
+          }
         : {}),
-      ...(params.extraBody ?? {}),
+      ...params.extraBody,
     };
     params.onRequestBody?.(requestBody);
     const body = JSON.stringify(requestBody);

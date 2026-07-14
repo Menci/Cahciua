@@ -1,15 +1,12 @@
 import type { Logger } from '@guiiai/logg';
 
-import { callLlm, type ForceToolChoice, type LlmCallConfig, type LlmCallResult, type LlmCallUsage, type ToolSchema } from './call-llm';
-import { ensureDumpDir } from './constants';
 import type { CahciuaTool } from './tools';
 import { executeToolCall, extractToolCalls } from './tools';
+import { callLlm, type ForceToolChoice, type LlmCallConfig, type LlmCallResult, type LlmCallUsage, type ToolSchema } from '../llm/call';
 import type {
   ConversationEntry,
   ToolResult,
 } from '../unified-api/types';
-
-ensureDumpDir();
 
 // RunnerConfig is the per-endpoint identity used as the runner cache key.
 // Per-call concerns like forceToolChoice live on StepLoopParams so two chats

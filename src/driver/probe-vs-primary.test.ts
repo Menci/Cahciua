@@ -1,18 +1,18 @@
 import { Format, initLogger, LogLevel, useLogger } from '@guiiai/logg';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('./call-llm', async importOriginal => {
-  const actual = await importOriginal<typeof import('./call-llm')>();
+vi.mock('../llm/call', async importOriginal => {
+  const actual = await importOriginal<typeof import('../llm/call')>();
   return {
     ...actual,
     callLlm: vi.fn(),
   };
 });
 
-import { callLlm } from './call-llm';
 import { createDriver } from './index';
 import type { TurnResponseV2 } from './types';
 import type { ResolvedChatConfig } from '../config/config';
+import { callLlm } from '../llm/call';
 import type { RenderedContext } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 

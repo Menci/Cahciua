@@ -1,9 +1,9 @@
 import type { Logger } from '@guiiai/logg';
 
-import { callLlm, type LlmCallConfig } from './call-llm';
 import { composeContext } from './context';
 import { renderCompactionSystemPrompt, renderCompactionUserInstruction } from './prompt';
 import type { CompactionSessionMeta, TurnResponseV2 } from './types';
+import { callLlm, type LlmCallConfig } from '../llm/call';
 import type { RenderedContext } from '../rendering/types';
 import type {
   ConversationEntry,

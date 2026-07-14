@@ -451,56 +451,5 @@ export const injectLateBindingPrompt = (entries: ConversationEntry[], prompt: st
   } satisfies InputMessage);
 };
 
-// --- trimImages: cap total images before sending to LLM ---
-
-const countImages = (entries: ConversationEntry[]): number => {
-  let count = 0;
-  for (const e of entries) {
-    if (e.kind === 'toolResult' && typeof e.payload !== 'string')
-      count += e.payload.filter(p => p.kind === 'image').length;
-    else if (e.kind === 'message')
-      for (const p of e.parts)
-        if (p.kind === 'image') count++;
-  }
-  return count;
-};
-
-export const trimImages = (entries: ConversationEntry[], maxImages: number): ConversationEntry[] => {
-  const total = countImages(entries);
-  if (total <= maxImages) return entries;
-
-  let toDrop = total - maxImages;
-  return entries.map(e => {
-    if (toDrop <= 0) return e;
-
-    if (e.kind === 'message' && e.role !== 'assistant') {
-      const hasImages = e.parts.some(p => p.kind === 'image');
-      if (!hasImages) return e;
-      const newParts: InputPart[] = [];
-      for (const p of e.parts) {
-        if (p.kind === 'image' && toDrop > 0) { toDrop--; continue; }
-        newParts.push(p);
-      }
-      if (newParts.length === 0)
-        newParts.push({ kind: 'text', text: '[image removed]' });
-      return { ...e, parts: newParts };
-    }
-
-    if (e.kind === 'toolResult' && typeof e.payload !== 'string') {
-      const hasImages = e.payload.some(p => p.kind === 'image');
-      if (!hasImages) return e;
-      const newParts: InputPart[] = [];
-      for (const p of e.payload) {
-        if (p.kind === 'image' && toDrop > 0) { toDrop--; continue; }
-        newParts.push(p);
-      }
-      const payload: string | InputPart[] = newParts.length === 0 ? '[image removed]' : newParts;
-      return { ...e, payload };
-    }
-
-    return e;
-  });
-};
-
 // Re-exported for convenience to runner/compaction.
 export type { ConversationEntry, InputMessage, OutputMessage, ToolCallPart, ToolResult };

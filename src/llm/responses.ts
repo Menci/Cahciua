@@ -1,12 +1,26 @@
 import type { Logger } from '@guiiai/logg';
 
-import type {
-  ResponseOutputItem,
-  ResponseOutputMessage,
-  ResponseOutputReasoning,
-  ResponseTool,
-  ResponsesResult,
-} from './responses-types';
+import type { ResponsesAssistantItem } from '../unified-api/responses-types';
+
+interface ResponseTool {
+  type: 'function';
+  name: string;
+  parameters: Record<string, unknown>;
+  strict: boolean;
+  description?: string;
+}
+
+interface ResponsesResult {
+  output: ResponsesAssistantItem[];
+  status: 'completed' | 'failed' | 'incomplete' | 'in_progress';
+  incomplete_details?: { reason: string };
+  error?: { message: string };
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    input_tokens_details?: { cached_tokens: number };
+  };
+}
 
 export interface ResponsesApiParams {
   baseURL: string;
@@ -24,14 +38,13 @@ export interface ResponsesApiParams {
 }
 
 export interface ResponsesApiResult {
-  output: ResponseOutputItem[];
+  output: ResponsesAssistantItem[];
   usage: {
     inputTokens: number;
     outputTokens: number;
     cacheReadTokens: number;
     cacheWriteTokens: number;
   };
-  status: string;
 }
 
 export const responsesApi = async (params: ResponsesApiParams): Promise<ResponsesApiResult> => {
@@ -54,7 +67,7 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
               : { type: 'function' as const, name: params.forceToolChoice.name },
           }
         : {}),
-      ...(params.extraBody ?? {}),
+      ...params.extraBody,
     };
     params.onRequestBody?.(requestBody);
     const body = JSON.stringify(requestBody);
@@ -76,11 +89,15 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
     }
 
     const json = await res.json() as ResponsesResult;
+    if (json.status !== 'completed') {
+      const reason = json.error?.message ?? json.incomplete_details?.reason ?? json.status;
+      throw new Error(`Responses API returned ${json.status}: ${reason}`);
+    }
+    if (!json.usage) throw new Error('Completed Responses API result has no usage');
 
     for (const item of json.output) {
       if (item.type === 'message') {
-        const msg = item as ResponseOutputMessage;
-        for (const block of msg.content) {
+        for (const block of item.content) {
           if (block.type === 'output_text')
             log.withFields({ label, text: block.text }).log('content');
         }
@@ -89,7 +106,7 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
         try { args = JSON.parse(item.arguments); } catch { /* keep raw string */ }
         log.withFields({ label, tool: item.name, args }).log('tool call');
       } else if (item.type === 'reasoning') {
-        const reasoning = (item as ResponseOutputReasoning).summary.map(s => s.text).join('\n');
+        const reasoning = item.summary.map(s => s.text).join('\n');
         if (reasoning) log.withFields({ label, reasoning }).log('reasoning');
       }
     }
@@ -99,12 +116,11 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
       usage: {
         // Responses' input_tokens already includes cache hits; cached_tokens
         // is a breakdown, not an additional bucket. No separate write counter.
-        inputTokens: json.usage?.input_tokens ?? 0,
-        outputTokens: json.usage?.output_tokens ?? 0,
-        cacheReadTokens: json.usage?.input_tokens_details?.cached_tokens ?? 0,
+        inputTokens: json.usage.input_tokens,
+        outputTokens: json.usage.output_tokens,
+        cacheReadTokens: json.usage.input_tokens_details?.cached_tokens ?? 0,
         cacheWriteTokens: 0,
       },
-      status: json.status,
     };
   } finally {
     if (timeout) clearTimeout(timeout);

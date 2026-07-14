@@ -4,7 +4,7 @@ import { renderAnimationToTextSystemPrompt } from './animation-to-text-prompt';
 import { deduplicateFrames } from './frame-extractor';
 import type { ImageAltTextRecord } from './image-to-text';
 import { callDescriptionLlm, createSemaphore } from './llm-description';
-import type { LlmEndpoint } from '../driver/types';
+import type { LlmEndpoint } from '../llm/types';
 
 export interface AnimationToTextResolver {
   resolve(params: {

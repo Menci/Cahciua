@@ -1,18 +1,19 @@
 import type { Logger } from '@guiiai/logg';
 import { computed, effect, signal } from 'alien-signals';
 
-import { callLlm, type ToolSchema } from './call-llm';
 import { runCompaction } from './compaction';
 import { composeContext, composeProbeContext, findWorkingWindowCursor, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
 import { createBashTool, createAttachmentDownloader, createDecideTool, createDownloadFileTool, createEndTurnTool, createKillTaskTool, createReactTool, createReadImageTool, createReadTaskOutputTool, createSendMessageTool, createSleepTool, createWebFetchTool, createWebSearchTool, extractDecideResult } from './tools';
 import type { CahciuaTool, SendMessageAttachment } from './tools';
-import type { CompactionSessionMeta, DriverConfig, LlmEndpoint, ProbeResponseV2, TurnResponseV2 } from './types';
+import type { CompactionSessionMeta, DriverConfig, ProbeResponseV2, TurnResponseV2 } from './types';
 import { createWebFetcher } from './web-fetch';
 import { createWebSearcher } from './web-search';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
+import { callLlm, type ToolSchema } from '../llm/call';
+import type { LlmEndpoint } from '../llm/types';
 import type { RenderedContext } from '../rendering/types';
 import { renderImageToTextSystemPrompt } from '../telegram/image-to-text-prompt';
 import { callDescriptionLlm } from '../telegram/llm-description';

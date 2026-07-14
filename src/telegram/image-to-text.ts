@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import { renderImageToTextSystemPrompt } from './image-to-text-prompt';
 import { callDescriptionLlm, createSemaphore } from './llm-description';
 import type { CanonicalAttachment } from '../adaptation/types';
-import type { LlmEndpoint } from '../driver/types';
+import type { LlmEndpoint } from '../llm/types';
 
 const IMAGE_TO_TEXT_MAX_EDGE = 512;
 
