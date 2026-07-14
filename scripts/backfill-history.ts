@@ -29,9 +29,9 @@ import { Format, initLogger, LogLevel, useLogger } from '@guiiai/logg';
 import * as tdl from 'tdl';
 import type * as Td from 'tdlib-types';
 
-import { adaptMessage, adaptServiceEvent, isServiceMessage } from '../src/adaptation';
 import { loadConfig } from '../src/config/config';
 import { createDatabase, persistEvent, persistMessage, runMigrations } from '../src/db';
+import { adaptMessage, adaptServiceEvent, isServiceMessage } from '../src/telegram/adaptation';
 import { resolveTdjson } from '../src/telegram/tdjson';
 import { resolveUserbotDataDir } from '../src/telegram/tdlib-paths';
 import { createUserbotClient } from '../src/telegram/userbot';

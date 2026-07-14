@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 
 import * as tdl from 'tdl';
 
-import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, contentToPlainText, isServiceMessage } from './adaptation';
+import { contentToPlainText } from './adaptation';
 import type { ContentNode } from './adaptation/types';
 import { createBackgroundTaskManager } from './background-task';
 import { shellTaskFactory } from './background-task/shell';
@@ -21,6 +21,7 @@ import type { PipelineEvent } from './pipeline';
 import type { RenderParams } from './rendering';
 import { isConfiguredChat, selectStartupReplayChatIds } from './startup';
 import { createTelegramManager } from './telegram';
+import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, isServiceMessage } from './telegram/adaptation';
 import type { SentMessage } from './telegram/bot';
 import { renderMarkdownToTelegramHTML } from './telegram/markdown';
 import type { Attachment, TelegramMessage } from './telegram/message/types';
