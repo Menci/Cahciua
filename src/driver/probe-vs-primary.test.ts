@@ -127,7 +127,7 @@ describe('probe vs primary view of bot\'s own messages', () => {
         return { entries: out, usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 } };
       }
       // primary: returns a send_message tool call so the runner accepts and
-      // exits (send_message default await_response=false → no follow-up).
+      // exits (send_message defaults to await_response=false, so there is no follow-up).
       const out: ConversationEntry[] = [{
         kind: 'message',
         role: 'assistant',
@@ -153,16 +153,18 @@ describe('probe vs primary view of bot\'s own messages', () => {
         persistProbeResponse: async () => {},
         sendMessage: async () => ({ messageId: 999, date: 0 }),
         setMessageReaction: async () => {},
+        sendTypingAction: async () => {},
+        onDebounceStateChange: () => {},
         loadCompaction: () => null,
         loadLastProbeTime: () => 0,
         persistCompaction: () => {},
-        setCompactCursor: () => undefined,
+        setCompactCursor: () => [],
         getChatTitle: () => 'Test',
         runtimeConfig: { shell: ['/bin/bash', '-c'], writeFile: ['cat'], readFile: ['cat'], writeFileSizeLimit: 1024, readFileSizeLimit: 1024 },
         loadMessageAttachments: () => undefined,
         messageExists: () => true,
         downloadMessageMedia: async () => undefined,
-        resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock' }),
+        resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock', apiFormat: 'openai-chat' }),
         backgroundTask: {
           startTask: () => 0,
           killTask: () => ({ ok: true }),
@@ -285,16 +287,18 @@ describe('probe vs primary view of bot\'s own messages', () => {
         persistProbeResponse: async () => {},
         sendMessage: async (_chatId, text) => { sendMessageCalls.push({ text }); return { messageId: 999, date: 0 }; },
         setMessageReaction: async () => {},
+        sendTypingAction: async () => {},
+        onDebounceStateChange: () => {},
         loadCompaction: () => null,
         loadLastProbeTime: () => 0,
         persistCompaction: () => {},
-        setCompactCursor: () => undefined,
+        setCompactCursor: () => [],
         getChatTitle: () => 'Test',
         runtimeConfig: { shell: ['/bin/bash', '-c'], writeFile: ['cat'], readFile: ['cat'], writeFileSizeLimit: 1024, readFileSizeLimit: 1024 },
         loadMessageAttachments: () => undefined,
         messageExists: () => true,
         downloadMessageMedia: async () => undefined,
-        resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock' }),
+        resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock', apiFormat: 'openai-chat' }),
         backgroundTask: {
           startTask: () => 0,
           killTask: () => ({ ok: true }),

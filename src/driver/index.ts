@@ -1,38 +1,24 @@
 import type { Logger } from '@guiiai/logg';
-import { computed, effect, signal } from 'alien-signals';
+import { signal } from 'alien-signals';
 
 import { createCompactionController } from './compaction-controller';
-import { composeContext, composeProbeContext, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, triggerSenderLatestMs, wasToolLoopInterrupted } from './context';
+import { wasToolLoopInterrupted } from './context';
 import { createPrimaryTools } from './primary-tools';
-import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import { createRunner } from './runner';
-import { createDecideTool, extractDecideResult, toToolSchema } from './tools';
+import { createReplyScheduler } from './scheduler';
 import type { SendMessageAttachment } from './tools';
 import type { CompactionSessionMeta, DriverConfig, ProbeResponseV2, TurnResponseV2 } from './types';
+import { executeWakeup } from './wakeup';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
-import { callLlm } from '../llm/call';
 import type { LlmEndpoint } from '../llm/types';
 import type { RenderedContext } from '../rendering/types';
 import type { Attachment } from '../telegram/message/types';
 
-/** Format current time in local timezone as ISO 8601 with offset (e.g. 2025-03-13T22:30:00+08:00). */
-const localTimeNow = (): string => {
-  const now = new Date();
-  const off = -now.getTimezoneOffset();
-  const sign = off >= 0 ? '+' : '-';
-  const pad = (n: number) => String(Math.abs(n)).padStart(2, '0');
-  const tz = `${sign}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
-  const iso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
-  return `${iso}${tz}`;
-};
-
 export { mergeContext } from './merge';
 export { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
-export type { DriverConfig, ProviderFormat } from './types';
+export type { DriverConfig } from './types';
 export type { TurnResponseV2, ProbeResponseV2 } from './types';
-
-const MAX_STEPS = Infinity;
 
 export const createDriver = (config: DriverConfig, deps: {
   loadTurnResponses: (chatId: string, afterMs?: number) => Promise<TurnResponseV2[]>;
@@ -40,14 +26,14 @@ export const createDriver = (config: DriverConfig, deps: {
   persistProbeResponse: (chatId: string, probe: ProbeResponseV2) => Promise<void>;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number, attachments?: SendMessageAttachment[]) => Promise<{ messageId: number; date: number }>;
   setMessageReaction: (chatId: string, messageId: number, emoji: string | undefined) => Promise<void>;
-  sendTypingAction?: (chatId: string) => Promise<void>;
+  sendTypingAction: (chatId: string) => Promise<void>;
   // Called when a chat enters (true) / leaves (false) its debounce window, so the
   // host can run an active typing poll for large supergroups only while waiting.
-  onDebounceStateChange?: (chatId: string, isDebouncing: boolean) => void;
+  onDebounceStateChange: (chatId: string, isDebouncing: boolean) => void;
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
   loadLastProbeTime: (chatId: string) => number;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
-  setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
+  setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext;
   getChatTitle: (chatId: string) => string | undefined;
   runtimeConfig: RuntimeConfig;
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
@@ -66,29 +52,6 @@ export const createDriver = (config: DriverConfig, deps: {
   const log = logger.withContext('driver');
   const chatIds = new Set(config.chatIds);
 
-  // Runner cache: keyed by "apiBaseUrl::model" to reuse runners across chats
-  // sharing the same endpoint.
-  const runners = new Map<string, ReturnType<typeof createRunner>>();
-  const getOrCreateRunner = (endpoint: LlmEndpoint) => {
-    const key = `${endpoint.apiBaseUrl}::${endpoint.model}`;
-    let runner = runners.get(key);
-    if (!runner) {
-      runner = createRunner({
-        apiBaseUrl: endpoint.apiBaseUrl,
-        apiKey: endpoint.apiKey,
-        model: endpoint.model,
-        apiFormat: endpoint.apiFormat ?? 'openai-chat',
-        timeoutSec: endpoint.timeoutSec,
-        extraBody: endpoint.extraBody,
-      });
-      runners.set(key, runner);
-    }
-    return runner;
-  };
-
-  const loadTRs = (chatId: string, afterMs?: number): Promise<TurnResponseV2[]> =>
-    deps.loadTurnResponses(chatId, afterMs);
-
   const getLastProcessedTime = async (chatId: string): Promise<number> => {
     const trs = await deps.loadTurnResponses(chatId);
     const lastTr = trs.length > 0 ? trs[trs.length - 1]!.requestedAtMs : 0;
@@ -98,7 +61,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
   const chatScopes = new Map<string, {
     rc: ReturnType<typeof signal<RenderedContext>>;
-    lastTypingMs: ReturnType<typeof signal<number>>;
+    notifyTyping: () => void;
     cleanup: () => void;
   }>();
 
@@ -106,53 +69,16 @@ export const createDriver = (config: DriverConfig, deps: {
     const existing = chatScopes.get(chatId);
     if (existing) return existing;
 
-    // Resolve per-chat config once per scope
     const chatConfig = config.resolveChatConfig(chatId);
-
-    const createTools = () => createPrimaryTools({
-      chatId,
-      chatConfig,
-      runtimeConfig: deps.runtimeConfig,
-      sendMessage: deps.sendMessage,
-      setMessageReaction: deps.setMessageReaction,
-      loadMessageAttachments: deps.loadMessageAttachments,
-      messageExists: deps.messageExists,
-      downloadMessageMedia: deps.downloadMessageMedia,
-      resolveModel: deps.resolveModel,
-      backgroundTask: deps.backgroundTask,
-      log,
-    });
 
     const rc = signal<RenderedContext>([]);
     const lastProcessedMs = signal(0);
-    // Mirrors wasToolLoopInterrupted(latest persisted TR). When true, the reply
-    // effect should fire even without new external events to drive the loop
-    // forward (e.g. sleep / requiresFollowUp tool result waiting for the next
-    // step). Initialized async on cold start, updated at the end of each cycle.
+    // A persisted requiresFollowUp result keeps the wake-up eligible after restart.
     const lastTRInterrupted = signal(false);
     void getLastProcessedTime(chatId).then(v => lastProcessedMs(Math.max(lastProcessedMs(), v)));
-    void loadTRs(chatId).then(trs => lastTRInterrupted(wasToolLoopInterrupted(trs)));
-    const running = signal(false);
+    void deps.loadTurnResponses(chatId).then(trs => lastTRInterrupted(wasToolLoopInterrupted(trs)));
     const failedRc = signal<RenderedContext | null>(null);
-    // Typing signal: written by handleTyping when another user is typing. The reply
-    // effect reads it declaratively to extend the debounce window.
-    const lastTypingMs = signal(0);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    // Start of the current debounce window — caps total wait at maxDelayMs.
-    let debounceWindowStartMs: number | undefined;
-    // Whether we're currently in a debounce window — drives the typing-poll
-    // lifecycle. Notify the host only on transitions.
-    let isDebouncing = false;
-    const setDebouncing = (v: boolean) => {
-      if (isDebouncing === v) return;
-      isDebouncing = v;
-      deps.onDebounceStateChange?.(chatId, v);
-    };
 
-    // --- Compaction state as signal ---
-    // Initialized from DB on scope creation (cold start). Updated by the
-    // compaction effect when it completes. Read by the reply effect to
-    // get cursor + summary. No runtime DB queries.
     const compactionMeta = signal<CompactionSessionMeta | null>(
       deps.loadCompaction(chatId),
     );
@@ -168,269 +94,78 @@ export const createDriver = (config: DriverConfig, deps: {
       log,
     });
     const { cursorMs, summary } = compaction;
-
-    // --- Main LLM reply effect ---
-    // Typing-aware debounce: after new external messages arrive, wait
-    // `initialDelayMs` past the latest message from the *trigger sender* (the one
-    // whose message opened the window) before replying, so a burst from that
-    // person is answered once. Only the trigger sender's further messages extend
-    // the wait; other people talking does not. Anyone typing extends the wait by
-    // `typingExtendMs`; total wait is capped at `maxDelayMs` from when the window
-    // opened. Everything is signal-driven — new messages (rc) and typing
-    // (lastTypingMs) re-run the effect, which recomputes the deadline. The
-    // `running` signal still serializes calls, so messages arriving mid-call
-    // accumulate and are picked up on the next window.
-    const { initialDelayMs, typingExtendMs, maxDelayMs } = chatConfig.debounce;
-
-    const needsReply = computed(() => {
-      const rcVal = rc();
-      if (rcVal.length === 0) return false;
-      if (rcVal === failedRc()) return false;
-      if (lastTRInterrupted()) return true;
-      return latestExternalEventMs(rcVal, lastProcessedMs()) != null;
+    const runner = createRunner({
+      apiBaseUrl: chatConfig.primary.model.apiBaseUrl,
+      apiKey: chatConfig.primary.model.apiKey,
+      model: chatConfig.primary.model.model,
+      apiFormat: chatConfig.primary.model.apiFormat,
+      timeoutSec: chatConfig.primary.model.timeoutSec,
+      extraBody: chatConfig.primary.model.extraBody,
     });
 
-    const disposeReplyEffect = effect(() => {
-      const isRunning = running();
-      const typingAt = lastTypingMs();
-      if (timer) { clearTimeout(timer); timer = undefined; }
-      if (isRunning || !needsReply()) { debounceWindowStartMs = undefined; setDebouncing(false); return; }
+    const createTools = () => createPrimaryTools({
+      chatId,
+      chatConfig,
+      runtimeConfig: deps.runtimeConfig,
+      sendMessage: deps.sendMessage,
+      setMessageReaction: deps.setMessageReaction,
+      loadMessageAttachments: deps.loadMessageAttachments,
+      messageExists: deps.messageExists,
+      downloadMessageMedia: deps.downloadMessageMedia,
+      resolveModel: deps.resolveModel,
+      backgroundTask: deps.backgroundTask,
+      log,
+    });
 
-      const now = Date.now();
-      debounceWindowStartMs ??= now;
-      setDebouncing(true);
-
-      const lastMsgMs = triggerSenderLatestMs(rc(), lastProcessedMs()) ?? now;
-      let fireAtMs = lastMsgMs + initialDelayMs;
-      if (typingAt > 0) fireAtMs = Math.max(fireAtMs, typingAt + typingExtendMs);
-      fireAtMs = Math.min(fireAtMs, debounceWindowStartMs + maxDelayMs);
-
-      timer = setTimeout(() => {
-        timer = undefined;
-        debounceWindowStartMs = undefined;
-        setDebouncing(false);
-        const rcAtStart = rc();
-        running(true);
-
-        void (async () => {
+    const scheduler = createReplyScheduler({
+      chatId,
+      debounce: chatConfig.debounce,
+      context: rc,
+      lastProcessedMs,
+      lastTurnInterrupted: lastTRInterrupted,
+      failedContext: failedRc,
+      onDebounceStateChange: deps.onDebounceStateChange,
+      execute: async contextAtStart => {
+        try {
+          await executeWakeup({
+            chatId,
+            chatConfig,
+            contextAtStart,
+            currentContext: rc,
+            cursorMs: cursorMs(),
+            summary: summary(),
+            loadTurnResponses: deps.loadTurnResponses,
+            persistTurnResponse: deps.persistTurnResponse,
+            persistProbeResponse: deps.persistProbeResponse,
+            getChatTitle: deps.getChatTitle,
+            getActiveBackgroundTasks: deps.backgroundTask.getActiveTasks,
+            sendTypingAction: deps.sendTypingAction,
+            createTools,
+            runner,
+            getLastProcessedMs: lastProcessedMs,
+            setLastProcessedMs: lastProcessedMs,
+            log,
+          });
+        } catch (error) {
+          log.withError(error).withFields({ chatId }).error('LLM call failed');
+          failedRc(contextAtStart);
+        } finally {
           try {
-            // Read compaction state from signal — no DB query.
-            const cursor = cursorMs();
-            const sum = summary();
-
-            const trs = await loadTRs(chatId, cursor);
-            const ctx = composeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, chatConfig.primary.model.model, sum);
-            if (!ctx) return;
-
-            log.withFields({
-              chatId,
-              entries: ctx.entries.length,
-              estimatedTokens: ctx.estimatedTokens,
-            }).log('Triggering LLM call');
-
-            const tools = createTools();
-
-            // --- Compute interrupt state from TRs ---
-            const isInterrupted = wasToolLoopInterrupted(trs);
-            // Only a mid-loop interrupt skips the probe — that means the bot
-            // was already mid-reply and got cut off by new user input, so
-            // re-entering the reply flow is clearly warranted. Everything
-            // else — including @mentions and direct replies — goes through
-            // probe; the judge decides whether the wake-up actually calls
-            // for a message (e.g. an @ that's just ending a discussion does
-            // not).
-            const skipProbe = isInterrupted;
-
-            const activeBackgroundTasks = deps.backgroundTask.getActiveTasks(chatId);
-            const timeNow = localTimeNow();
-            // The probe's reason, when probe gated this primary call. Forwarded
-            // to primary's late-binding as advisory context. Stays undefined
-            // when probe was skipped (interrupted).
-            let probeReason: string | undefined;
-
-            // --- Probe gate ---
-            if (!skipProbe) {
-              log.withFields({ chatId, lastProcessedMs: lastProcessedMs() }).log('Running probe');
-
-              const probeCtx = composeProbeContext(rcAtStart, trs, chatConfig.compaction.maxContextEstTokens, sum);
-              if (!probeCtx) return;
-
-              const probeSystem = await renderSystemPrompt({
-                mode: 'probe',
-                currentChannel: 'telegram',
-                modelName: chatConfig.probe.model.model,
-                chatId,
-                chatTitle: deps.getChatTitle(chatId),
-                systemFiles: chatConfig.systemFiles,
-              });
-
-              const probeEntries = [...probeCtx.entries];
-              injectLateBindingPrompt(probeEntries, await renderLateBindingPrompt({
-                mode: 'probe',
-                timeNow,
-                activeBackgroundTasks,
-              }));
-
-              const decideTool = createDecideTool();
-              const probeRequestedAt = Date.now();
-              const probeResult = await callLlm(
-                { ...chatConfig.probe.model, forceToolChoice: { name: 'decide' } },
-                probeEntries, probeSystem,
-                [decideTool].map(toToolSchema),
-                { log, label: `probe:${chatId}`, dumpId: `${chatId}.probe`, maxImagesAllowed: chatConfig.probe.model.maxImagesAllowed },
-              );
-
-              const decision = extractDecideResult(probeResult.entries);
-              // No decide call (model failed to call the only tool) is treated as
-              // silence — fail closed rather than activating primary on garbage.
-              const shouldAct = decision?.should_act === 'send_message';
-
-              log.withFields({ chatId, shouldAct, reason: decision?.reason }).log('Probe result');
-
-              await deps.persistProbeResponse(chatId, {
-                requestedAtMs: probeRequestedAt,
-                entries: probeResult.entries,
-                inputTokens: probeResult.usage.inputTokens,
-                outputTokens: probeResult.usage.outputTokens,
-                cacheReadTokens: probeResult.usage.cacheReadTokens,
-                cacheWriteTokens: probeResult.usage.cacheWriteTokens,
-                modelName: chatConfig.probe.model.model,
-                isActivated: shouldAct,
-                createdAt: Date.now(),
-              });
-
-              lastProcessedMs(probeRequestedAt);
-
-              if (!shouldAct) return;
-              probeReason = decision?.reason;
-            }
-
-            // We are committed to running primary now (probe passed, or was
-            // skipped due to a de-facto act trigger). Start the "typing…"
-            // action here — it covers the prep render + runStepLoop + the
-            // optional fallback round. Refreshed every 5s since Telegram
-            // clears the indicator after ~5s. Best-effort.
-            let typingInterval: ReturnType<typeof setInterval> | undefined;
-            if (deps.sendTypingAction && chatConfig.sendTypingAction) {
-              void deps.sendTypingAction(chatId).catch(() => {});
-              typingInterval = setInterval(() => {
-                void deps.sendTypingAction!(chatId).catch(() => {});
-              }, 5000);
-            }
-
-            try {
-              const system = await renderSystemPrompt({
-                mode: 'primary',
-                currentChannel: 'telegram',
-                modelName: chatConfig.primary.model.model,
-                chatId,
-                chatTitle: deps.getChatTitle(chatId),
-                systemFiles: chatConfig.systemFiles,
-              });
-
-              injectLateBindingPrompt(ctx.entries, await renderLateBindingPrompt({
-                mode: 'primary',
-                timeNow,
-                isInterrupted,
-                activeBackgroundTasks,
-                ...(probeReason ? { probeReason } : {}),
-              }));
-
-              const primaryTools = tools;
-
-              const runner = getOrCreateRunner(chatConfig.primary.model);
-
-              await runner.runStepLoop({
-                chatId,
-                entries: ctx.entries,
-                system,
-                tools: primaryTools,
-                maxSteps: MAX_STEPS,
-                maxImagesAllowed: chatConfig.primary.model.maxImagesAllowed,
-                forceToolChoice: 'any',
-                onStepComplete: async (stepEntries, usage, requestedAtMs) => {
-                  await deps.persistTurnResponse(chatId, {
-                    requestedAtMs,
-                    entries: stepEntries,
-                    inputTokens: usage.inputTokens,
-                    outputTokens: usage.outputTokens,
-                    cacheReadTokens: usage.cacheReadTokens,
-                    cacheWriteTokens: usage.cacheWriteTokens,
-                    modelName: chatConfig.primary.model.model,
-                  });
-                  lastProcessedMs(requestedAtMs);
-                },
-                checkInterrupt: () => {
-                  if (rc() === rcAtStart) return false;
-                  return latestExternalEventMs(rc(), lastProcessedMs()) != null;
-                },
-                log,
-              });
-
-              // Fallback: if this ReAct loop ended via end_turn but never
-              // emitted a send_message, run one forced send_message step.
-              // The bot is not told this is happening — same prompt, same
-              // entries; only tool_choice differs at the API boundary.
-              const latestTRs = await loadTRs(chatId, cursor);
-              if (loopEndedWithoutSendMessage(latestTRs)) {
-                log.withFields({ chatId }).log('Loop ended without send_message — running forced fallback');
-                await runner.runStepLoop({
-                  chatId,
-                  entries: ctx.entries,
-                  system,
-                  tools: primaryTools,
-                  maxSteps: 1,
-                  maxImagesAllowed: chatConfig.primary.model.maxImagesAllowed,
-                  forceToolChoice: { name: 'send_message' },
-                  onStepComplete: async (stepEntries, usage, requestedAtMs) => {
-                    await deps.persistTurnResponse(chatId, {
-                      requestedAtMs,
-                      entries: stepEntries,
-                      inputTokens: usage.inputTokens,
-                      outputTokens: usage.outputTokens,
-                      cacheReadTokens: usage.cacheReadTokens,
-                      cacheWriteTokens: usage.cacheWriteTokens,
-                      modelName: chatConfig.primary.model.model,
-                    });
-                    lastProcessedMs(requestedAtMs);
-                  },
-                  checkInterrupt: () => false,
-                  log,
-                });
-              }
-            } finally {
-              if (typingInterval) clearInterval(typingInterval);
-            }
-          } catch (err) {
-            // No retry or backoff — a failed call is recorded via failedRc and
-            // only re-attempted when new external messages produce a fresh RC.
-            log.withError(err).withFields({ chatId }).error('LLM call failed');
-            failedRc(rcAtStart);
-          } finally {
-            // Refresh interrupted state from latest persisted TRs so the effect
-            // re-fires for tool-loop continuation when needed (e.g. sleep returned
-            // requiresFollowUp). Done before flipping running so the recompute
-            // sees both signals updated atomically.
-            try {
-              const latestTRs = await loadTRs(chatId, cursorMs());
-              lastTRInterrupted(wasToolLoopInterrupted(latestTRs));
-            } catch (err) {
-              log.withError(err).withFields({ chatId }).warn('Failed to refresh lastTRInterrupted');
-            }
-            running(false);
+            const responses = await deps.loadTurnResponses(chatId, cursorMs());
+            lastTRInterrupted(wasToolLoopInterrupted(responses));
+          } catch (error) {
+            log.withError(error).withFields({ chatId }).warn('Failed to refresh lastTRInterrupted');
           }
-        })();
-      }, Math.max(0, fireAtMs - now));
+        }
+      },
     });
 
     const cleanup = () => {
-      if (timer) clearTimeout(timer);
-      setDebouncing(false);
-      disposeReplyEffect();
+      scheduler.dispose();
       compaction.dispose();
     };
 
-    const entry = { rc, lastTypingMs, cleanup };
+    const entry = { rc, notifyTyping: scheduler.notifyTyping, cleanup };
     chatScopes.set(chatId, entry);
     return entry;
   };
@@ -442,7 +177,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
   const handleTyping = (chatId: string) => {
     if (!chatIds.has(chatId)) return;
-    getOrCreateScope(chatId).lastTypingMs(Date.now());
+    getOrCreateScope(chatId).notifyTyping();
   };
 
   const stop = () => {

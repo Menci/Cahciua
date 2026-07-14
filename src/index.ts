@@ -392,7 +392,11 @@ const main = async () => {
     loadCompaction: chatId => loadCompaction(db, chatId),
     loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
     persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
-    setCompactCursor: (chatId, cursorMs) => pipeline.setCompactCursor(chatId, cursorMs),
+    setCompactCursor: (chatId, cursorMs) => {
+      const context = pipeline.setCompactCursor(chatId, cursorMs);
+      if (!context) throw new Error(`Cannot compact non-resident chat ${chatId}`);
+      return context;
+    },
     getChatTitle: chatId => pipeline.getIC(chatId)?.chatTitle,
     runtimeConfig,
     loadMessageAttachments: (chatId, messageId) => loadMessageAttachments(db, chatId, messageId),

@@ -2,8 +2,6 @@ import type { ResolvedChatConfig } from '../config/config';
 import type { LlmEndpoint } from '../llm/types';
 import type { ConversationEntry } from '../unified-api/types';
 
-export type { LlmEndpoint, ProviderFormat } from '../llm/types';
-
 export interface TurnResponseV2 {
   requestedAtMs: number;
   entries: ConversationEntry[];

@@ -203,6 +203,10 @@ describe('loopEndedWithoutSendMessage', () => {
     { kind: 'message', role: 'assistant', parts: [{ kind: 'toolCall', callId: `c${ts}`, name: 'send_message', args: '{"text":"hi"}' }], reasoning: undefined },
     { kind: 'toolResult', callId: `c${ts}`, payload: '{"ok":true}', requiresFollowUp: false },
   ]);
+  const failedSendMsgTr = (ts: number): TurnResponseV2 => tr(ts, [
+    { kind: 'message', role: 'assistant', parts: [{ kind: 'toolCall', callId: `c${ts}`, name: 'send_message', args: '{"text":"hi"}' }], reasoning: undefined },
+    { kind: 'toolResult', callId: `c${ts}`, payload: '{"error":"failed"}', requiresFollowUp: true },
+  ]);
   const endTurnTr = (ts: number): TurnResponseV2 => tr(ts, [
     { kind: 'message', role: 'assistant', parts: [{ kind: 'toolCall', callId: `c${ts}`, name: 'end_turn', args: '{}' }], reasoning: undefined },
     { kind: 'toolResult', callId: `c${ts}`, payload: '{"ok":true}', requiresFollowUp: false },
@@ -254,6 +258,10 @@ describe('loopEndedWithoutSendMessage', () => {
     // Bot acted (react) but never spoke. Fallback fires.
     const trs = [endTurnTr(100), reactTr(200), endTurnTr(210)];
     expect(loopEndedWithoutSendMessage(trs)).toBe(true);
+  });
+
+  it('returns true when send_message was called but failed', () => {
+    expect(loopEndedWithoutSendMessage([failedSendMsgTr(100), endTurnTr(110)])).toBe(true);
   });
 
   it('returns true when prior cycle exited via clean send_message (different loop)', () => {

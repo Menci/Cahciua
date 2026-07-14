@@ -7,7 +7,6 @@ import type {
   InputMessage,
   InputPart,
   OutputMessage,
-  ToolCallPart,
   ToolResult,
 } from '../unified-api/types';
 
@@ -40,8 +39,8 @@ const entryTokens = (e: ConversationEntry): number => {
 export const latestExternalEventMs = (rc: RenderedContext, afterMs: number): number | null => {
   let latest: number | null = null;
   for (const seg of rc) {
-    if (seg.receivedAtMs > afterMs && !seg.isMyself)
-      latest = seg.receivedAtMs > (latest ?? 0) ? seg.receivedAtMs : latest;
+    if (seg.receivedAtMs > afterMs && !seg.isMyself && (latest == null || seg.receivedAtMs > latest))
+      latest = seg.receivedAtMs;
   }
   return latest;
 };
@@ -76,17 +75,20 @@ const trHasToolCalls = (tr: TurnResponseV2): boolean =>
   tr.entries.some(e => e.kind === 'message' && e.role === 'assistant'
     && e.parts.some(p => p.kind === 'toolCall'));
 
-const trHasToolCallNamed = (tr: TurnResponseV2, name: string): boolean =>
-  tr.entries.some(e => e.kind === 'message' && e.role === 'assistant'
-    && e.parts.some(p => p.kind === 'toolCall' && p.name === name));
-
-/** Was end_turn called in this TR? */
-export const wasEndTurnCalled = (tr: TurnResponseV2): boolean =>
-  trHasToolCallNamed(tr, 'end_turn');
-
-/** Was send_message called in this TR? */
-export const wasSendMessageCalled = (tr: TurnResponseV2): boolean =>
-  trHasToolCallNamed(tr, 'send_message');
+const wasSendMessageSuccessful = (tr: TurnResponseV2): boolean => {
+  const callIds = new Set<string>();
+  for (const entry of tr.entries) {
+    if (entry.kind !== 'message' || entry.role !== 'assistant') continue;
+    for (const part of entry.parts)
+      if (part.kind === 'toolCall' && part.name === 'send_message') callIds.add(part.callId);
+  }
+  for (const entry of tr.entries) {
+    if (entry.kind !== 'toolResult' || !callIds.has(entry.callId) || typeof entry.payload !== 'string') continue;
+    const payload = JSON.parse(entry.payload) as { ok?: unknown };
+    if (payload.ok === true) return true;
+  }
+  return false;
+};
 
 /** Did this TR exit via interrupt-style continuation? — i.e. at least one of
  * its toolResults had requiresFollowUp=true, meaning the runner intended to
@@ -98,47 +100,26 @@ const trWasInterrupted = (tr: TurnResponseV2): boolean => {
   return false;
 };
 
-/**
- * Determine whether the just-completed ReAct loop ended with end_turn but
- * contained no send_message anywhere — indicating the bot ran out of moves
- * without speaking. The driver uses this to schedule a fallback forced
- * send_message round.
- *
- * Loop membership is structural, not time-based: a loop is the chain of TRs
- * connected by interrupt-continuation. Walking back from the end_turn:
- *
- *  - Cross any boundary where the previous TR is interrupted (its
- *    toolResults include fwup=true) — the next TR is its resumed
- *    continuation, same loop.
- *  - Stop at the first boundary where the previous TR exited cleanly
- *    (no fwup=true toolResults) — the next TR was a fresh trigger
- *    (probe activation OR a mention/replied skip-probe), starting a new
- *    loop. Anything earlier is in a previous, separately-evaluated loop.
- *
- * Gate: the latest TR must itself be end_turn. A cycle that exited via
- * send_message (clean) or was interrupted mid-non-end-turn-step is not
- * eligible — fallback only fires for cycles the bot deliberately ended.
- *
- * Returns false if the latest TR is not end_turn, or if any TR in the
- * walked loop called send_message.
- */
+// A wake-up is the structural chain joined by requiresFollowUp results. A clean
+// TR boundary starts a fresh probe-activated wake-up and stops the backward scan.
 export const loopEndedWithoutSendMessage = (trs: TurnResponseV2[]): boolean => {
   if (trs.length === 0) return false;
   const endIdx = trs.length - 1;
-  if (!wasEndTurnCalled(trs[endIdx]!)) return false;
+  const ended = trs[endIdx]!.entries.some(entry =>
+    entry.kind === 'message'
+    && entry.role === 'assistant'
+    && entry.parts.some(part => part.kind === 'toolCall' && part.name === 'end_turn'));
+  if (!ended) return false;
 
   for (let i = endIdx; i >= 0; i--) {
-    if (wasSendMessageCalled(trs[i]!)) return false;
+    if (wasSendMessageSuccessful(trs[i]!)) return false;
     if (i === 0) break;
-    // The previous TR is in this loop only if it was interrupted (i.e. the
-    // current TR is its continuation). Otherwise it belongs to an earlier,
-    // already-completed loop and is not relevant here.
+    // A clean previous TR is the boundary of this wake-up chain.
     if (!trWasInterrupted(trs[i - 1]!)) break;
   }
   return true;
 };
 
-/** Was the last TR interrupted? (ends with a requiresFollowUp ToolResult) */
 export const wasToolLoopInterrupted = (trs: TurnResponseV2[]): boolean => {
   if (trs.length === 0) return false;
   const entries = trs[trs.length - 1]!.entries;
@@ -147,7 +128,6 @@ export const wasToolLoopInterrupted = (trs: TurnResponseV2[]): boolean => {
   return toolResults.some(tr => tr.requiresFollowUp);
 };
 
-// --- trimStaleNoToolCallTurnResponses ---
 const KEEP_NO_TOOL_CALL_TRS = 5;
 
 const trimStaleNoToolCallTRs = (trs: TurnResponseV2[]): TurnResponseV2[] => {
@@ -159,7 +139,6 @@ const trimStaleNoToolCallTRs = (trs: TurnResponseV2[]): TurnResponseV2[] => {
   return trs.filter((_, i) => !dropSet.has(i));
 };
 
-// --- trimToolResults ---
 const TOOL_RESULT_TRIM_THRESHOLD = 512;
 const TOOL_RESULT_KEEP_RECENT_OVERSIZED = 5;
 
@@ -237,7 +216,6 @@ const trimToolResults = (trs: TurnResponseV2[]): TurnResponseV2[] => {
   });
 };
 
-// --- trimSelfMessagesCoveredBySendToolCalls ---
 const filterSelfSentSegments = (rc: RenderedContext): RenderedContext =>
   rc.filter(seg => !seg.isSelfSent);
 
@@ -265,14 +243,14 @@ export const findWorkingWindowCursor = (
     accum += entry.tokens;
     if (accum > budgetTokens) return entry.timeMs;
   }
-  return entries.at(-1)?.timeMs ?? 0;
+  return entries.at(-1)!.timeMs;
 };
 
 const trimEntries = (entries: ConversationEntry[], maxTokens: number): { entries: ConversationEntry[]; estimatedTokens: number } => {
   let total = entries.reduce((a, e) => a + entryTokens(e), 0);
   if (total <= maxTokens) return { entries, estimatedTokens: total };
 
-  // Deep-clone the first user InputMessage's parts for in-place trimming
+  // Clone user-message part arrays before trimming so caller input remains unchanged.
   const result: ConversationEntry[] = entries.map(e =>
     e.kind === 'message' && e.role === 'user' ? { ...e, parts: [...e.parts] } : e);
 
@@ -450,6 +428,3 @@ export const injectLateBindingPrompt = (entries: ConversationEntry[], prompt: st
     parts: [{ kind: 'text', text: prompt }],
   } satisfies InputMessage);
 };
-
-// Re-exported for convenience to runner/compaction.
-export type { ConversationEntry, InputMessage, OutputMessage, ToolCallPart, ToolResult };

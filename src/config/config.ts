@@ -5,9 +5,10 @@ import { merge } from 'es-toolkit';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
-import type { CompactionConfig, DebounceConfig, LlmEndpoint, ProviderFormat } from '../driver/types';
+import type { CompactionConfig, DebounceConfig } from '../driver/types';
 import type { WebFetchConfig } from '../driver/web-fetch/types';
 import type { WebSearchConfig } from '../driver/web-search/types';
+import type { LlmEndpoint, ProviderFormat } from '../llm/types';
 
 const llmEndpointEntries = {
   apiBaseUrl: v.string(),
