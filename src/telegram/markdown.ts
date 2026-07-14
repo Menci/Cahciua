@@ -1,18 +1,14 @@
 import MarkdownIt from 'markdown-it';
-// markdown-it-math-loose is a CommonJS plugin without bundled types.
-// @ts-expect-error - no types published
 import type StateInline from 'markdown-it/lib/rules_inline/state_inline.mjs';
 import MarkdownItMath from 'markdown-it-math-loose';
 
 const md = new MarkdownIt({ linkify: true });
 
-// --- Spoiler plugin: ||text|| → <tg-spoiler>text</tg-spoiler> ---
 // The built-in `text` rule doesn't treat `|` as a terminator, so it swallows
 // pipe characters before any custom inline rule gets a chance to run.
 // We replace the `text` rule to also stop at 0x7C (|).
 
 function spoilerPlugin(md: MarkdownIt) {
-  // 1. Replace the built-in `text` rule so `|` is treated as a terminator.
   md.inline.ruler.at('text', (state: StateInline, silent: boolean) => {
     let pos = state.pos;
     while (pos < state.posMax
@@ -26,13 +22,11 @@ function spoilerPlugin(md: MarkdownIt) {
     return true;
   });
 
-  // 2. Add the spoiler inline rule.
   md.inline.ruler.before('strikethrough', 'spoiler', (state: StateInline, silent: boolean) => {
     const src = state.src;
     if (src.charCodeAt(state.pos) !== 0x7C || src.charCodeAt(state.pos + 1) !== 0x7C)
       return false;
 
-    // Find closing ||
     const start = state.pos + 2;
     const closingIdx = src.indexOf('||', start);
     if (closingIdx === -1 || closingIdx > state.posMax - 2)
@@ -43,7 +37,6 @@ function spoilerPlugin(md: MarkdownIt) {
     const tokenOpen = state.push('spoiler_open', 'tg-spoiler', 1);
     tokenOpen.markup = '||';
 
-    // Recursively tokenize the inner content
     const prevPosMax = state.posMax;
     state.pos = start;
     state.posMax = closingIdx;
