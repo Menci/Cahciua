@@ -32,7 +32,7 @@ export interface ResponsesApiParams {
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
-  onRequestBody?: (body: unknown) => void;
+  onRequestBody: (body: unknown) => void;
   log: Logger;
   label: string;
 }
@@ -69,7 +69,7 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
         : {}),
       ...params.extraBody,
     };
-    params.onRequestBody?.(requestBody);
+    params.onRequestBody(requestBody);
     const body = JSON.stringify(requestBody);
 
     const url = `${params.baseURL.replace(/\/$/, '')}/responses`;

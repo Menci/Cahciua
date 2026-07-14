@@ -34,7 +34,6 @@ const toolCallEntries = (callId: string, name: string, args = '{}'): Conversatio
 const makeChatConfig = (): ResolvedChatConfig => ({
   primary: {
     model: { apiBaseUrl: 'mock', apiKey: 'key', model: 'mock-primary', apiFormat: 'openai-chat' },
-    apiFormat: 'openai-chat',
   },
   systemFiles: [],
   sendTypingAction: false,

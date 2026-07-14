@@ -28,7 +28,7 @@ export interface LlmCallConfig extends Omit<LlmEndpoint, 'maxImagesAllowed'> {
 
 export interface ToolSchema {
   name: string;
-  description?: string;
+  description: string;
   parameters: Record<string, unknown>;
 }
 
@@ -84,7 +84,9 @@ export const callLlm = async (
   tools: ToolSchema[] | undefined,
   options: LlmCallOptions,
 ): Promise<LlmCallResult> => {
-  const apiFormat = config.apiFormat ?? 'openai-chat';
+  if (config.forceToolChoice && (!tools || tools.length === 0))
+    throw new Error('forceToolChoice requires at least one tool');
+  const apiFormat = config.apiFormat;
   const { log, label } = options;
 
   let prepared = entries;
@@ -146,7 +148,7 @@ export const callLlm = async (
   dumpLlmPayload(options.dumpId, 'response', response);
 
   const choice = response.choices[0];
-  if (!choice) return { entries: [], usage: response.usage };
+  if (!choice) throw new Error('Chat Completions response contained no choices');
 
   return {
     entries: fromChatCompletionsOutput([choice.message as ChatCompletionsAssistantMessage]),

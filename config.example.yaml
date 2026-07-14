@@ -1,109 +1,99 @@
 models:
   primary:
-    apiBaseUrl: ""
+    apiBaseUrl: "https://api.openai.com/v1"
     apiKey: ""
-    model: "claude-opus-4-6"
-    # apiFormat: "responses"        # optional: 'openai-chat' (default), 'responses', or 'anthropic-messages'
-    # timeoutSec: 120                # optional: abort requests that stream for too long
-    # maxImagesAllowed: 100     # optional: drop oldest images when context exceeds this limit
-    # extraBody:                     # optional: shallow-merged into the provider request body. Schema is
-    #                                # the raw provider schema — match it to apiFormat above. Examples:
-    #   reasoning_effort: "high"     #   openai-chat: GPT/DeepSeek/Kimi reasoning knob.
-    #   thinking:                    #   anthropic-messages: enable Claude thinking; bump max_tokens accordingly.
-    #     type: "enabled"
-    #     budget_tokens: 10000
-    #   max_tokens: 16000
-    #   reasoning:                   #   responses: GPT effort + summary opt-in (summary is required to surface reasoning text).
-    #     effort: "low"
+    model: "gpt-5.4"
+    apiFormat: "responses" # openai-chat | responses | anthropic-messages
+    timeoutSec: 120 # complete non-streaming request timeout
+    maxImagesAllowed: 100
+    # Extra provider-native request fields are shallow-merged at the wire boundary.
+    # extraBody:
+    #   reasoning:
+    #     effort: "high"
     #     summary: "auto"
+
   probe:
-    apiBaseUrl: ""
+    apiBaseUrl: "https://api.anthropic.com/v1"
     apiKey: ""
     model: "claude-haiku-4-5"
-    # timeoutSec: 60                 # optional: abort requests that stream for too long
-    # maxImagesAllowed: 10     # optional: Gemini Flash allows max 10 images
+    apiFormat: "anthropic-messages"
+    timeoutSec: 60
+    maxImagesAllowed: 10
 
 telegram:
   botToken: ""
   apiId: 0
   apiHash: ""
-  session: ""
+  userbotEnabled: false
+  # botDataDir: "data/tdlib-bot"
+  # userbotDataDir: "data/tdlib-userbot"
 
 database:
   path: "./data/cahciua.db"
 
-# Runtime configuration: shell and file I/O commands used by tools.
-# These are global (not per-chat) because they describe the execution environment.
 runtime:
-  shell: ["/bin/bash", "-c"]                                   # command prefix for bash tool
-  writeFile: ["/bin/bash", "-c", "/usr/bin/cat > \"$0\""]      # write stdin to file (path appended as arg); required
-  readFile: ["/usr/bin/cat"]                                   # read file to stdout (path appended as arg); required
-  # writeFileSizeLimit: 20971520                               # max bytes for download_file (default 20 MB)
-  # readFileSizeLimit: 20971520                                # max bytes for runtime.readFile consumers (send_message attachments, read_image)
+  shell: ["/bin/bash", "-c"]
+  writeFile: ["/bin/bash", "-c", "/usr/bin/cat > \"$0\""]
+  readFile: ["/usr/bin/cat"]
+  writeFileSizeLimit: 20971520
+  readFileSizeLimit: 20971520
 
-# Per-chat configuration. Keys (except "default") serve as the chat ID whitelist.
-# Each per-chat entry is deep-merged with "default" — only specify overrides.
+backgroundTasks:
+  outputDir: "./data/task-outputs"
+  retentionCount: 20
+
+# Every key other than "default" is a resident chat ID. Per-chat objects are
+# deep-merged over default; unconfigured chats are archived but never projected.
 chats:
   default:
     primary:
-      model: "primary"            # references a key in models
-      # forceToolCall: false      # send tool_choice=required/any; the model must call a tool (use dismiss_message to stay silent)
-    # systemFiles: persona / instruction files appended verbatim to the system
-    # prompt (each rendered as "## <basename>" + file content). Use for the bot's
-    # identity, voice, and standing rules.
-    # systemFiles:
-    #   - "prompts/IDENTITY.md"
-    # sendTypingAction: true         # show a "typing…" chat action while generating a reply (default true; set false to disable)
-    # debounce: wait before replying so a burst of messages is answered once.
-    # Anyone typing (seen via userbot) extends the wait; capped at maxDelayMs.
-    # debounce:
-    #   initialDelayMs: 1000         # wait this long past the latest message
-    #   typingExtendMs: 5000         # a typing event extends the wait to now + this
-    #   maxDelayMs: 30000            # hard cap on total wait from the first message
-    compaction:
-      maxContextEstTokens: 512000    # high water mark: trigger compaction when estimated context exceeds this
-      workingWindowEstTokens: 8000   # low water mark: how many estimated tokens of raw content to retain after compaction
-      # model: "primary"           # optional: override model for compaction calls (defaults to chat model)
-    # Probe: use a small/cheap model to decide whether to respond in group chats.
-    # When the bot is not @'d or replied to, the probe model runs first. If it
-    # chooses silence (no tool calls), the primary model is skipped entirely.
-    # If it produces tool calls, the primary model is activated for the real response.
+      model: "primary"
     probe:
-      enabled: false
-      model: "probe"              # references a key in models
-      # forceToolCall: false      # same semantics as primary.forceToolCall, applied to the probe call
+      # Probe is mandatory. Omit model to reuse the primary endpoint.
+      model: "probe"
+    systemFiles:
+      - "prompts/IDENTITY.md"
+    sendTypingAction: true
+    blockedUserIds: []
+
+    debounce:
+      initialDelayMs: 1000
+      typingExtendMs: 5000
+      maxDelayMs: 30000
+
+    compaction:
+      maxContextEstTokens: 200000
+      workingWindowEstTokens: 8000
+      # model: "primary"
+
     imageToText:
       enabled: false
-      model: "primary"            # references a key in models
-      maxConcurrency: 3           # max parallel LLM calls for image-to-text
+      model: "primary"
+      maxConcurrency: 3
+
     animationToText:
       enabled: false
-      model: "primary"            # references a key in models
-      # maxFrames: 5              # max equidistant frames to extract (default 5)
-      maxConcurrency: 3           # max parallel LLM calls for animation-to-text
+      model: "primary"
+      maxFrames: 5
+      maxConcurrency: 3
+
     customEmojiToText:
       enabled: false
-      model: "primary"            # references a key in models
-      # maxFrames: 5              # max equidistant frames for animated custom emoji (default 5)
-      maxConcurrency: 3           # max parallel LLM calls for custom-emoji-to-text
-    # Tools: configuration for enabled tools.
+      model: "primary"
+      maxFrames: 5
+      maxConcurrency: 3
+
     tools:
-      # bash:
-      #   backgroundThresholdSec: 10               # timeout threshold above which bash runs as background task
-      # Web tools — shared provider credentials, with `search`/`fetch` picking
-      # which provider to use for each role. Omit `search` or `fetch` to disable
-      # the corresponding tool. Only providers used by the active roles need a
-      # filled `apiKey`.
+      bash:
+        backgroundThresholdSec: 10
       web:
         providers:
-          tavily: { apiKey: "" }                     # https://tavily.com
-          microsoftGrounding: { apiKey: "" }         # https://dashboard.microsoft.ai/keys
-          jina: { apiKey: "" }                       # https://jina.ai (apiKey optional for fetch, required for search)
-          exa: { apiKey: "" }                        # https://exa.ai
-        search: "tavily"                             # tavily | microsoft-grounding | jina | exa (omit to disable web_search)
-        fetch: "jina"                                # currently only `jina` (omit to disable web_fetch)
+          tavily: { apiKey: "" }
+          microsoftGrounding: { apiKey: "" }
+          jina: { apiKey: "" }
+          exa: { apiKey: "" }
+        # search: "tavily" # tavily | microsoft-grounding | jina | exa
+        # fetch: "jina"
 
-  # Per-chat overrides — uncomment and customize:
-  # "751414718":                   # per-chat partial override (deep-merged with default)
-  #   model: "secondary"
-  # "-1002173016093": {}           # whitelisted with all defaults
+  # Replace with a Telegram chat ID to enable residency and Driver processing.
+  "-1000000000000": {}

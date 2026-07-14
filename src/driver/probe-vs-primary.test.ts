@@ -24,7 +24,6 @@ const mockCallLlm = vi.mocked(callLlm);
 const makeChatConfig = (): ResolvedChatConfig => ({
   primary: {
     model: { apiBaseUrl: 'mock', apiKey: 'k', model: 'mock-primary', apiFormat: 'openai-chat' },
-    apiFormat: 'openai-chat',
   },
   systemFiles: [],
   sendTypingAction: false,

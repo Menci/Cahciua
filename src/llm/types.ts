@@ -4,7 +4,7 @@ export interface LlmEndpoint {
   apiBaseUrl: string;
   apiKey: string;
   model: string;
-  apiFormat?: ProviderFormat;
+  apiFormat: ProviderFormat;
   maxImagesAllowed?: number;
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;

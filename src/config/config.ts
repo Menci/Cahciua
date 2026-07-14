@@ -8,7 +8,7 @@ import { parse as parseYaml } from 'yaml';
 import type { CompactionConfig, DebounceConfig } from '../driver/types';
 import type { WebFetchConfig } from '../driver/web-fetch/types';
 import type { WebSearchConfig } from '../driver/web-search/types';
-import type { LlmEndpoint, ProviderFormat } from '../llm/types';
+import type { LlmEndpoint } from '../llm/types';
 
 const llmEndpointEntries = {
   apiBaseUrl: v.string(),
@@ -25,9 +25,9 @@ const llmEndpointEntries = {
 const DEFAULT_FILE_SIZE_LIMIT = 20 * 1024 * 1024; // 20 MB
 
 const RuntimeSchema = v.object({
-  shell: v.optional(v.array(v.string()), ['/bin/bash', '-c']),
-  writeFile: v.array(v.string()),
-  readFile: v.array(v.string()),
+  shell: v.optional(v.pipe(v.array(v.string()), v.minLength(1)), ['/bin/bash', '-c']),
+  writeFile: v.pipe(v.array(v.string()), v.minLength(1)),
+  readFile: v.pipe(v.array(v.string()), v.minLength(1)),
   writeFileSizeLimit: v.optional(v.number(), DEFAULT_FILE_SIZE_LIMIT),
   readFileSizeLimit: v.optional(v.number(), DEFAULT_FILE_SIZE_LIMIT),
 });
@@ -56,18 +56,18 @@ const ChatConfigSchema = v.object({
   }), {}),
   imageToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
-    model: v.optional(v.string(), ''),
+    model: v.optional(v.pipe(v.string(), v.minLength(1))),
     maxConcurrency: v.optional(v.number(), 3),
   }), {}),
   animationToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
-    model: v.optional(v.string(), ''),
+    model: v.optional(v.pipe(v.string(), v.minLength(1))),
     maxFrames: v.optional(v.number(), 5),
     maxConcurrency: v.optional(v.number(), 3),
   }), {}),
   customEmojiToText: v.optional(v.object({
     enabled: v.optional(v.boolean(), false),
-    model: v.optional(v.string(), ''),
+    model: v.optional(v.pipe(v.string(), v.minLength(1))),
     maxFrames: v.optional(v.number(), 5),
     maxConcurrency: v.optional(v.number(), 3),
   }), {}),
@@ -91,7 +91,7 @@ const ChatConfigSchema = v.object({
 // Per-chat overrides: all fields optional, no defaults
 const ChatOverrideSchema = v.optional(v.partial(v.object({
   primary: v.partial(v.object({
-    model: v.string(),
+    model: v.pipe(v.string(), v.minLength(1)),
   })),
   systemFiles: v.array(v.string()),
   sendTypingAction: v.boolean(),
@@ -104,25 +104,25 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
   compaction: v.partial(v.object({
     maxContextEstTokens: v.number(),
     workingWindowEstTokens: v.number(),
-    model: v.string(),
+    model: v.pipe(v.string(), v.minLength(1)),
   })),
   probe: v.partial(v.object({
-    model: v.string(),
+    model: v.pipe(v.string(), v.minLength(1)),
   })),
   imageToText: v.partial(v.object({
     enabled: v.boolean(),
-    model: v.string(),
+    model: v.pipe(v.string(), v.minLength(1)),
     maxConcurrency: v.number(),
   })),
   animationToText: v.partial(v.object({
     enabled: v.boolean(),
-    model: v.string(),
+    model: v.pipe(v.string(), v.minLength(1)),
     maxFrames: v.number(),
     maxConcurrency: v.number(),
   })),
   customEmojiToText: v.partial(v.object({
     enabled: v.boolean(),
-    model: v.string(),
+    model: v.pipe(v.string(), v.minLength(1)),
     maxFrames: v.number(),
     maxConcurrency: v.number(),
   })),
@@ -172,21 +172,11 @@ const ConfigSchema = v.object({
 export type Config = v.InferOutput<typeof ConfigSchema>;
 export type ChatConfig = v.InferOutput<typeof ChatConfigSchema>;
 
-export interface RuntimeConfig {
-  shell: string[];
-  writeFile: string[];
-  readFile: string[];
-  writeFileSizeLimit: number;
-  readFileSizeLimit: number;
-}
-
-export interface BackgroundTasksConfig {
-  outputDir: string;
-  retentionCount: number;
-}
+export type RuntimeConfig = Config['runtime'];
+export type BackgroundTasksConfig = Config['backgroundTasks'];
 
 export interface ResolvedChatConfig {
-  primary: { model: LlmEndpoint; apiFormat: ProviderFormat };
+  primary: { model: LlmEndpoint };
   systemFiles: { filename: string; content: string }[];
   sendTypingAction: boolean;
   blockedUserIds: string[];
@@ -211,23 +201,10 @@ export const loadConfig = (): Config => {
   return v.parse(ConfigSchema, parsed);
 };
 
-export const resolveRuntime = (config: Config): RuntimeConfig => ({
-  shell: config.runtime.shell,
-  writeFile: config.runtime.writeFile,
-  readFile: config.runtime.readFile,
-  writeFileSizeLimit: config.runtime.writeFileSizeLimit,
-  readFileSizeLimit: config.runtime.readFileSizeLimit,
-});
-
-export const resolveBackgroundTasks = (config: Config): BackgroundTasksConfig => ({
-  outputDir: config.backgroundTasks.outputDir,
-  retentionCount: config.backgroundTasks.retentionCount,
-});
-
 export const resolveModel = (config: Config, name: string): LlmEndpoint => {
   const entry = config.models[name];
   if (!entry) throw new Error(`Unknown model "${name}" — not found in models registry`);
-  return entry;
+  return { ...entry, apiFormat: entry.apiFormat ?? 'openai-chat' };
 };
 
 /** Return whitelisted chat IDs (all keys in chats except "default"). */
@@ -236,12 +213,11 @@ export const getChatIds = (config: Config): string[] =>
 
 /** Deep-merge default chat config with per-chat overrides and resolve model names. */
 export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatConfig => {
-  const override = config.chats[chatId] ?? {};
+  const override = config.chats[chatId];
+  if (!override) throw new Error(`Unknown chat "${chatId}" — not found in chats registry`);
   const merged: ChatConfig = merge(structuredClone(config.chats.default), override);
 
   const primaryModel = resolveModel(config, merged.primary.model);
-  const primaryApiFormat: ProviderFormat = primaryModel.apiFormat ?? 'openai-chat';
-
   const web = merged.tools.web;
   const providers = web.providers;
 
@@ -264,7 +240,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
   }
 
   return {
-    primary: { model: primaryModel, apiFormat: primaryApiFormat },
+    primary: { model: primaryModel },
     systemFiles: merged.systemFiles.map(path => ({
       filename: basename(path),
       content: readFileSync(path, 'utf-8').trim(),
@@ -281,18 +257,18 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
     },
     imageToText: {
       enabled: merged.imageToText.enabled,
-      model: merged.imageToText.model || undefined,
+      model: merged.imageToText.model,
       maxConcurrency: merged.imageToText.maxConcurrency,
     },
     animationToText: {
       enabled: merged.animationToText.enabled,
-      model: merged.animationToText.model || undefined,
+      model: merged.animationToText.model,
       maxFrames: merged.animationToText.maxFrames,
       maxConcurrency: merged.animationToText.maxConcurrency,
     },
     customEmojiToText: {
       enabled: merged.customEmojiToText.enabled,
-      model: merged.customEmojiToText.model || undefined,
+      model: merged.customEmojiToText.model,
       maxFrames: merged.customEmojiToText.maxFrames,
       maxConcurrency: merged.customEmojiToText.maxConcurrency,
     },

@@ -65,7 +65,7 @@ export interface MessagesApiParams {
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
-  onRequestBody?: (body: unknown) => void;
+  onRequestBody: (body: unknown) => void;
   log: Logger;
   label: string;
 }
@@ -103,7 +103,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
         : {}),
       ...params.extraBody,
     };
-    params.onRequestBody?.(requestBody);
+    params.onRequestBody(requestBody);
     const body = JSON.stringify(requestBody);
 
     const url = `${params.baseURL.replace(/\/$/, '')}/messages`;

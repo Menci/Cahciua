@@ -47,7 +47,6 @@ describe('createCompactionController', () => {
       chatConfig: {
         primary: {
           model: { apiBaseUrl: 'mock', apiKey: 'key', model: 'model', apiFormat: 'openai-chat' },
-          apiFormat: 'openai-chat',
         },
         systemFiles: [],
         sendTypingAction: false,

@@ -22,7 +22,7 @@ export interface ChatCompletionsParams {
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
-  onRequestBody?: (body: unknown) => void;
+  onRequestBody: (body: unknown) => void;
   log: Logger;
   label: string;
 }
@@ -75,7 +75,7 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
         : {}),
       ...params.extraBody,
     };
-    params.onRequestBody?.(requestBody);
+    params.onRequestBody(requestBody);
     const body = JSON.stringify(requestBody);
 
     const url = `${params.baseURL.replace(/\/$/, '')}/chat/completions`;
