@@ -31,8 +31,8 @@ const hashBuffer = (buffer: Buffer): string =>
 export const computeThumbnailHash = (thumbnailWebp: string): string =>
   hashBuffer(Buffer.from(thumbnailWebp, 'base64'));
 
-const prepareImageToTextUrl = async (buffer: Buffer): Promise<string> => {
-  const resized = await sharp(buffer)
+const prepareImageToTextBuffer = async (buffer: Buffer): Promise<Buffer> =>
+  await sharp(buffer)
     .resize(IMAGE_TO_TEXT_MAX_EDGE, IMAGE_TO_TEXT_MAX_EDGE, {
       fit: 'inside',
       withoutEnlargement: true,
@@ -40,8 +40,6 @@ const prepareImageToTextUrl = async (buffer: Buffer): Promise<string> => {
     .flatten({ background: '#ffffff' })
     .png()
     .toBuffer();
-  return `data:image/png;base64,${resized.toString('base64')}`;
-};
 
 export const createImageToTextResolver = (params: {
   enabled: boolean;
@@ -79,14 +77,14 @@ export const createImageToTextResolver = (params: {
         const model = params.model;
         if (!model) throw new Error('imageToText.model is required when imageToText.enabled=true');
 
-        const imageUrl = await prepareImageToTextUrl(highResBuffer ?? thumbnailBuffer);
+        const imageBuffer = await prepareImageToTextBuffer(highResBuffer ?? thumbnailBuffer);
         const system = await renderImageToTextSystemPrompt({ caption });
 
         const result = await callDescriptionLlm({
           model,
           system,
           userText: 'Describe this image.',
-          images: [{ url: imageUrl }],
+          images: [imageBuffer],
           log,
           label: 'image-to-text',
         });

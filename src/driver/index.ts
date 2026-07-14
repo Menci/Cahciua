@@ -268,13 +268,12 @@ export const createDriver = (config: DriverConfig, deps: {
                     .resize(maxEdge, maxEdge, { fit: 'inside', withoutEnlargement: true })
                     .png()
                     .toBuffer();
-                  const imageUrl = `data:image/png;base64,${resized.toString('base64')}`;
                   const system = await renderImageToTextSystemPrompt({ caption: '', detail });
                   const model = deps.resolveModel(chatConfig.imageToText.model!);
                   const result = await callDescriptionLlm({
                     model, system,
                     userText: 'Describe this image.',
-                    images: [{ url: imageUrl }],
+                    images: [resized],
                     log, label: 'read-image',
                   });
                   return result.text.trim();

@@ -1,104 +1,88 @@
 import type { Logger } from '@guiiai/logg';
+import sharp from 'sharp';
 
-import { chatCompletions } from '../llm/chat';
-import { responsesApi } from '../llm/responses';
+import { callLlm } from '../llm/call';
 import type { LlmEndpoint } from '../llm/types';
+import type { ConversationEntry, InputMessage, OutputMessage } from '../unified-api/types';
 
 export const createSemaphore = (max: number) => {
   let current = 0;
   const queue: (() => void)[] = [];
   return {
     acquire: () => new Promise<void>(resolve => {
-      if (current < max) { current++; resolve(); } else queue.push(resolve);
+      if (current < max) {
+        current++;
+        resolve();
+      } else {
+        queue.push(resolve);
+      }
     }),
     release: () => {
       current--;
       const next = queue.shift();
-      if (next) { current++; next(); }
+      if (next) {
+        current++;
+        next();
+      }
     },
   };
 };
 
-const extractChatText = (message?: { content?: string | { text?: string }[] | null }): string => {
-  if (!message?.content) return '';
-  if (typeof message.content === 'string') return message.content.trim();
-  return message.content
-    .map(part => part.text ?? '')
-    .join('')
-    .trim();
+const extractDescriptionText = (entries: ConversationEntry[]): string => {
+  const text: string[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== 'message' || entry.role !== 'assistant') continue;
+    for (const part of (entry as OutputMessage).parts) {
+      if (part.kind === 'text') text.push(part.text);
+      else if (part.kind === 'textGroup') text.push(...part.content.map(item => item.text));
+    }
+  }
+  return text.join('').trim();
 };
-
-const extractResponsesText = (output: Array<{ type: string; role?: string; content?: Array<{ type: string; text?: string; refusal?: string }> }>): string =>
-  output
-    .filter(item => item.type === 'message' && item.role === 'assistant')
-    .flatMap(item => item.content ?? [])
-    .map(block => block.type === 'output_text' ? (block.text ?? '') : (block.refusal ?? ''))
-    .join('')
-    .trim();
-
-export interface ImageContentPart {
-  url: string;
-  detail?: 'high' | 'low' | 'auto';
-}
 
 export const callDescriptionLlm = async (params: {
   model: LlmEndpoint;
   system: string;
   userText: string;
-  images: ImageContentPart[];
+  images: Buffer[];
   log: Logger;
   label: string;
 }): Promise<{ text: string; outputTokens: number }> => {
   const { model, system, userText, images, log, label } = params;
+  log.withFields({
+    systemLen: system.length,
+    images: images.length,
+    apiFormat: model.apiFormat,
+  }).log(`${label} request`);
 
-  log.withFields({ systemLen: system.length, images: images.length, apiFormat: model.apiFormat ?? 'openai-chat' }).log(`${label} request`);
-
-  if ((model.apiFormat ?? 'openai-chat') === 'responses') {
-    const input = [{
-      type: 'message',
-      role: 'user',
-      content: [
-        { type: 'input_text', text: userText },
-        ...images.map(img => ({ type: 'input_image', image_url: img.url, detail: img.detail ?? 'high' as const })),
-      ],
-    }];
-    const response = await responsesApi({
-      baseURL: model.apiBaseUrl,
-      apiKey: model.apiKey,
-      model: model.model,
-      instructions: system,
-      input,
-      log,
-      label,
-      timeoutSec: model.timeoutSec,
-    });
-
-    return {
-      text: extractResponsesText(response.output as Array<{ type: string; role?: string; content?: Array<{ type: string; text?: string; refusal?: string }> }>),
-      outputTokens: response.usage.outputTokens,
-    };
-  }
-
-  const chatMessages = [{
-    role: 'user' as const,
-    content: [
-      { type: 'text' as const, text: userText },
-      ...images.map(img => ({ type: 'image_url' as const, image_url: { url: img.url, detail: img.detail ?? 'high' as const } })),
+  const entries: ConversationEntry[] = [{
+    kind: 'message',
+    role: 'user',
+    parts: [
+      { kind: 'text', text: userText },
+      ...images.map(image => ({
+        kind: 'image' as const,
+        image: sharp(image),
+        detail: 'high' as const,
+      })),
     ],
-  }];
-  const response = await chatCompletions({
-    baseURL: model.apiBaseUrl,
+  } satisfies InputMessage];
+
+  const result = await callLlm({
+    apiBaseUrl: model.apiBaseUrl,
     apiKey: model.apiKey,
     model: model.model,
-    system,
-    messages: chatMessages,
+    apiFormat: model.apiFormat,
+    timeoutSec: model.timeoutSec,
+    extraBody: model.extraBody,
+  }, entries, system, undefined, {
     log,
     label,
-    timeoutSec: model.timeoutSec,
+    maxImagesAllowed: model.maxImagesAllowed,
   });
 
   return {
-    text: extractChatText(response.choices[0]?.message),
-    outputTokens: response.usage.outputTokens,
+    text: extractDescriptionText(result.entries),
+    outputTokens: result.usage.outputTokens,
   };
 };
