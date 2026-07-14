@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { adaptDelete, adaptEdit, adaptMessage, adaptServiceEvent, isServiceMessage, parseContent } from './adaptation';
+import type { IngressTelegramMessage, IngressTelegramMessageEdit } from './ingress-meta';
 import { contentToPlainText } from '../adaptation/content';
 import type { ContentNode } from '../adaptation/types';
-import type { MessageEntity, TelegramMessage, TelegramMessageEdit } from './message/types';
+import type { MessageEntity, TelegramMessage } from './message/types';
 
 // --- helpers ---
 
@@ -11,12 +12,14 @@ const entity = (type: string, offset: number, length: number, extra?: Partial<Me
   type, offset, length, ...extra,
 });
 
-const baseTelegramMessage = (overrides?: Partial<TelegramMessage>): TelegramMessage => ({
+const baseTelegramMessage = (overrides?: Partial<TelegramMessage>): IngressTelegramMessage => ({
   messageId: 42,
   chatId: '-100123',
   date: 1700000000,
   text: 'hello',
   source: 'bot',
+  receivedAtMs: 1700000000000,
+  utcOffsetMin: 480,
   ...overrides,
 });
 
@@ -372,14 +375,15 @@ describe('adaptMessage', () => {
 // --- adaptEdit ---
 
 describe('adaptEdit', () => {
-  const baseEdit: TelegramMessageEdit = {
+  const baseEdit: IngressTelegramMessageEdit = {
     messageId: 42,
     chatId: '-100123',
     date: 1700000000,
     editDate: 1700000060,
     text: 'edited',
-    source: 'userbot',
-  } as TelegramMessageEdit;
+    receivedAtMs: 1700000060000,
+    utcOffsetMin: 480,
+  };
 
   it('maps basic fields', () => {
     const event = adaptEdit(baseEdit);
@@ -403,18 +407,24 @@ describe('adaptEdit', () => {
 
 describe('adaptDelete', () => {
   it('converts messageIds to strings', () => {
-    const event = adaptDelete({ messageIds: [1, 2, 3], chatId: '-100123' });
+    const event = adaptDelete({
+      messageIds: [1, 2, 3],
+      chatId: '-100123',
+      receivedAtMs: 1700000000000,
+      utcOffsetMin: 480,
+    });
     expect(event.messageIds).toEqual(['1', '2', '3']);
   });
 
   it('derives timestampSec from receivedAtMs', () => {
-    const event = adaptDelete({ messageIds: [1], chatId: '-100123' });
+    const event = adaptDelete({
+      messageIds: [1],
+      chatId: '-100123',
+      receivedAtMs: 1700000000000,
+      utcOffsetMin: 480,
+    });
     expect(event.timestampSec).toBe(Math.floor(event.receivedAtMs / 1000));
     expect(event.utcOffsetMin).toBeTypeOf('number');
-  });
-
-  it('throws when chatId is missing', () => {
-    expect(() => adaptDelete({ messageIds: [1] })).toThrow('Cannot adapt delete event without chatId');
   });
 });
 
@@ -450,7 +460,7 @@ describe('isServiceMessage', () => {
 
 describe('adaptServiceEvent', () => {
   it('returns null for regular messages', () => {
-    expect(adaptServiceEvent(baseTelegramMessage())).toBeNull();
+    expect(() => adaptServiceEvent(baseTelegramMessage())).toThrow('not a service event');
   });
 
   it('adapts members_joined', () => {

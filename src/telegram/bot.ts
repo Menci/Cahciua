@@ -9,12 +9,13 @@ import type * as Td from 'tdlib-types';
 import type { EntityCache } from './entity-cache';
 import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
+import { captureIngressMetadata } from './ingress-meta';
 import { decideLinkPreviewOptions } from './link-preview';
 import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
 import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
-import { resolveMessageMetadata } from './message/resolve-metadata';
 import { fromTdMessage } from './message/tdlib';
+import { firstNonEmptyString } from './tdlib-string';
 
 export interface BotClientOptions {
   apiId: number;
@@ -57,10 +58,7 @@ export interface MediaGroupItem {
 
 export interface CustomEmojiInfo {
   customEmojiId: string;
-  isAnimated: boolean;
-  isVideo: boolean;
-  setName?: string;
-  setTitle?: string;
+  format: 'static' | 'animated' | 'video';
   download: () => Promise<Buffer>;
 }
 
@@ -77,7 +75,7 @@ export interface BotClient {
   sendAnimation(chatId: string | number, animation: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
   sendVideoNote(chatId: string | number, videoNote: Buffer, options?: MediaSendOptions): Promise<SentMessage>;
   sendMediaGroup(chatId: string | number, media: MediaGroupItem[], options?: SendOptions): Promise<SentMessage[]>;
-  sendChatAction(chatId: string | number, action?: 'typing'): Promise<void>;
+  sendChatAction(chatId: string | number): Promise<void>;
   setMessageReaction(chatId: string | number, messageId: number, emoji: string | undefined): Promise<void>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
   getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
@@ -92,14 +90,12 @@ const parseMode = (mode: 'HTML' | 'MarkdownV2' | undefined): Td.TextParseMode$In
   return { _: 'textParseModeHTML' };
 };
 
-const formattedFromHtml = (text: string, mode: 'HTML' | 'MarkdownV2' = 'HTML'): Td.formattedText$Input => {
+const formattedFromHtml = (text: string, mode: 'HTML' | 'MarkdownV2' = 'HTML'): Td.formattedText => {
   if (!text) return { _: 'formattedText', text: '', entities: [] };
   const result = tdl.execute({ _: 'parseTextEntities', text, parse_mode: parseMode(mode) });
-  if (result?._ === 'formattedText') {
-    return { _: 'formattedText', text: result.text, entities: result.entities };
-  }
-  // parseTextEntities returned an error — fall back to plain text without entities.
-  return { _: 'formattedText', text, entities: [] };
+  if (result._ !== 'formattedText')
+    throw new Error(`TDLib rejected rendered markup: ${result.message}`);
+  return { _: 'formattedText', text: result.text, entities: result.entities };
 };
 
 const writeTempBuffer = async (workDir: string, buffer: Buffer, fileName: string): Promise<string> => {
@@ -160,13 +156,8 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
       cache.putChat(update.chat);
       break;
     case 'updateNewMessage': {
-      const msg = fromTdMessage(cache, update.message);
-      if (msg) {
-        void (async () => {
-          await resolveMessageMetadata(client, msg);
-          messageBus.emit({ ...msg, source: 'bot' });
-        })();
-      }
+      const msg = fromTdMessage(cache, update.message, 'bot');
+      if (msg) messageBus.emit(captureIngressMetadata(msg));
       break;
     }
     }
@@ -179,7 +170,10 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     info = {
       id: me.id,
       firstName: me.first_name,
-      username: me.usernames?.editable_username || me.usernames?.active_usernames?.[0],
+      username: firstNonEmptyString(
+        me.usernames?.editable_username,
+        me.usernames?.active_usernames?.[0],
+      ),
     };
     log.withFields({ id: info.id, username: info.username, name: [me.first_name, me.last_name].filter(Boolean).join(' ') }).log('Bot authenticated');
   };
@@ -211,7 +205,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     await ensureChatKnown(chatId);
     // The caller passes markdown (LLM output). We render to Telegram-supported
     // HTML and then dispatch to either inputMessageRichMessage (for rich-only
-    // features like math, headings, lists, tables) or inputMessageText (for
+    // tables and math) or inputMessageText (for
     // plain entity-style content that older clients can render correctly).
     const html = renderMarkdownToTelegramHTML(text);
     const replyTo: Td.InputMessageReplyTo$Input | undefined = opts?.replyToMessageId
@@ -234,7 +228,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
           return {
             _: 'inputMessageText' as const,
             text: formatted,
-            link_preview_options: decideLinkPreviewOptions(formatted.text ?? '', formatted.entities ?? []),
+            link_preview_options: decideLinkPreviewOptions(formatted.text, formatted.entities),
             clear_draft: true,
           };
         })();
@@ -248,9 +242,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
 
     const sentText = sent.content._ === 'messageText'
       ? sent.content.text.text
-      : sent.content._ === 'messageRichMessage'
-        ? ''  // rich content doesn't reduce to plain text cleanly; downstream only uses the returned messageId.
-        : '';
+      : '';
     return { messageId: tdLibToServerMessageId(sent.id), date: sent.date, text: sentText };
   };
 
@@ -343,14 +335,22 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
           : undefined,
         input_message_contents: contents,
       }) as Td.messages;
-      return result.messages.flatMap((m): SentMessage[] => m ? [{ messageId: tdLibToServerMessageId(m.id), date: m.date, text: 'caption' in m.content && m.content.caption ? m.content.caption.text : '' }] : []);
+      if (result.messages.length !== media.length)
+        throw new Error(`TDLib returned ${result.messages.length} album messages for ${media.length} inputs`);
+      return result.messages.map((message, index): SentMessage => {
+        if (!message) throw new Error(`TDLib returned no album message at index ${index}`);
+        return {
+          messageId: tdLibToServerMessageId(message.id),
+          date: message.date,
+          text: 'caption' in message.content ? message.content.caption.text : '',
+        };
+      });
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
   };
 
-  const sendChatAction = async (chatId: string | number, action: 'typing' = 'typing') => {
-    void action;
+  const sendChatAction = async (chatId: string | number) => {
     await ensureChatKnown(chatId);
     await client.invoke({
       _: 'sendChatAction',
@@ -400,13 +400,12 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     }) as Td.stickers;
     return stickers.stickers.flatMap((s): CustomEmojiInfo[] => {
       if (s.full_type._ !== 'stickerFullTypeCustomEmoji') return [];
-      const setIdStr = String(s.set_id);
       const stickerFile = s.sticker;
       return [{
         customEmojiId: String(s.id),
-        isAnimated: s.format._ === 'stickerFormatTgs',
-        isVideo: s.format._ === 'stickerFormatWebm',
-        setName: setIdStr !== '0' ? setIdStr : undefined,
+        format: s.format._ === 'stickerFormatTgs'
+          ? 'animated'
+          : s.format._ === 'stickerFormatWebm' ? 'video' : 'static',
         download: async () => {
           const downloaded = await waitForFileDownload(stickerFile.id);
           const fs = await import('node:fs/promises');

@@ -20,14 +20,13 @@ export interface AnimationToTextResolver {
 }
 
 export const createAnimationToTextResolver = (params: {
-  enabled: boolean;
-  model?: LlmEndpoint;
+  model: LlmEndpoint;
   maxConcurrency: number;
   logger: Logger;
   lookupByHash: (hash: string) => ImageAltTextRecord | null;
   persist: (record: ImageAltTextRecord) => void;
 }): AnimationToTextResolver => {
-  const log = params.logger.withContext('telegram:animation-to-text');
+  const log = params.logger.withContext('media:animation-to-text');
   const semaphore = createSemaphore(params.maxConcurrency);
   const inflightByHash = new Map<string, Promise<ImageAltTextRecord>>();
 
@@ -53,9 +52,6 @@ export const createAnimationToTextResolver = (params: {
         const recheck = params.lookupByHash(cacheKey);
         if (recheck) return recheck;
 
-        const model = params.model;
-        if (!model) throw new Error('animationToText.model is required when animationToText.enabled=true');
-
         const uniqueFrames = isSticker ? deduplicateFrames(frames) : frames;
 
         const timestamps = frameTimestamps
@@ -74,7 +70,7 @@ export const createAnimationToTextResolver = (params: {
         });
 
         const result = await callDescriptionLlm({
-          model,
+          model: params.model,
           system,
           userText: 'Describe this animation.',
           images: uniqueFrames,
@@ -98,7 +94,10 @@ export const createAnimationToTextResolver = (params: {
     })();
 
     inflightByHash.set(cacheKey, task);
-    void task.finally(() => inflightByHash.delete(cacheKey)).catch(() => {});
+    void task.then(
+      () => inflightByHash.delete(cacheKey),
+      () => inflightByHash.delete(cacheKey),
+    );
     return task;
   };
 

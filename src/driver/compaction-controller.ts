@@ -18,7 +18,7 @@ export const createCompactionController = (deps: {
   compactionMeta: Signal<CompactionSessionMeta | null>;
   loadTurnResponses: (chatId: string, afterMs?: number) => Promise<TurnResponseV2[]>;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
-  setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext | undefined;
+  setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext;
   log: Logger;
 }) => {
   const cursorMs = computed(() => deps.compactionMeta()?.newCursorMs);
@@ -27,8 +27,7 @@ export const createCompactionController = (deps: {
   const disposeCursorEffect = effect(() => {
     const cursor = cursorMs();
     if (cursor == null) return;
-    const context = deps.setCompactCursor(deps.chatId, cursor);
-    if (context) deps.context(context);
+    deps.context(deps.setCompactCursor(deps.chatId, cursor));
   });
 
   let running = false;

@@ -1,4 +1,5 @@
-import type { Attachment, ForwardInfo, MessageEntity, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from './message';
+import type { IngressTelegramMessage, IngressTelegramMessageDelete, IngressTelegramMessageEdit } from './ingress-meta';
+import type { Attachment, ForwardInfo, MessageEntity, TelegramMessage, TelegramUser } from './message';
 import type {
   CanonicalAttachment,
   CanonicalDeleteEvent,
@@ -53,15 +54,16 @@ const adaptForwardInfo = (info?: ForwardInfo): CanonicalForwardInfo | undefined 
   return result;
 };
 
-// --- Rich text parser: Telegram's text + offset-based entities → ContentNode tree ---
-
 const entityToNode = (
   entity: MessageEntity,
   rawText: string,
   children: ContentNode[],
 ): ContentNode => {
+  const requireField = <T>(value: T | undefined, field: string): T => {
+    if (value === undefined) throw new Error(`Telegram ${entity.type} entity has no ${field}`);
+    return value;
+  };
   switch (entity.type) {
-  // Leaf nodes — raw text, no nested formatting
   case 'code':
     return { type: 'code', text: rawText };
   case 'pre':
@@ -69,7 +71,6 @@ const entityToNode = (
       ? { type: 'pre', text: rawText, language: entity.language }
       : { type: 'pre', text: rawText };
 
-  // Container nodes
   case 'bold':
   case 'italic':
   case 'underline':
@@ -80,24 +81,20 @@ const entityToNode = (
   case 'expandable_blockquote':
     return { type: 'blockquote', children };
 
-  // Links
   case 'text_link':
-    return { type: 'link', url: entity.url!, children };
+    return { type: 'link', url: requireField(entity.url, 'url'), children };
   case 'url':
     return { type: 'link', url: rawText, children };
 
-  // Mentions
   case 'mention':
     return { type: 'mention', children };
   case 'text_mention':
-    return { type: 'mention', userId: entity.userId!, children };
+    return { type: 'mention', userId: requireField(entity.userId, 'userId'), children };
 
-  // Custom emoji — metadata (set id / title / format) was resolved at ingress
-  // by resolveMessageMetadata; copy it onto the canonical node here.
   case 'custom_emoji':
     return {
       type: 'custom_emoji',
-      customEmojiId: entity.customEmojiId!,
+      customEmojiId: requireField(entity.customEmojiId, 'customEmojiId'),
       children,
       ...entity.customEmojiSetId && { stickerSetId: entity.customEmojiSetId },
       ...entity.customEmojiSetName && { stickerSetName: entity.customEmojiSetName },
@@ -126,18 +123,15 @@ const buildContentTree = (
     const entityStart = entity.offset;
     const entityEnd = entity.offset + entity.length;
 
-    // Skip entities outside our range
     if (entityStart < start || entityEnd > end) {
       i++;
       continue;
     }
 
-    // Plain text before this entity
     if (entityStart > pos) {
       nodes.push({ type: 'text', text: text.slice(pos, entityStart) });
     }
 
-    // Collect child entities (fully contained within this entity)
     const children: MessageEntity[] = [];
     let j = i + 1;
     while (j < entities.length && entities[j]!.offset < entityEnd) {
@@ -157,7 +151,6 @@ const buildContentTree = (
     i = j;
   }
 
-  // Trailing text
   if (pos < end) {
     nodes.push({ type: 'text', text: text.slice(pos, end) });
   }
@@ -169,25 +162,18 @@ export const parseContent = (text: string, entities?: MessageEntity[]): ContentN
   if (!entities || entities.length === 0) {
     return text ? [{ type: 'text', text }] : [];
   }
-  // Sort by offset ascending, length descending (outer entities first for nesting)
   const sorted = [...entities].sort((a, b) => a.offset - b.offset || b.length - a.length);
   return buildContentTree(text, sorted, 0, text.length);
 };
 
-// --- Adapt functions ---
-
-export const captureUtcOffset = (): number => -new Date().getTimezoneOffset();
-
-export const adaptMessage = (msg: TelegramMessage): CanonicalMessageEvent => {
-  const receivedAtMs = msg.receivedAtMs ?? Date.now();
-  const utcOffsetMin = msg.utcOffsetMin ?? captureUtcOffset();
+export const adaptMessage = (msg: IngressTelegramMessage): CanonicalMessageEvent => {
   const event: CanonicalMessageEvent = {
     type: 'message',
     chatId: msg.chatId,
     messageId: String(msg.messageId),
-    receivedAtMs,
+    receivedAtMs: msg.receivedAtMs,
     timestampSec: msg.date,
-    utcOffsetMin,
+    utcOffsetMin: msg.utcOffsetMin,
     content: parseContent(msg.text, msg.entities),
     attachments: adaptAttachments(msg.attachments),
   };
@@ -199,16 +185,14 @@ export const adaptMessage = (msg: TelegramMessage): CanonicalMessageEvent => {
   return event;
 };
 
-export const adaptEdit = (edit: TelegramMessageEdit): CanonicalEditEvent => {
-  const receivedAtMs = edit.receivedAtMs ?? Date.now();
-  const utcOffsetMin = edit.utcOffsetMin ?? captureUtcOffset();
+export const adaptEdit = (edit: IngressTelegramMessageEdit): CanonicalEditEvent => {
   const event: CanonicalEditEvent = {
     type: 'edit',
     chatId: edit.chatId,
     messageId: String(edit.messageId),
-    receivedAtMs,
+    receivedAtMs: edit.receivedAtMs,
     timestampSec: edit.editDate,
-    utcOffsetMin,
+    utcOffsetMin: edit.utcOffsetMin,
     content: parseContent(edit.text, edit.entities),
     attachments: adaptAttachments(edit.attachments),
   };
@@ -216,20 +200,16 @@ export const adaptEdit = (edit: TelegramMessageEdit): CanonicalEditEvent => {
   return event;
 };
 
-export const adaptDelete = (del: TelegramMessageDelete): CanonicalDeleteEvent => {
-  if (!del.chatId) throw new Error('Cannot adapt delete event without chatId');
-  const now = del.receivedAtMs ?? Date.now();
+export const adaptDelete = (del: IngressTelegramMessageDelete): CanonicalDeleteEvent => {
   return {
     type: 'delete',
     chatId: del.chatId,
     messageIds: del.messageIds.map(String),
-    receivedAtMs: now,
-    timestampSec: Math.floor(now / 1000),
-    utcOffsetMin: del.utcOffsetMin ?? captureUtcOffset(),
+    receivedAtMs: del.receivedAtMs,
+    timestampSec: Math.floor(del.receivedAtMs / 1000),
+    utcOffsetMin: del.utcOffsetMin,
   };
 };
-
-// --- Service event adaptation ---
 
 export const isServiceMessage = (msg: TelegramMessage): boolean => {
   if (msg.newChatMembers != null) return true;
@@ -240,7 +220,7 @@ export const isServiceMessage = (msg: TelegramMessage): boolean => {
   return msg.pinnedMessage != null;
 };
 
-export const adaptServiceEvent = (msg: TelegramMessage): CanonicalServiceEvent | null => {
+export const adaptServiceEvent = (msg: IngressTelegramMessage): CanonicalServiceEvent => {
   let action: ServiceAction | null = null;
 
   if (msg.newChatMembers && msg.newChatMembers.length > 0) {
@@ -257,16 +237,14 @@ export const adaptServiceEvent = (msg: TelegramMessage): CanonicalServiceEvent |
     action = { action: 'message_pinned', messageId: String(msg.pinnedMessage.messageId) };
   }
 
-  if (!action) return null;
+  if (!action) throw new Error('Telegram message is not a service event');
 
-  const receivedAtMs = msg.receivedAtMs ?? Date.now();
-  const utcOffsetMin = msg.utcOffsetMin ?? captureUtcOffset();
   const event: CanonicalServiceEvent = {
     type: 'service',
     chatId: msg.chatId,
-    receivedAtMs,
+    receivedAtMs: msg.receivedAtMs,
     timestampSec: msg.date,
-    utcOffsetMin,
+    utcOffsetMin: msg.utcOffsetMin,
     action,
   };
   if (msg.sender) event.actor = adaptUser(msg.sender);

@@ -1,20 +1,17 @@
 import type * as Td from 'tdlib-types';
 
 import type { EntityCache } from '../entity-cache';
+import { nonEmptyString } from '../tdlib-string';
 import { tdLibToServerMessageId } from './id-conversion';
 import type { Attachment, ForwardInfo, MessageEntity, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from './types';
 
-// --- chat / sender ---
-
 export const chatIdToString = (id: number | string): string => String(id);
 
-const senderToUser = (cache: EntityCache, sender: Td.MessageSender): TelegramUser | undefined => {
+const senderToUser = (cache: EntityCache, sender: Td.MessageSender): TelegramUser => {
   if (sender._ === 'messageSenderUser')
     return cache.resolveUser(sender.user_id) ?? { id: String(sender.user_id), firstName: '', isBot: false, isPremium: false };
   return cache.resolveChatAsUser(sender.chat_id) ?? { id: String(sender.chat_id), firstName: '', isBot: false, isPremium: false };
 };
-
-// --- entities ---
 
 const ENTITY_TYPE_MAP: Record<string, string> = {
   textEntityTypeMention: 'mention',
@@ -52,11 +49,9 @@ const convertEntities = (entities?: Array<Td.textEntity>): MessageEntity[] | und
   });
 };
 
-// --- attachments ---
-
-const photoToAttachment = (p: Td.photo, hasSpoiler?: boolean): Attachment | undefined => {
+const photoToAttachment = (p: Td.photo, hasSpoiler?: boolean): Attachment => {
   const largest = [...p.sizes].sort((a, b) => b.width * b.height - a.width * a.height)[0];
-  if (!largest) return undefined;
+  if (!largest) throw new Error('TDLib photo contains no sizes');
   return {
     type: 'photo',
     width: largest.width,
@@ -87,8 +82,8 @@ const animationToAttachment = (a: Td.animation, hasSpoiler?: boolean): Attachmen
   width: a.width,
   height: a.height,
   duration: a.duration,
-  fileName: a.file_name || undefined,
-  mimeType: a.mime_type || undefined,
+  fileName: nonEmptyString(a.file_name),
+  mimeType: nonEmptyString(a.mime_type),
   fileSize: a.animation.size,
   ...(hasSpoiler ? { hasSpoiler: true } : {}),
 });
@@ -98,8 +93,8 @@ const videoToAttachment = (v: Td.video, hasSpoiler?: boolean): Attachment => ({
   width: v.width,
   height: v.height,
   duration: v.duration,
-  fileName: v.file_name || undefined,
-  mimeType: v.mime_type || undefined,
+  fileName: nonEmptyString(v.file_name),
+  mimeType: nonEmptyString(v.mime_type),
   fileSize: v.video.size,
   ...(hasSpoiler ? { hasSpoiler: true } : {}),
 });
@@ -115,22 +110,22 @@ const videoNoteToAttachment = (vn: Td.videoNote): Attachment => ({
 const voiceToAttachment = (v: Td.voiceNote): Attachment => ({
   type: 'voice',
   duration: v.duration,
-  mimeType: v.mime_type || undefined,
+  mimeType: nonEmptyString(v.mime_type),
   fileSize: v.voice.size,
 });
 
 const audioToAttachment = (a: Td.audio): Attachment => ({
   type: 'audio',
   duration: a.duration,
-  fileName: a.file_name || undefined,
-  mimeType: a.mime_type || undefined,
+  fileName: nonEmptyString(a.file_name),
+  mimeType: nonEmptyString(a.mime_type),
   fileSize: a.audio.size,
 });
 
 const documentToAttachment = (d: Td.document): Attachment => ({
   type: 'document',
-  fileName: d.file_name || undefined,
-  mimeType: d.mime_type || undefined,
+  fileName: nonEmptyString(d.file_name),
+  mimeType: nonEmptyString(d.mime_type),
   fileSize: d.document.size,
 });
 
@@ -149,7 +144,7 @@ const convertContent = (content: Td.MessageContent): ContentResult | null => {
     return {
       text: content.caption.text,
       entities: convertEntities(content.caption.entities),
-      ...(att ? { attachments: [att] } : {}),
+      attachments: [att],
     };
   }
   case 'messageSticker':
@@ -281,7 +276,7 @@ const flattenPageBlock = (block: Td.PageBlock): string => {
     return '';
   case 'pageBlockList':
     return `${block.items.map((item, i) => {
-      const marker = item.label || `${i + 1}.`;
+      const marker = item.label === '' ? `${i + 1}.` : item.label;
       const body = item.blocks.map(flattenPageBlock).join('').trim();
       return `${marker} ${body}\n`;
     }).join('')  }\n`;
@@ -321,8 +316,6 @@ const flattenPageBlock = (block: Td.PageBlock): string => {
 const flattenRichMessage = (msg: Td.richMessage): string =>
   msg.blocks.map(flattenPageBlock).join('').replace(/\n{3,}/g, '\n\n').trim();
 
-// --- forward info ---
-
 const convertForwardInfo = (cache: EntityCache, fwd: Td.messageForwardInfo | undefined): ForwardInfo | undefined => {
   if (!fwd) return undefined;
   const info: ForwardInfo = { date: fwd.date };
@@ -354,11 +347,9 @@ const convertForwardInfo = (cache: EntityCache, fwd: Td.messageForwardInfo | und
   return info;
 };
 
-// --- service messages ---
-
 const convertServiceContent = (
   cache: EntityCache,
-  base: Omit<TelegramMessage, 'source'>,
+  base: Omit<TelegramMessage, 'sender'> & { sender: TelegramUser },
   content: Td.MessageContent,
 ): TelegramMessage | null => {
   switch (content._) {
@@ -368,25 +359,24 @@ const convertServiceContent = (
       return user ? [user] : [{ id: String(uid), firstName: '', isBot: false, isPremium: false }];
     });
     if (members.length === 0) return null;
-    return { ...base, source: 'userbot', newChatMembers: members };
+    return { ...base, newChatMembers: members };
   }
   case 'messageChatJoinByLink':
   case 'messageChatJoinByRequest': {
-    if (!base.sender) return null;
-    return { ...base, source: 'userbot', newChatMembers: [base.sender] };
+    return { ...base, newChatMembers: [base.sender] };
   }
   case 'messageChatDeleteMember': {
     const left = cache.resolveUser(content.user_id) ?? { id: String(content.user_id), firstName: '', isBot: false, isPremium: false };
-    return { ...base, source: 'userbot', leftChatMember: left };
+    return { ...base, leftChatMember: left };
   }
   case 'messageChatChangeTitle':
-    return { ...base, source: 'userbot', newChatTitle: content.title };
+    return { ...base, newChatTitle: content.title };
   case 'messageChatChangePhoto':
-    return { ...base, source: 'userbot', newChatPhoto: true };
+    return { ...base, newChatPhoto: true };
   case 'messageChatDeletePhoto':
-    return { ...base, source: 'userbot', deleteChatPhoto: true };
+    return { ...base, deleteChatPhoto: true };
   case 'messagePinMessage':
-    return { ...base, source: 'userbot', pinnedMessage: { messageId: tdLibToServerMessageId(content.message_id) } };
+    return { ...base, pinnedMessage: { messageId: tdLibToServerMessageId(content.message_id) } };
   default:
     return null;
   }
@@ -403,17 +393,19 @@ const SERVICE_CONTENT_TYPES = new Set([
   'messagePinMessage',
 ]);
 
-// --- public API ---
-
-export const fromTdMessage = (cache: EntityCache, msg: Td.message): TelegramMessage | null => {
+export const fromTdMessage = (
+  cache: EntityCache,
+  msg: Td.message,
+  source: TelegramMessage['source'],
+): TelegramMessage | null => {
   const replyTo = msg.reply_to?._ === 'messageReplyToMessage' ? msg.reply_to : undefined;
   const quote = replyTo?.quote;
-  const base: Omit<TelegramMessage, 'source'> = {
+  const base: Omit<TelegramMessage, 'sender'> & { sender: TelegramUser } = {
     messageId: tdLibToServerMessageId(msg.id),
     chatId: chatIdToString(msg.chat_id),
     sender: senderToUser(cache, msg.sender_id),
     date: msg.date,
-    editDate: msg.edit_date || undefined,
+    editDate: msg.edit_date === 0 ? undefined : msg.edit_date,
     text: '',
     replyToMessageId: replyTo?.message_id ? tdLibToServerMessageId(replyTo.message_id) : undefined,
     replyQuote: quote
@@ -422,6 +414,7 @@ export const fromTdMessage = (cache: EntityCache, msg: Td.message): TelegramMess
     forwardInfo: convertForwardInfo(cache, msg.forward_info),
     mediaGroupId: msg.media_album_id && msg.media_album_id !== '0' ? msg.media_album_id : undefined,
     viaBotId: msg.via_bot_user_id ? String(msg.via_bot_user_id) : undefined,
+    source,
   };
 
   if (SERVICE_CONTENT_TYPES.has(msg.content._)) {
@@ -435,11 +428,11 @@ export const fromTdMessage = (cache: EntityCache, msg: Td.message): TelegramMess
     text: result.text,
     entities: result.entities,
     attachments: result.attachments,
-    source: 'userbot',
   };
 };
 
 export const fromTdMessageEdited = (cache: EntityCache, msg: Td.message): TelegramMessageEdit | null => {
+  if (msg.edit_date === 0) throw new Error('TDLib edited message has no edit timestamp');
   const result = convertContent(msg.content);
   if (!result) return null;
   return {
@@ -447,7 +440,7 @@ export const fromTdMessageEdited = (cache: EntityCache, msg: Td.message): Telegr
     chatId: chatIdToString(msg.chat_id),
     sender: senderToUser(cache, msg.sender_id),
     date: msg.date,
-    editDate: msg.edit_date || msg.date,
+    editDate: msg.edit_date,
     text: result.text,
     entities: result.entities,
     attachments: result.attachments,
@@ -458,6 +451,3 @@ export const fromTdDeletedMessages = (chatId: string | number, messageIds: Reado
   messageIds: [...messageIds],
   chatId: String(chatId),
 });
-
-// --- entity-type-aware HTML escaping (utility for markdown→HTML pipeline; we still
-// rely on tdlib's own HTML parser via parseTextEntities) ---

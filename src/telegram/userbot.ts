@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+
 import type { Logger } from '@guiiai/logg';
 import * as tdl from 'tdl';
 import type * as Td from 'tdlib-types';
@@ -5,10 +7,12 @@ import type * as Td from 'tdlib-types';
 import type { EntityCache } from './entity-cache';
 import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
+import { captureIngressMetadata } from './ingress-meta';
 import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit } from './message';
 import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
 import { resolveMessageMetadata } from './message/resolve-metadata';
 import { fromTdMessage, fromTdMessageEdited } from './message/tdlib';
+import { firstNonEmptyString } from './tdlib-string';
 import { isTypingLikeAction } from './typing-action';
 
 export interface UserbotOptions {
@@ -41,8 +45,6 @@ export interface UserbotClient {
 
 export interface FetchOptions {
   limit?: number;
-  minId?: number;
-  maxId?: number;
   offsetId?: number;
 }
 
@@ -87,6 +89,19 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
   const editBus = createEventBus<TelegramMessageEdit>('userbot:edit', log);
   const deleteBus = createEventBus<TelegramMessageDelete>('userbot:delete', log);
   const typingBus = createEventBus<TypingEvent>('userbot:typing', log);
+  const updateQueues = new Map<string, Promise<void>>();
+
+  const enqueueUpdate = (chatId: string, task: () => Promise<void>): void => {
+    const previous = updateQueues.get(chatId) ?? Promise.resolve();
+    const current = previous.then(task);
+    updateQueues.set(chatId, current);
+    void current.then(
+      () => {
+        if (updateQueues.get(chatId) === current) updateQueues.delete(chatId);
+      },
+      error => log.withError(error).withFields({ chatId }).error('Userbot update queue blocked'),
+    );
+  };
 
   client.on('update', (update: Td.Update) => {
     switch (update._) {
@@ -97,12 +112,10 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
       cache.putChat(update.chat);
       return;
     case 'updateNewMessage': {
-      const msg = fromTdMessage(cache, update.message);
+      const msg = fromTdMessage(cache, update.message, 'userbot');
       if (msg) {
-        void (async () => {
-          await resolveMessageMetadata(client, msg);
-          messageBus.emit(msg);
-        })();
+        const ingress = captureIngressMetadata(msg);
+        enqueueUpdate(ingress.chatId, async () => messageBus.emit(ingress));
       }
       return;
     }
@@ -111,23 +124,38 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
       // We re-fetch the message to get the full updated state and emit a single edit.
       // Phantom edits (link preview load, etc.) do not fire updateMessageEdited — only
       // updateMessageContent — so this gating is exactly what we want.
-      void (async () => {
-        try {
-          const msg = await client.invoke({ _: 'getMessage', chat_id: update.chat_id, message_id: update.message_id }) as Td.message;
-          const edit = fromTdMessageEdited(cache, msg);
-          if (edit) {
-            await resolveMessageMetadata(client, edit);
-            editBus.emit(edit);
+      const ingress = captureIngressMetadata({});
+      const chatId = String(update.chat_id);
+      enqueueUpdate(chatId, async () => {
+        let attempts = 0;
+        while (true) {
+          try {
+            const msg = await client.invoke({ _: 'getMessage', chat_id: update.chat_id, message_id: update.message_id }) as Td.message;
+            const edit = fromTdMessageEdited(cache, msg);
+            if (edit) editBus.emit({ ...edit, ...ingress });
+            return;
+          } catch (error) {
+            attempts++;
+            const delayMs = Math.min(1000 * 2 ** (attempts - 1), 30000);
+            log.withError(error).withFields({
+              chatId,
+              messageId: update.message_id,
+              attempt: attempts,
+              retryInMs: delayMs,
+            }).error('Failed to fetch edited message; chat update queue remains blocked');
+            await sleep(delayMs);
           }
-        } catch (err) {
-          log.withError(err).withFields({ chatId: update.chat_id, messageId: update.message_id }).warn('Failed to fetch edited message');
         }
-      })();
+      });
       return;
     }
     case 'updateDeleteMessages': {
       if (!update.is_permanent) return;
-      deleteBus.emit({ messageIds: [...update.message_ids].map(tdLibToServerMessageId), chatId: String(update.chat_id) });
+      const deletion = captureIngressMetadata({
+        messageIds: [...update.message_ids].map(tdLibToServerMessageId),
+        chatId: String(update.chat_id),
+      });
+      enqueueUpdate(deletion.chatId, async () => deleteBus.emit(deletion));
       return;
     }
     case 'updateChatAction': {
@@ -145,7 +173,10 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     const me = await client.invoke({ _: 'getMe' }) as Td.user;
     log.withFields({
       id: me.id,
-      username: me.usernames?.editable_username || me.usernames?.active_usernames?.[0],
+      username: firstNonEmptyString(
+        me.usernames?.editable_username,
+        me.usernames?.active_usernames?.[0],
+      ),
       name: [me.first_name, me.last_name].filter(Boolean).join(' '),
     }).log('Authenticated');
     // Warm chat cache so updates can resolve sender info before we see them.
@@ -174,10 +205,8 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     }) as Td.messages;
     const msgs = result.messages.flatMap((m): TelegramMessage[] => {
       if (!m) return [];
-      const conv = fromTdMessage(cache, m);
+      const conv = fromTdMessage(cache, m, 'userbot');
       if (!conv) return [];
-      if (opts.minId !== undefined && conv.messageId <= opts.minId) return [];
-      if (opts.maxId !== undefined && conv.messageId >= opts.maxId) return [];
       return [conv];
     });
     await Promise.all(msgs.map(m => resolveMessageMetadata(client, m)));
@@ -193,7 +222,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     }) as Td.messages;
     const msgs = result.messages.flatMap((m): TelegramMessage[] => {
       if (!m) return [];
-      const conv = fromTdMessage(cache, m);
+      const conv = fromTdMessage(cache, m, 'userbot');
       return conv ? [conv] : [];
     });
     await Promise.all(msgs.map(m => resolveMessageMetadata(client, m)));

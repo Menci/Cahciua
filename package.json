@@ -43,8 +43,10 @@
     "markdown-it": "^14.1.1",
     "markdown-it-math-loose": "^4.1.1",
     "prebuilt-tdlib": "^0.1008064.0",
+    "reflect-metadata": "^0.2.2",
     "sharp": "^0.34.5",
     "tdl": "^8.1.0",
+    "tsyringe": "^4.10.0",
     "valibot": "^1.2.0",
     "yaml": "^2.8.2"
   },

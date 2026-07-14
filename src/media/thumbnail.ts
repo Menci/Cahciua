@@ -1,7 +1,5 @@
 import sharp from 'sharp';
 
-import type { Attachment } from '../telegram/message';
-
 // Target ~100 tokens per image under Claude's formula: tokens = ceil(w*h / 750).
 // 100 * 750 = 75,000 max pixels. For a square that's ~274px per side.
 // We cap total pixels at 75,000 by limiting the long edge and relying on
@@ -9,10 +7,11 @@ import type { Attachment } from '../telegram/message';
 const THUMBNAIL_MAX_PIXELS = 75000;
 
 export const generateThumbnail = async (buffer: Buffer): Promise<string> => {
-  // First pass: read metadata to get dimensions
   const meta = await sharp(buffer).metadata();
-  const w = meta.width ?? 512;
-  const h = meta.height ?? 512;
+  if (meta.width == null || meta.height == null)
+    throw new Error('Thumbnail source has no raster dimensions');
+  const w = meta.width;
+  const h = meta.height;
 
   // Compute max long edge that keeps w*h ≤ THUMBNAIL_MAX_PIXELS.
   // For aspect ratio r = longEdge/shortEdge:
@@ -32,7 +31,13 @@ export const generateThumbnail = async (buffer: Buffer): Promise<string> => {
 
 const THUMBNAIL_TYPES = new Set(['photo', 'sticker']);
 
-export const canGenerateThumbnail = (attachment: Attachment): boolean =>
+export interface ThumbnailSource {
+  type: string;
+  isAnimatedSticker?: boolean;
+  isVideoSticker?: boolean;
+}
+
+export const canGenerateThumbnail = (attachment: ThumbnailSource): boolean =>
   THUMBNAIL_TYPES.has(attachment.type)
   && !attachment.isAnimatedSticker
   && !attachment.isVideoSticker;

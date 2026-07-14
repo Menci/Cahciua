@@ -27,7 +27,6 @@ export interface ImageToTextResolver {
 const hashBuffer = (buffer: Buffer): string =>
   createHash('sha256').update(buffer).digest('hex');
 
-/** Compute cache key from a base64-encoded thumbnail. */
 export const computeThumbnailHash = (thumbnailWebp: string): string =>
   hashBuffer(Buffer.from(thumbnailWebp, 'base64'));
 
@@ -42,18 +41,16 @@ const prepareImageToTextBuffer = async (buffer: Buffer): Promise<Buffer> =>
     .toBuffer();
 
 export const createImageToTextResolver = (params: {
-  enabled: boolean;
-  model?: LlmEndpoint;
+  model: LlmEndpoint;
   maxConcurrency: number;
   logger: Logger;
   lookupByHash: (imageHash: string) => ImageAltTextRecord | null;
   persist: (record: ImageAltTextRecord) => void;
 }): ImageToTextResolver => {
-  const log = params.logger.withContext('telegram:image-to-text');
+  const log = params.logger.withContext('media:image-to-text');
   const semaphore = createSemaphore(params.maxConcurrency);
   const inflightByHash = new Map<string, Promise<ImageAltTextRecord>>();
 
-  // Core: thumbnail hash → dedup → cache lookup → semaphore-gated LLM → persist
   const resolveByBuffer = (
     thumbnailBuffer: Buffer,
     caption: string,
@@ -70,18 +67,14 @@ export const createImageToTextResolver = (params: {
 
       await semaphore.acquire();
       try {
-        // Re-check after acquiring semaphore
         const recheck = params.lookupByHash(imageHash);
         if (recheck) return recheck;
-
-        const model = params.model;
-        if (!model) throw new Error('imageToText.model is required when imageToText.enabled=true');
 
         const imageBuffer = await prepareImageToTextBuffer(highResBuffer ?? thumbnailBuffer);
         const system = await renderImageToTextSystemPrompt({ caption });
 
         const result = await callDescriptionLlm({
-          model,
+          model: params.model,
           system,
           userText: 'Describe this image.',
           images: [imageBuffer],
@@ -104,7 +97,10 @@ export const createImageToTextResolver = (params: {
     })();
 
     inflightByHash.set(imageHash, task);
-    void task.finally(() => inflightByHash.delete(imageHash)).catch(() => {});
+    void task.then(
+      () => inflightByHash.delete(imageHash),
+      () => inflightByHash.delete(imageHash),
+    );
     return task;
   };
 
@@ -114,7 +110,6 @@ export const createImageToTextResolver = (params: {
     },
 
     async hydrateCanonicalAttachments(attachments, caption) {
-      if (!params.enabled) return;
       await Promise.all(attachments.map(async att => {
         if (att.altText || !att.thumbnailWebp) return;
         const buffer = Buffer.from(att.thumbnailWebp, 'base64');

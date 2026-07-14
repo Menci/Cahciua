@@ -15,7 +15,8 @@ import type { CompactionSessionMeta, ProbeResponseV2, TurnResponseV2 } from '../
 import type { ImageAltTextRecord } from '../media/image-to-text';
 import type { PipelineEvent } from '../projection/reduce';
 import type { RuntimeEvent, RuntimeEventData } from '../runtime-event';
-import type { TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from '../telegram/message';
+import type { IngressTelegramMessageDelete } from '../telegram/ingress-meta';
+import type { TelegramMessage, TelegramMessageEdit, TelegramUser } from '../telegram/message';
 import type { Attachment } from '../telegram/message/types';
 import type { ConversationEntry } from '../unified-api/types';
 
@@ -118,9 +119,7 @@ export const persistMessageEdit = (db: DB, edit: TelegramMessageEdit) => {
   }
 };
 
-export const persistMessageDelete = (db: DB, del: TelegramMessageDelete) => {
-  if (!del.chatId) return;
-
+export const persistMessageDelete = (db: DB, del: IngressTelegramMessageDelete) => {
   db.update(messages)
     .set({ deletedAt: new Date() })
     .where(and(
@@ -225,14 +224,17 @@ const reconstructEditEvent = (row: EventRow): CanonicalEditEvent => {
   return event;
 };
 
-const reconstructDeleteEvent = (row: EventRow): CanonicalDeleteEvent => ({
-  type: 'delete',
-  chatId: row.chatId,
-  messageIds: row.messageIds ?? [],
-  receivedAtMs: row.receivedAtMs,
-  timestampSec: row.timestampSec,
-  utcOffsetMin: row.utcOffsetMin,
-});
+const reconstructDeleteEvent = (row: EventRow): CanonicalDeleteEvent => {
+  if (!row.messageIds) throw new Error(`Delete event ${row.id} has no message IDs`);
+  return {
+    type: 'delete',
+    chatId: row.chatId,
+    messageIds: row.messageIds,
+    receivedAtMs: row.receivedAtMs,
+    timestampSec: row.timestampSec,
+    utcOffsetMin: row.utcOffsetMin,
+  };
+};
 
 const reconstructServiceEvent = (row: EventRow): CanonicalServiceEvent => {
   const event: CanonicalServiceEvent = {
@@ -275,28 +277,18 @@ const reconstructEvent = (row: EventRow): PipelineEvent => {
   }
 };
 
-export const loadEvents = (db: DB, chatId: string, afterMs?: number): PipelineEvent[] => {
+const loadEventRows = (db: DB, chatId: string, afterMs?: number) => {
   const cond = afterMs != null
     ? and(eq(events.chatId, chatId), gte(events.receivedAtMs, afterMs))
     : eq(events.chatId, chatId);
-  const rows = db.select().from(events)
+  return db.select().from(events)
     .where(cond)
     .orderBy(events.receivedAtMs, events.id)
     .all();
-  return rows.map(reconstructEvent);
 };
 
-// Resolve chatId for message IDs that lack chat context (MTProto private chat deletes).
-// Operates on platform-level numeric IDs (messages table stores raw Telegram data).
-export const lookupChatId = (db: DB, messageIds: number[]): string | undefined => {
-  if (messageIds.length === 0) return undefined;
-  const row = db.select({ chatId: messages.chatId })
-    .from(messages)
-    .where(inArray(messages.messageId, messageIds))
-    .limit(1)
-    .get();
-  return row?.chatId;
-};
+export const loadEvents = (db: DB, chatId: string, afterMs?: number): PipelineEvent[] =>
+  loadEventRows(db, chatId, afterMs).map(reconstructEvent);
 
 export const loadKnownChatIds = (db: DB): string[] => {
   const rows = db.selectDistinct({ chatId: events.chatId })
@@ -409,19 +401,19 @@ export const loadLastProbeTime = (db: DB, chatId: string): number => {
   return row?.requestedAt ?? 0;
 };
 
-const reconstructImageAltTextRecord = (row: typeof imageAltTexts.$inferSelect): ImageAltTextRecord => ({
-  imageHash: row.imageHash,
-  altText: row.altText,
-  altTextTokens: row.altTextTokens,
-  ...row.stickerSetName && { stickerSetName: row.stickerSetName },
-});
-
 export const loadImageAltTextByHash = (db: DB, imageHash: string): ImageAltTextRecord | null => {
   const row = db.select().from(imageAltTexts)
     .where(eq(imageAltTexts.imageHash, imageHash))
     .limit(1)
     .get();
-  return row ? reconstructImageAltTextRecord(row) : null;
+  return row
+    ? {
+        imageHash: row.imageHash,
+        altText: row.altText,
+        altTextTokens: row.altTextTokens,
+        ...row.stickerSetName && { stickerSetName: row.stickerSetName },
+      }
+    : null;
 };
 
 export const persistImageAltText = (db: DB, record: ImageAltTextRecord) => {
@@ -452,21 +444,9 @@ export const updateEventAttachments = (db: DB, eventId: number, attachments: Can
     .run();
 };
 
-export interface EventWithId {
-  id: number;
-  event: PipelineEvent;
-}
-
-export const loadEventsWithId = (db: DB, chatId: string, afterMs?: number): EventWithId[] => {
-  const cond = afterMs != null
-    ? and(eq(events.chatId, chatId), gte(events.receivedAtMs, afterMs))
-    : eq(events.chatId, chatId);
-  const rows = db.select().from(events)
-    .where(cond)
-    .orderBy(events.receivedAtMs, events.id)
-    .all();
-  return rows.map(row => ({ id: row.id, event: reconstructEvent(row) }));
-};
+export const loadEventsWithId = (db: DB, chatId: string, afterMs?: number) =>
+  loadEventRows(db, chatId, afterMs)
+    .map(row => ({ id: row.id, event: reconstructEvent(row) }));
 
 /** Load all attachments for a message (used by download_file tool). */
 export const loadMessageAttachments = (db: DB, chatId: string, messageId: number): Attachment[] | undefined => {

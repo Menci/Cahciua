@@ -8,8 +8,6 @@ import { gunzipSync } from 'node:zlib';
 
 import sharp from 'sharp';
 
-import type { Attachment } from '../telegram/message';
-
 const execFileAsync = promisify(execFile);
 
 // Same budget as IMAGE_TO_TEXT_MAX_EDGE in image-to-text.ts
@@ -17,18 +15,15 @@ const FRAME_MAX_EDGE = 512;
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
 const DEFAULT_MAX_FRAMES = 5;
 
-// ffmpeg-static provides a bundled ffmpeg binary
 const getFfmpegPath = async (): Promise<string> =>
   (await import('ffmpeg-static')).default!;
 
-// ffprobe-static provides a bundled ffprobe binary
 const getFfprobePath = async (): Promise<string> =>
   (await import('ffprobe-static')).default.path;
 
 const hashBuffer = (buffer: Buffer): string =>
   createHash('sha256').update(buffer).digest('hex');
 
-/** Deduplicate frames by content hash, preserving order. */
 export const deduplicateFrames = (frames: Buffer[]): Buffer[] => {
   const seen = new Set<string>();
   const unique: Buffer[] = [];
@@ -48,8 +43,18 @@ export interface FrameExtractionResult {
   frameTimestamps?: number[];
 }
 
-/** Whether this attachment can have frames extracted. */
-export const canExtractFrames = (att: Attachment): boolean => {
+export interface FrameCandidate {
+  type: string;
+  isAnimatedSticker?: boolean;
+  isVideoSticker?: boolean;
+  mimeType?: string;
+}
+
+export interface FrameSource extends FrameCandidate {
+  type: 'animation' | 'sticker';
+}
+
+export const canExtractFrames = <T extends FrameCandidate>(att: T): att is T & FrameSource => {
   if (att.type === 'animation') return true;
   if (att.type === 'sticker' && (att.isVideoSticker || att.isAnimatedSticker))
     return true;
@@ -110,7 +115,8 @@ const getVideoFrameCount = async (filePath: string): Promise<number> => {
     filePath,
   ]);
   const count = parseInt(stdout.trim(), 10);
-  return isNaN(count) || count <= 0 ? 1 : count;
+  if (isNaN(count) || count <= 0) throw new Error('ffprobe returned no positive frame count');
+  return count;
 };
 
 const getVideoFps = async (filePath: string): Promise<number | undefined> => {
@@ -154,11 +160,9 @@ const extractVideoFrames = async (buffer: Buffer, maxFrames: number): Promise<{ 
     // ffmpeg outputs 1-indexed: frame_1.png, frame_2.png, ...
     const frames: Buffer[] = [];
     for (let i = 1; i <= indices.length; i++) {
-      try {
-        const framePath = join(dir, `frame_${i}.png`);
-        const raw = await sharp(framePath).png().toBuffer();
-        frames.push(await resizeFrame(raw));
-      } catch { /* skip missing frames */ }
+      const framePath = join(dir, `frame_${i}.png`);
+      const raw = await sharp(framePath).png().toBuffer();
+      frames.push(await resizeFrame(raw));
     }
 
     const fps = await getVideoFps(inputPath);
@@ -173,15 +177,23 @@ const extractVideoFrames = async (buffer: Buffer, maxFrames: number): Promise<{ 
 
 const extractTgsFrames = async (buffer: Buffer, maxFrames: number): Promise<{ frames: Buffer[]; frameTimestamps?: number[] }> => {
   const lottieJson = gunzipSync(buffer);
-  const parsed = JSON.parse(lottieJson.toString('utf-8'));
-  const inPoint = typeof parsed.ip === 'number' ? parsed.ip : 0;
-  const outPoint = typeof parsed.op === 'number' ? parsed.op : 1;
+  const parsed = JSON.parse(lottieJson.toString('utf-8')) as Record<string, unknown>;
+  const numberField = (name: string): number => {
+    const value = parsed[name];
+    if (typeof value !== 'number' || !Number.isFinite(value))
+      throw new Error(`TGS field ${name} must be a finite number`);
+    return value;
+  };
+  const inPoint = numberField('ip');
+  const outPoint = numberField('op');
   // rlottie exposes valid frame indices as 0..totalFrame()-1. Lottie `op` may be
   // fractional; rounding can select `totalFrame()` itself and crash native export.
   const totalFrames = Math.max(1, Math.floor(outPoint - inPoint));
-  const width = typeof parsed.w === 'number' ? parsed.w : 512;
-  const height = typeof parsed.h === 'number' ? parsed.h : 512;
-  const fps = typeof parsed.fr === 'number' && parsed.fr > 0 ? parsed.fr : undefined;
+  const width = numberField('w');
+  const height = numberField('h');
+  const fps = numberField('fr');
+  if (outPoint <= inPoint || width <= 0 || height <= 0 || fps <= 0)
+    throw new Error('TGS dimensions, frame range, and frame rate must be positive');
 
   const indices = pickFrameIndices(totalFrames, maxFrames);
 
@@ -199,14 +211,13 @@ const extractTgsFrames = async (buffer: Buffer, maxFrames: number): Promise<{ fr
     return await resizeFrame(png);
   }));
 
-  const frameTimestamps = fps ? indices.map(i => i / fps) : undefined;
+  const frameTimestamps = indices.map(i => i / fps);
   return { frames, frameTimestamps };
 };
 
-/** Extract equidistant frames from an animation buffer. */
 export const extractFrames = async (
   buffer: Buffer,
-  att: Attachment,
+  att: FrameCandidate,
   maxFrames = DEFAULT_MAX_FRAMES,
 ): Promise<FrameExtractionResult> => {
   if (buffer.length > MAX_FILE_SIZE)
