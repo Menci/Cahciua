@@ -81,4 +81,27 @@ describe('createSessionIngressQueue', () => {
 
     vi.useRealTimers();
   });
+
+  it('retries failed commits without advancing the session cursor', async () => {
+    vi.useFakeTimers();
+    const committed: string[] = [];
+    let attempts = 0;
+    const queue = createSessionIngressQueue<TestEvent>({
+      logger: useLogger('test'),
+      transform: async event => event,
+      commit: event => {
+        attempts++;
+        if (event.id === '1' && attempts === 1) throw new Error('commit failed');
+        committed.push(event.id);
+      },
+    });
+
+    queue.enqueue({ chatId: 'chat', id: '1' });
+    queue.enqueue({ chatId: 'chat', id: '2' });
+    await vi.runOnlyPendingTimersAsync();
+
+    await vi.waitFor(() => expect(committed).toEqual(['1', '2']));
+    expect(attempts).toBe(3);
+    vi.useRealTimers();
+  });
 });
