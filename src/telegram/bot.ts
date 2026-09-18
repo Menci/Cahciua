@@ -15,6 +15,7 @@ import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
 import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
 import { fromTdMessage } from './message/tdlib';
+import { createSendTracker } from './send-tracker';
 import { firstNonEmptyString } from './tdlib-string';
 
 export interface BotClientOptions {
@@ -125,6 +126,7 @@ const findFileInContent = (content: Td.MessageContent): Td.file | undefined => {
 export const createBotClient = (options: BotClientOptions, logger: Logger): BotClient => {
   const log = logger.withContext('telegram:bot');
   const cache = createEntityCache();
+  const sendTracker = createSendTracker();
 
   const client = tdl.createClient({
     apiId: options.apiId,
@@ -155,6 +157,10 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     case 'updateNewChat':
       cache.putChat(update.chat);
       break;
+    case 'updateMessageSendSucceeded':
+    case 'updateMessageSendFailed':
+      sendTracker.settle(update);
+      break;
     case 'updateNewMessage': {
       const msg = fromTdMessage(cache, update.message, 'bot');
       if (msg) messageBus.emit(captureIngressMetadata(msg));
@@ -180,6 +186,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
 
   const stop = async () => {
     log.log('Stopping bot...');
+    sendTracker.abort('bot client stopped');
     await client.close();
     log.log('Bot stopped');
   };
@@ -239,11 +246,12 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
       reply_to: replyTo,
       input_message_content: content,
     }) as Td.message;
+    const confirmed = await sendTracker.track(sent);
 
-    const sentText = sent.content._ === 'messageText'
-      ? sent.content.text.text
+    const sentText = confirmed.content._ === 'messageText'
+      ? confirmed.content.text.text
       : '';
-    return { messageId: tdLibToServerMessageId(sent.id), date: sent.date, text: sentText };
+    return { messageId: tdLibToServerMessageId(confirmed.id), date: confirmed.date, text: sentText };
   };
 
   const sendFileGeneric = async (
@@ -294,8 +302,9 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
           : undefined,
         input_message_content: content,
       }) as Td.message;
-      const captionText = 'caption' in sent.content && sent.content.caption ? sent.content.caption.text : '';
-      return { messageId: tdLibToServerMessageId(sent.id), date: sent.date, text: captionText };
+      const confirmed = await sendTracker.track(sent);
+      const captionText = 'caption' in confirmed.content && confirmed.content.caption ? confirmed.content.caption.text : '';
+      return { messageId: tdLibToServerMessageId(confirmed.id), date: confirmed.date, text: captionText };
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
@@ -337,14 +346,15 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
       }) as Td.messages;
       if (result.messages.length !== media.length)
         throw new Error(`TDLib returned ${result.messages.length} album messages for ${media.length} inputs`);
-      return result.messages.map((message, index): SentMessage => {
-        if (!message) throw new Error(`TDLib returned no album message at index ${index}`);
-        return {
-          messageId: tdLibToServerMessageId(message.id),
-          date: message.date,
-          text: 'caption' in message.content ? message.content.caption.text : '',
-        };
-      });
+      const confirmed = await Promise.all(result.messages.map(async message => {
+        if (!message) throw new Error('TDLib returned no album message');
+        return await sendTracker.track(message);
+      }));
+      return confirmed.map((message): SentMessage => ({
+        messageId: tdLibToServerMessageId(message.id),
+        date: message.date,
+        text: 'caption' in message.content ? message.content.caption.text : '',
+      }));
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }

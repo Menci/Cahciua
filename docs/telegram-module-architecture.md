@@ -18,6 +18,7 @@ manager.ts
 ```
 
 - `bot.ts`: bot authentication, outbound actions, bot-limited ingress fallback.
+- `send-tracker.ts`: pairs bot sends with TDLib's terminal send updates.
 - `userbot.ts`: full-visibility ingress, history, typing, and preferred downloads.
 - `manager.ts`: creates the single active ingress stream and blocks on media transforms.
 - `adaptation.ts`: Telegram message/entity structures to canonical events.
@@ -61,10 +62,12 @@ Transform failures are retried and keep the queue blocked. Do not replace this w
 
 Driver hooks translate `send_message` attachments into Telegram sends and use the configured workspace read command for file bytes.
 
-After a successful send, each returned Telegram message becomes a synthetic canonical message with `isSelfSent=true`:
+Bot sends resolve through the send tracker: TDLib returns a per-dialog yet-unsent id immediately, while the media upload and server confirmation continue asynchronously. The invoke is only considered complete when TDLib emits `updateMessageSendSucceeded` (which carries the final server message id) or `updateMessageSendFailed`. There is no timeout — long uploads and FLOOD_WAIT retries legitimately keep a message pending — and pending sends are aborted only when the bot client stops. Temp files backing `inputFileLocal` are deleted after the terminal update, since removing them earlier breaks the upload.
+
+After the confirmed send, each returned Telegram message becomes a synthetic canonical message with `isSelfSent=true`:
 
 ```text
-send succeeds
+send confirmed
 -> adapt synthetic TelegramMessage
 -> persist canonical event
 -> configured? hydrate + Pipeline push

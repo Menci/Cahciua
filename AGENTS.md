@@ -90,7 +90,7 @@ Runtime resolves `vendor/libtdjson.so` first and falls back to `prebuilt-tdlib`.
 
 ### Telegram Clients And Ingress
 
-Bot and userbot are both tdl clients. With a configured userbot, it exclusively owns message/edit/delete/typing ingress; otherwise the bot provides limited ingress. Outbound sends always use the bot. Downloads prefer userbot and fall back to bot, keyed by `(chatId, messageId)` rather than persisted TDLib-local file IDs.
+Bot and userbot are both tdl clients. With a configured userbot, it exclusively owns message/edit/delete/typing ingress; otherwise the bot provides limited ingress. Outbound sends always use the bot and wait for TDLib's terminal `updateMessageSendSucceeded`/`updateMessageSendFailed` before returning: TDLib resolves `sendMessage` with a per-dialog yet-unsent id while the upload and server confirmation continue asynchronously, so temp files backing `inputFileLocal` must live until that confirmation and the final server message id is only known there. There is no confirmation timeout — large uploads and FLOOD_WAIT retries keep the message pending for unbounded time while still making progress; pending sends are aborted only on client stop. Downloads prefer userbot and fall back to bot, keyed by `(chatId, messageId)` rather than persisted TDLib-local file IDs.
 
 `TelegramManager` owns clients, the ordered ingress queue, and blocking transforms. Metadata resolution and media work run inside that queue after timestamps are captured. `live-handlers.ts` owns Telegram update side effects. `event-sink.ts` centralizes canonical persistence/publication. Commit and publication phases are idempotent so failures retry without advancing the queue cursor or duplicating events. `driver-hooks.ts` owns send/react/download and synthetic self-events. `post-startup.ts` owns historical media backfills.
 
@@ -98,7 +98,7 @@ Configured chats are the in-memory residency whitelist. Unconfigured chats persi
 
 ### Synthetic Self-Events
 
-Every successful bot send immediately creates a canonical `isSelfSent=true` event, persists it, and publishes it to Pipeline without waking Driver. Userbot echo deduplication replaces the synthetic payload with authoritative Telegram content while preserving `isSelfSent` and the original local ordering timestamp. This closes the probe race without making final context arrival-order dependent.
+Every successful bot send creates a canonical `isSelfSent=true` event carrying the final server message id, persists it, and publishes it to Pipeline without waking Driver. Userbot echo deduplication matches on that message id and replaces the synthetic payload with authoritative Telegram content while preserving `isSelfSent` and the original local ordering timestamp. This closes the probe race without making final context arrival-order dependent.
 
 ### Telegram Markdown
 

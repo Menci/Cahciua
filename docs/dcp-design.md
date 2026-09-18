@@ -181,7 +181,7 @@ persist platform message/edit/delete row
 
 The queue retries the same commit object on persistence/publication failure; live handlers and the event sink make each phase idempotent. Unconfigured chats stop after persistence.
 
-Driver hooks own outbound sends. After Telegram confirms a send, they create and persist a synthetic `isSelfSent` event, project it for configured chats, and deliberately do not notify Driver. This makes the bot's action visible to the next probe before userbot echo.
+Driver hooks own outbound sends. After Telegram confirms a send (the terminal `updateMessageSendSucceeded`/`updateMessageSendFailed` that also carries the final server message id), they create and persist a synthetic `isSelfSent` event, project it for configured chats, and deliberately do not notify Driver. This makes the bot's action visible to the next probe before userbot echo, and its message id makes the echo deduplication in Projection an exact match.
 
 Post-startup tasks backfill missing animation hashes and uncached custom emoji, then replay affected resident chats.
 
