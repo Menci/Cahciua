@@ -14,6 +14,7 @@ import type { RuntimeConfig } from '../config/config';
 import type { LlmEndpoint } from '../llm/types';
 import type { RenderedContext } from '../rendering/types';
 import type { Attachment } from '../telegram/message/types';
+import type { BanSpammerResult } from '../telegram/moderation-types';
 
 export { mergeContext } from './merge';
 export { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
@@ -25,6 +26,7 @@ export const createDriver = (config: DriverConfig, deps: {
   persistTurnResponse: (chatId: string, tr: TurnResponseV2) => Promise<void>;
   persistProbeResponse: (chatId: string, probe: ProbeResponseV2) => Promise<void>;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number, attachments?: SendMessageAttachment[]) => Promise<{ messageId: number; date: number }>;
+  banSpammer: (chatId: string, messageId: number) => Promise<BanSpammerResult>;
   setMessageReaction: (chatId: string, messageId: number, emoji: string | undefined) => Promise<void>;
   sendTypingAction: (chatId: string) => Promise<void>;
   // Called when a chat enters (true) / leaves (false) its debounce window, so the
@@ -108,6 +110,7 @@ export const createDriver = (config: DriverConfig, deps: {
       chatConfig,
       runtimeConfig: deps.runtimeConfig,
       sendMessage: deps.sendMessage,
+      banSpammer: deps.banSpammer,
       setMessageReaction: deps.setMessageReaction,
       loadMessageAttachments: deps.loadMessageAttachments,
       messageExists: deps.messageExists,

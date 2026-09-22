@@ -20,6 +20,7 @@ import {
   persistTurnResponse,
   updateEventAttachments,
 } from '../../db';
+import { findModerationSender, loadModerationMessageIds } from '../../db/moderation';
 import { createDriver } from '../../driver';
 import { createDriverInputBus } from '../../driver/input-bus';
 import {
@@ -28,6 +29,8 @@ import {
   createTelegramLiveHandlers,
   createTelegramPostStartupTasks,
 } from '../../telegram';
+import { createModerationService } from '../../telegram/moderation';
+import { createModerationApi } from '../../telegram/moderation-api';
 import type { Registrar } from '../registrar';
 import { TOKENS } from '../tokens';
 
@@ -79,6 +82,29 @@ export const registerDriver = ({ get, register }: Registrar): void => {
     const pipeline = get(TOKENS.PIPELINE);
     const telegram = get(TOKENS.TELEGRAM_DRIVER_HOOKS);
     const backgroundTasks = get(TOKENS.BACKGROUND_TASK_MANAGER);
+    const bot = get(TOKENS.TELEGRAM_CLIENTS).bot;
+    const eventSink = get(TOKENS.TELEGRAM_EVENT_SINK);
+    const moderation = createModerationService({
+      api: createModerationApi(bot.raw(), bot.botUserId()),
+      findSender: (chatId, messageId) => findModerationSender(db, chatId, messageId),
+      loadMessageIds: (chatId, userId) => loadModerationMessageIds(db, chatId, userId),
+      botUserId: bot.botUserId(),
+      enabledChatIds: new Set(get(TOKENS.CHAT_IDS).filter(chatId => resolveChatConfig(config, chatId).tools.banSpammer)),
+      publishDeletions: (chatId, messageIds) => {
+        const receivedAtMs = Date.now();
+        const utcOffsetMin = -new Date(receivedAtMs).getTimezoneOffset();
+        persistMessageDelete(db, { chatId, messageIds, receivedAtMs, utcOffsetMin });
+        eventSink.accept({
+          type: 'delete',
+          chatId,
+          messageIds: messageIds.map(String),
+          receivedAtMs,
+          timestampSec: Math.floor(receivedAtMs / 1000),
+          utcOffsetMin,
+        }, { notifyDriver: false });
+      },
+      logger: get(TOKENS.LOGGER),
+    });
     return createDriver({
       chatIds: get(TOKENS.CHAT_IDS),
       resolveChatConfig: id => resolveChatConfig(config, id),
@@ -90,6 +116,7 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       setMessageReaction: telegram.setMessageReaction,
       onDebounceStateChange: telegram.onDebounceStateChange,
       sendMessage: telegram.sendMessage,
+      banSpammer: moderation.banSpammer,
       loadCompaction: chatId => loadCompaction(db, chatId),
       loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
       persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),

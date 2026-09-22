@@ -57,7 +57,7 @@ describe('createCompactionController', () => {
         imageToText: { enabled: false, maxConcurrency: 1 },
         animationToText: { enabled: false, maxFrames: 1, maxConcurrency: 1 },
         customEmojiToText: { enabled: false, maxFrames: 1, maxConcurrency: 1 },
-        tools: { bash: { backgroundThresholdSec: 10 } },
+        tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
       },
       context: rendered,
       compactionMeta: signal<CompactionSessionMeta | null>(null),

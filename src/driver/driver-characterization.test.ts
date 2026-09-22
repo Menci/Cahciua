@@ -46,7 +46,7 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   imageToText: { enabled: false, maxConcurrency: 1 },
   animationToText: { enabled: false, maxFrames: 0, maxConcurrency: 1 },
   customEmojiToText: { enabled: false, maxFrames: 0, maxConcurrency: 1 },
-  tools: { bash: { backgroundThresholdSec: 10 } },
+  tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
 });
 
 const buildExternalContext = (receivedAtMs = 1000): RenderedContext => [{
@@ -65,6 +65,7 @@ const makeDriverDeps = (overrides: Partial<DriverDeps> = {}): DriverDeps => ({
   persistTurnResponse: async () => {},
   persistProbeResponse: async () => {},
   sendMessage: async () => ({ messageId: 1, date: 0 }),
+  banSpammer: async () => ({ status: 'rejected' as const, reason: 'unknown_message' as const }),
   setMessageReaction: async () => {},
   sendTypingAction: async () => {},
   onDebounceStateChange: () => {},

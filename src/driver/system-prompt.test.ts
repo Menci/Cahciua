@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { renderMarkdownString } from '@velin-dev/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { renderSystemPrompt } from './prompt';
+
 // basePath must be a file (not directory) so createRequire resolves pnpm's node_modules
 const basePath = resolve(__dirname, '../../package.json');
 
@@ -36,6 +38,28 @@ const assertNoVueSyntaxLeak = (rendered: string) => {
 const systemTemplate = loadTemplate('system.velin.md');
 const renderSystem = (data: Record<string, unknown> = {}) =>
   renderMarkdownString(systemTemplate, data, basePath).then(r => r.rendered);
+
+describe('chat-owned moderation policy', () => {
+  it.each(['primary', 'probe'])('has no moderation introduction by default in %s', async mode => {
+    const props = { mode, modelName: 'test-model', chatId: '-100123' };
+    const rendered = await renderSystem(props);
+    const lateBinding = await renderMarkdownString(loadTemplate('late-binding.velin.md'), { mode, timeNow: '2026-09-22' }, basePath);
+    for (const text of [rendered, lateBinding.rendered]) {
+      expect(text).not.toContain('ban_spammer');
+      expect(text).not.toContain('spam-moderation');
+      expect(text).not.toContain('Spam Moderation');
+    }
+  });
+
+  it.each(['primary', 'probe'] as const)('renders the configured group policy in %s', async mode => {
+    const policy = 'Use `ban_spammer` under this group-specific policy. Keep the audit notice concise.';
+    const rendered = await renderSystemPrompt({
+      mode, modelName: 'test-model', chatId: '-100123',
+      systemFiles: [{ filename: 'group-policy.md', content: policy }],
+    });
+    expect(rendered).toContain(policy);
+  });
+});
 
 describe('system.velin.md (mode=primary)', () => {
   const baseProps = { mode: 'primary', modelName: 'gpt-4o', chatId: '-1001234567890' };

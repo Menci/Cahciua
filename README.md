@@ -29,6 +29,16 @@ Both bot and optional userbot use TDLib through `tdl`. The userbot is the exclus
 
 Ingress is ordered per chat. Enabled image, animation, and custom-emoji descriptions are blocking transforms: unresolved head events prevent later events from committing. Successful bot sends immediately inject a synthetic self-event so the probe sees the bot's action before userbot echo arrives.
 
+## Spam Moderation
+
+Enable `tools.banSpammer: true` in the intended chat override; its default is false. Tool exposure and backend authorization follow this setting. Put the group policy in that chat's `systemFiles` alongside identity files so both probe and primary receive it through the existing injection mechanism.
+
+Store the group policy in a deployment-local Markdown file. Deployment-local group policies can identify eligible accounts through sufficient conversational history showing exclusively one-off solicitation. Genuine questions, feedback, and ordinary exchanges establish normal participation. For normal members discussing topics outside the bot's permitted scope, the bot remains silent on that topic and leaves member conduct to human administrators. Archived names and messages serve as internal reference examples interpreted in context. Backend protections cover owners, administrators, the bot itself, and users with at least 10 archived messages. Deleted messages retain their contribution to the observed count; eligibility is independent of join age.
+
+The bot needs administrator permissions to restrict members and delete messages. Its action scope is permanent ban plus deletion of known messages permitted within Telegram's 48-hour bot window. Each call checks current Telegram state and returns its actual outcomes. Existing tool call/result history provides the audit record; message lookup and counting use the existing event archive.
+
+After a confirmed ban, the tool result supplies an exact announcement with a `tg://user?id=...` link labeled "spam 账号". Primary calls `send_message` with exactly one argument, `text`, containing that announcement. Names, usernames, profile text, spam content, media, and audit reasoning stay in the private assessment. Partial cleanup receives its own factual announcement. Link accessibility depends on Telegram clients and account privacy; the numeric UID is also retained in the audit record.
+
 ## Setup
 
 Requirements: Node.js >=22, pnpm, `libpng-dev`, and `librlottie-dev`.

@@ -72,6 +72,7 @@ const ChatConfigSchema = v.object({
     maxConcurrency: v.optional(v.number(), 3),
   }), {}),
   tools: v.object({
+    banSpammer: v.optional(v.boolean(), false),
     bash: v.optional(v.object({
       backgroundThresholdSec: v.optional(v.number(), 10),
     }), {}),
@@ -127,6 +128,7 @@ const ChatOverrideSchema = v.optional(v.partial(v.object({
     maxConcurrency: v.number(),
   })),
   tools: v.partial(v.object({
+    banSpammer: v.boolean(),
     bash: v.partial(v.object({
       backgroundThresholdSec: v.number(),
     })),
@@ -187,6 +189,7 @@ export interface ResolvedChatConfig {
   animationToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
   customEmojiToText: { enabled: boolean; model?: string; maxFrames: number; maxConcurrency: number };
   tools: {
+    banSpammer: boolean;
     bash: { backgroundThresholdSec: number };
     webSearch?: WebSearchConfig;
     webFetch?: WebFetchConfig;
@@ -273,6 +276,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
       maxConcurrency: merged.customEmojiToText.maxConcurrency,
     },
     tools: {
+      banSpammer: merged.tools.banSpammer,
       bash: { backgroundThresholdSec: merged.tools.bash.backgroundThresholdSec },
       ...(webSearch ? { webSearch } : {}),
       ...(webFetch ? { webFetch } : {}),

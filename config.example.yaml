@@ -84,6 +84,8 @@ chats:
       maxConcurrency: 3
 
     tools:
+      # Enable per chat only; moderation policy belongs in that chat's systemFiles.
+      banSpammer: false
       bash:
         backgroundThresholdSec: 10
       web:
@@ -97,3 +99,9 @@ chats:
 
   # Replace with a Telegram chat ID to enable residency and Driver processing.
   "-1000000000000": {}
+  # To enable moderation for a specific group:
+  # "-1001234567890":
+  #   tools: { banSpammer: true }
+  #   systemFiles:
+  #     - "prompts/IDENTITY.md"
+  #     - "prompts/group-moderation.md"

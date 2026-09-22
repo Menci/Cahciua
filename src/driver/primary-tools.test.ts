@@ -51,6 +51,7 @@ const createFixture = () => {
     chatConfig: {
       imageToText: { enabled: false },
       tools: {
+        banSpammer: false,
         bash: { backgroundThresholdSec: 10 },
       },
     },
@@ -62,6 +63,7 @@ const createFixture = () => {
       readFileSizeLimit: 1024 * 1024,
     },
     sendMessage: vi.fn(async () => ({ messageId: 77 })),
+    banSpammer: async () => ({ status: 'rejected' as const, reason: 'unknown_message' as const }),
     setMessageReaction: vi.fn(async () => {}),
     loadMessageAttachments: vi.fn(() => [{ type: 'photo' as const }]),
     messageExists: vi.fn(() => true),
@@ -86,6 +88,22 @@ beforeEach(() => {
 });
 
 describe('createPrimaryTools', () => {
+  it('omits moderation tools and descriptions when the chat disables moderation', () => {
+    const { deps } = createFixture();
+    const tools = createPrimaryTools(deps);
+    expect(tools.some(tool => tool.name === 'ban_spammer')).toBe(false);
+    expect(JSON.stringify(tools.map(tool => ({ name: tool.name, description: tool.description })))).not.toContain('ban_spammer');
+  });
+
+  it('binds moderation to the active chat and preserves its follow-up', async () => {
+    const { deps } = createFixture();
+    deps.chatConfig.tools.banSpammer = true;
+    deps.banSpammer = vi.fn(async () => ({ status: 'rejected' as const, reason: 'message_limit' as const }));
+    const result = await findTool(createPrimaryTools(deps), 'ban_spammer').execute({ message_id: '42', reason: 'unsolicited promotion' });
+    expect(deps.banSpammer).toHaveBeenCalledExactlyOnceWith('chat-1', 42);
+    expect(result.requiresFollowUp).toBe(true);
+  });
+
   it('preserves tool order and inserts configured web providers in place', async () => {
     const { deps } = createFixture();
     const search = vi.fn(async () => ({ results: [] }));

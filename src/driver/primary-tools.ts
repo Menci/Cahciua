@@ -4,6 +4,7 @@ import type { Logger } from '@guiiai/logg';
 
 import {
   createAttachmentDownloader,
+  createBanSpammerTool,
   createBashTool,
   createDownloadFileTool,
   createEndTurnTool,
@@ -24,6 +25,7 @@ import type { LlmEndpoint } from '../llm/types';
 import { renderImageToTextSystemPrompt } from '../media/image-to-text-prompt';
 import { callDescriptionLlm } from '../media/llm-description';
 import type { Attachment } from '../telegram/message/types';
+import type { BanSpammerResult } from '../telegram/moderation-types';
 
 type ImageDetail = 'low' | 'high';
 
@@ -42,6 +44,7 @@ export interface PrimaryToolsDependencies {
     replyToMessageId?: number,
     attachments?: SendMessageAttachment[],
   ) => Promise<{ messageId: number }>;
+  banSpammer: (chatId: string, messageId: number) => Promise<BanSpammerResult>;
   setMessageReaction: (chatId: string, messageId: number, emoji: string | undefined) => Promise<void>;
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
   messageExists: (chatId: string, messageId: number) => boolean;
@@ -129,6 +132,9 @@ export const createPrimaryTools = (deps: PrimaryToolsDependencies): CahciuaTool[
 
   const tools: CahciuaTool[] = [
     sendMessageTool,
+    ...(deps.chatConfig.tools.banSpammer
+      ? [createBanSpammerTool(messageId => deps.banSpammer(deps.chatId, messageId))]
+      : []),
     createReactTool(
       (messageId, emoji) => deps.setMessageReaction(deps.chatId, messageId, emoji),
       messageExists,

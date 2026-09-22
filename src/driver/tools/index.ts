@@ -1,4 +1,5 @@
 export { createAttachmentDownloader } from './attachment-downloader';
+export { createBanSpammerTool } from './ban-spammer';
 export { createBashTool } from './bash';
 export { createDecideTool, extractDecideResult } from './decide';
 export { createDownloadFileTool } from './download-file';

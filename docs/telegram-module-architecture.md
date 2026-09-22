@@ -26,6 +26,9 @@ manager.ts
 - `event-sink.ts`: canonical persistence plus configured-chat publication boundary.
 - `driver-hooks.ts`: sends, reactions, downloads, and synthetic self-events.
 - `post-startup.ts`: animation hash and custom-emoji backfills.
+- `moderation.ts`: chat/user protection rules, current-state checks, and ban/deletion execution.
+- `moderation-api.ts`: bot-only TDLib moderation calls and message-ID conversion.
+- `../db/moderation.ts`: sender lookup and distinct message-ID queries against the existing archive.
 
 Generic media code belongs in `src/media/`, not Telegram.
 
@@ -75,6 +78,20 @@ send confirmed
 ```
 
 For media groups, one synthetic event is created per returned message. The first carries the caption, matching Telegram echo behavior.
+
+## Spam Moderation
+
+Tool exposure and backend authorization require the current chat to enable `tools.banSpammer` (default false). Group policy is injected through chat `systemFiles`. Deployment-local group policies can identify eligible accounts through sufficient conversational history showing exclusively one-off solicitation. Genuine questions, feedback, and ordinary exchanges establish normal participation. For normal members discussing topics outside the bot's permitted scope, the bot remains silent on that topic and leaves member conduct to human administrators. Archived names and messages serve as internal reference examples interpreted in context.
+
+The Driver tool supplies an evidence message ID and a private reason. Its chat comes from the active Driver scope, and its target UID comes from persisted canonical message/edit events. The backend refuses missing evidence, non-user senders, self, protected membership states, missing bot permissions, and targets with 10 or more distinct observed message IDs. Edits do not inflate this count; deletes and context compaction do not reduce it. Service messages do not count. Unobserved history and message types not admitted by adaptation are outside this archive count.
+
+Execution uses the bot client even when userbot owns ingress. Load and verify the evidence through that bot, recheck the archive count, ban permanently, then load each known target message into the bot's own TDLib cache, check its sender/date/deletion properties, and delete it. An already-banned target can be cleaned up using the archived evidence identity after its evidence message has disappeared. Fresh calls require current evidence for an ordinary member. TDLib requires loaded message IDs for server deletion. The action scope is permanent ban plus permitted deletion of known messages younger than 48 hours.
+
+The Driver serializes tool calls per chat. Each invocation queries current state and returns successful, unavailable, undeletable, and failed message IDs. A failed ban propagates to the existing tool error handler; deletion failures are logged and returned alongside successful deletions. The existing tool call/result history owns the audit trail, including the evidence ID, private reason, target UID, and returned outcomes.
+
+Confirmed deletions and messages already unavailable to the bot update the platform archive and emit canonical delete events through the event sink without waking Driver. Repeating publication is safe for Projection. A subsequent userbot delete echo is also harmless. No direct IC mutation is allowed.
+
+The tool result requires model follow-up. After a confirmed ban, the tool result supplies an exact announcement with a `tg://user?id=...` link labeled "spam 账号". Primary calls `send_message` with exactly one argument, `text`, containing that announcement. Names, usernames, profile text, spam content, media, and audit reasoning stay in the private assessment. Partial cleanup receives its own factual announcement.
 
 ## Downloads
 
