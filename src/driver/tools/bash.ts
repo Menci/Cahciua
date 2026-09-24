@@ -14,16 +14,16 @@ export const createBashTool = (runtime: RuntimeConfig, backgroundTask: {
 }): CahciuaTool => createTool({
   name: 'bash',
   description:
-    'Execute a shell command. Output (stdout+stderr combined) is truncated to 4 KB. '
+    'Execute a shell command. Output (stdout + stderr combined) is truncated to 4 KB. '
     + 'For large outputs, redirect to a file and read specific ranges. '
-    + `Set timeout_seconds > ${backgroundTask.backgroundThresholdSec} for long-running commands — they run as background tasks and return immediately with a task ID.`,
+    + `When you set \`timeout_seconds > ${backgroundTask.backgroundThresholdSec}\`, the \`bash\` tool spawns a background task, immediately returning a task ID.`,
   parameters: {
     type: 'object',
     properties: {
       command: { type: 'string', description: 'The shell command to execute.' },
       timeout_seconds: {
         type: 'number',
-        description: `Timeout in seconds. Commands with timeout > ${backgroundTask.backgroundThresholdSec}s run as background tasks and return immediately with a task ID. Short commands (e.g. ls, cat) typically need 5-10s; builds or tests may need 60-300s.`,
+        description: `Timeout in seconds. Commands with \`timeout_seconds > ${backgroundTask.backgroundThresholdSec}\` run as background tasks and return immediately with a task ID. For short commands (e.g. ls, cat), set to \`${backgroundTask.backgroundThresholdSec}\`; builds or tests may need 60-300s.`,
       },
       intention: { type: 'string', description: 'Brief description of what this command does (shown in background task status).' },
     },
@@ -42,7 +42,7 @@ export const createBashTool = (runtime: RuntimeConfig, backgroundTask: {
         timeoutSec * 1000,
       );
       return {
-        content: JSON.stringify({ background_task_id: taskId, message: `Background task started (id: ${taskId}). You will be notified when it completes. Use kill_task to cancel or read_task_output to view results.` }),
+        content: JSON.stringify({ background_task_id: taskId, message: `Background task started (id: ${taskId}). You will be notified when it completes. Use \`kill_task\` to cancel or \`read_task_output\` to view the results.` }),
         requiresFollowUp: true,
       };
     }

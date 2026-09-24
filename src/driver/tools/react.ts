@@ -6,13 +6,13 @@ export const createReactTool = (
   messageExists: (messageId: number) => boolean,
 ): CahciuaTool => createTool({
   name: 'react',
-  description: 'Add or remove your emoji reaction on a message in the current chat. Reactions are a lightweight acknowledgement — useful when a full reply would be excessive. Bot accounts can only set one reaction per message; calling react again replaces the previous one. Custom emoji are not supported.',
+  description: 'Add or remove your emoji reaction on a message in the current chat. Bot accounts can only set one reaction per message; calling react again replaces the previous one.',
   parameters: {
     type: 'object',
     properties: {
-      message_id: { type: 'string', description: 'The id of the message in the current chat to react to.' },
-      emoji: { type: 'string', description: 'A single standard emoji (e.g. "👍", "❤️"). Required unless remove=true.' },
-      remove: { type: 'boolean', description: 'Set to true to clear your reaction on this message instead of adding one. Defaults to false.' },
+      message_id: { type: 'string', description: 'The ID of an existing message.' },
+      emoji: { type: 'string', description: 'A single emoji (e.g. "👍", "❤️"). Required unless remove=true.' },
+      remove: { type: 'boolean', description: 'Set to `true` to clear your reaction on this message instead of adding one. Defaults to `false`.' },
     },
     required: ['message_id'],
   },

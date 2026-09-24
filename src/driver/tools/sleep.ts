@@ -17,7 +17,7 @@ export const createSleepTool = (): CahciuaTool => createTool({
       },
       reason: {
         type: 'string',
-        description: 'Brief note on why you are sleeping (not shown to anyone).',
+        description: 'Brief note on why you are sleeping, for debug diagnostic purposes.',
       },
     },
     required: ['seconds'],

@@ -13,14 +13,14 @@ export const createSendMessageTool = (
 ): CahciuaTool => {
   const properties: Record<string, unknown> = {
     text: { type: 'string', description: 'The message to send. When sending attachments, this becomes the caption.' },
-    reply_to: { type: 'string', description: 'A message id to reply to.' },
+    reply_to: { type: 'string', description: 'The ID of an earlier message to create a quoted reply. A quoted reply is always preferred whenever your response is related to an earlier message.' },
     still_working: {
       type: 'boolean',
-      description: 'Set to true while you are still working and need another step after this message. Defaults to false.',
+      description: 'Set to `true` while you are still working on an agentic task and need another step after this message. Defaults to `false`.',
     },
     attachments: {
       type: 'array',
-      description: 'Media attachments to send. Multiple attachments are sent as a media group (album). Telegram media groups support up to 10 items; photos and videos can be mixed, but audio and documents must be grouped separately.',
+      description: 'Media attachments to send. Up to 10 attachments can be sent as a media group (album). A media group can only contain either a mix of photos and videos, or a single media type.',
       items: {
         type: 'object',
         properties: {
@@ -39,7 +39,7 @@ export const createSendMessageTool = (
 
   return createTool({
     name: 'send_message',
-    description: 'Send a message in the current conversation, optionally with media attachments.',
+    description: 'Send a message to the current conversation, optionally with media attachments.',
     parameters: {
       type: 'object',
       properties,
