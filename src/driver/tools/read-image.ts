@@ -18,17 +18,17 @@ export const createReadImageTool = (deps: {
   resolveImageToText?: (buffer: Buffer, detail: 'low' | 'high') => Promise<string>;
 }): CahciuaTool => createTool({
   name: 'read_image',
-  description: 'Read and analyze an image from a chat attachment or the filesystem.',
+  description: 'Read and analyze an image from either a chat attachment or the filesystem.',
   parameters: {
     type: 'object',
     properties: {
       file_id: {
         type: 'string',
-        description: 'The file-id from an attachment element (format: messageId:index).',
+        description: 'The `file-id` from an `<attachment>` element. (Typical format: `number:number`)',
       },
       path: {
         type: 'string',
-        description: 'Filesystem path to an image file.',
+        description: 'Filesystem path to a local image file.',
       },
       detail: {
         type: 'string',

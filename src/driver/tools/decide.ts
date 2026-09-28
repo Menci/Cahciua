@@ -14,8 +14,7 @@ interface DecideArgs {
 export const createDecideTool = (): CahciuaTool => createTool({
   name: DECIDE_TOOL_NAME,
   description:
-    'Record your judgement on whether the bot should take any action this turn. '
-    + 'Calling this tool IS the output of the evaluation; the arguments are the result.',
+    'Submit your prediction whether the chatbot will immediately perform new actions or send new messages to the chatroom.',
   parameters: {
     type: 'object',
     properties: {
@@ -23,12 +22,12 @@ export const createDecideTool = (): CahciuaTool => createTool({
         type: 'string',
         enum: ['send_message', 'no_action'],
         description:
-          '`send_message` — the bot should take action this turn, and that action MUST eventually produce at least one `send_message` call (other tools like `react`, `web_search`, `bash` may be chained before it). '
-          + '`no_action` — the bot should do nothing at all this turn (no message, no reaction, no tool call).',
+          '`send_message`: You predict that the chatbot will immediately perform new actions or send new messages to the chatroom.\n'
+          + '`no_action`: You predict that the chatbot will keep silent (no message, no reaction, no tool call) at this turn.',
       },
       reason: {
         type: 'string',
-        description: 'Brief, honest explanation of the judgement (one or two sentences). Speaks about the bot in third person.',
+        description: 'Explain your judgement in one sentence.',
       },
     },
     required: ['should_act', 'reason'],

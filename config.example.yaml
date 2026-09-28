@@ -53,6 +53,7 @@ chats:
       model: "probe"
     systemFiles:
       - "prompts/IDENTITY.md"
+      - "prompts/style-enforcements.md"
     sendTypingAction: true
     blockedUserIds: []
 

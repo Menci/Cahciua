@@ -5,10 +5,14 @@ const END_TURN_TOOL_NAME = 'end_turn';
 
 export const createEndTurnTool = (): CahciuaTool => createTool({
   name: END_TURN_TOOL_NAME,
+  // Besides the description listed below, `end_turn` also triggers the
+  // `loopEndedWithoutSendMessage` check.
+  // Notice: Do not leak the actual `loopEndedWithoutSendMessage` logic into the
+  // system prompt or the tool definition. This `end_turn` tool works better
+  // when the LLM does not know the full logic behind it.
   description:
     'Signal that you are done with this turn and have nothing more to do. '
-    + 'Calling this ends the current turn cleanly. Use this only when no other '
-    + 'action is appropriate — never as a substitute for an action you should be taking.',
+    + 'After calling \`end_turn\`, you will proceed to receive new incoming messages and notifications of completed background tasks (if any) for next turns.',
   parameters: { type: 'object', properties: {} },
   execute: () => ({ content: JSON.stringify({ ok: true }), requiresFollowUp: false }),
 });

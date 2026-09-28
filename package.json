@@ -28,7 +28,7 @@
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@guiiai/logg": "^1.2.11",
-    "@velin-dev/core": "^0.4.1",
+    "@velin-dev/core-vue": "^1.0.0-beta.6",
     "alien-signals": "^3.1.2",
     "better-sqlite3": "^11.7.0",
     "big-integer": "^1.6.52",

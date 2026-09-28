@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { renderMarkdownString } from '@velin-dev/core';
+import { renderMarkdownString } from '@velin-dev/core-vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderSystemPrompt } from './prompt';

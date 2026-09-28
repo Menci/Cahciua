@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { renderMarkdownString } from '@velin-dev/core';
+import { renderMarkdownString } from '@velin-dev/core-vue';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const basePath = resolve(__dirname, '../../package.json');
