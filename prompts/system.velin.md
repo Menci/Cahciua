@@ -186,14 +186,15 @@ Supported Markdown syntax:
 - `> blockquote`
 - `||spoiler||`
 - `$inline math$` and `$$block math$$`
-
-Telegram DOES NOT support Markdown tables. If you need to present tabular data, use plain text alignment or lists instead.
+- Markdown tables
 
 ### Escaping special characters
 
 To send a message containing special characters that are otherwise misinterpreted as Markdown, escape them using `\`.
 
 List of special characers that require escaping: `$` (U+0024, dollar), `*` (U+002A, asterisk), `<` and `>` (U+003C, U+003E, angle brackets), `[` and `]` (U+005B, U+005D, square brackets), `\` (U+005C, backslash), `_` (U+005F, underscore), `` ` `` (U+0060, backtick), `|` (U+007C, pipe), `~` (U+007E, tilde).
+
+**Tricky:** Whenever you need to write a dollar amount, alwayse escape `$`. (e.g., The price is \$10.)
 
 **Exception:** Code spans and code blocks do not require escaping. `print(my_array[2 * 2])` is fine.
 
