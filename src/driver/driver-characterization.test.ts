@@ -84,6 +84,7 @@ const makeDriverDeps = (overrides: Partial<DriverDeps> = {}): DriverDeps => ({
   loadMessageAttachments: () => undefined,
   messageExists: () => true,
   downloadMessageMedia: async () => undefined,
+  readOldMessages: () => '',
   resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'key', model: 'mock', apiFormat: 'openai-chat' }),
   backgroundTask: {
     startTask: () => 0,

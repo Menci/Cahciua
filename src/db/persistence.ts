@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, or, sql } from 'drizzle-orm';
 
 import type { DB } from './client';
 import { codec } from './codec';
@@ -447,6 +447,35 @@ export const updateEventAttachments = (db: DB, eventId: number, attachments: Can
 export const loadEventsWithId = (db: DB, chatId: string, afterMs?: number) =>
   loadEventRows(db, chatId, afterMs)
     .map(row => ({ id: row.id, event: reconstructEvent(row) }));
+
+/**
+ * Load the message/edit/delete events for specific message IDs in a single chat.
+ * Backs the `read_old_messages` tool: the LLM supplies IDs it saw in the
+ * chatlog, and we rebuild the same XML representation from persisted events.
+ *
+ * Delete events don't carry a single `message_id` — they list their targets in
+ * the `message_ids` JSON array — so they need a separate `json_each` match.
+ * Scoping by `chatId` is mandatory: a chat's context must never read another
+ * chat's history.
+ */
+export const loadEventsByMessageIds = (db: DB, chatId: string, messageIds: string[]): PipelineEvent[] => {
+  if (messageIds.length === 0) return [];
+  const idList = sql.join(messageIds.map(id => sql`${id}`), sql`, `);
+  const rows = db.select().from(events)
+    .where(and(
+      eq(events.chatId, chatId),
+      or(
+        and(inArray(events.type, ['message', 'edit']), inArray(events.messageId, messageIds)),
+        and(
+          eq(events.type, 'delete'),
+          sql`exists (select 1 from json_each(${events.messageIds}) where json_each.value in (${idList}))`,
+        ),
+      ),
+    ))
+    .orderBy(events.receivedAtMs, events.id)
+    .all();
+  return rows.map(reconstructEvent);
+};
 
 /** Load all attachments for a message (used by download_file tool). */
 export const loadMessageAttachments = (db: DB, chatId: string, messageId: number): Attachment[] | undefined => {

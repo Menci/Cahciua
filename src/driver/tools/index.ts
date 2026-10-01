@@ -8,6 +8,7 @@ export { executeToolCall, extractToolCalls } from './execution';
 export { createKillTaskTool } from './kill-task';
 export { createReactTool } from './react';
 export { createReadImageTool } from './read-image';
+export { MAX_READ_OLD_MESSAGE_IDS, createReadOldMessagesTool } from './read-old-messages';
 export { createReadTaskOutputTool } from './read-task-output';
 export { createSendMessageTool } from './send-message';
 export type { SendMessageAttachment } from './send-message';

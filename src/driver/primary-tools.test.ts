@@ -68,6 +68,7 @@ const createFixture = () => {
     loadMessageAttachments: vi.fn(() => [{ type: 'photo' as const }]),
     messageExists: vi.fn(() => true),
     downloadMessageMedia: vi.fn(async () => undefined),
+    readOldMessages: vi.fn(() => ''),
     resolveModel: vi.fn(() => endpoint),
     backgroundTask: {
       startTask: vi.fn(() => 9),
@@ -119,6 +120,7 @@ describe('createPrimaryTools', () => {
       'read_image',
       'kill_task',
       'read_task_output',
+      'read_old_messages',
       'sleep',
       'end_turn',
     ]);
@@ -139,6 +141,7 @@ describe('createPrimaryTools', () => {
       'read_image',
       'kill_task',
       'read_task_output',
+      'read_old_messages',
       'sleep',
       'end_turn',
     ]);

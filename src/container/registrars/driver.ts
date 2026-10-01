@@ -4,6 +4,7 @@ import { resolveChatConfig, resolveModel } from '../../config/config';
 import {
   loadCompaction,
   loadEvents,
+  loadEventsByMessageIds,
   loadEventsWithId,
   loadImageAltTextByHash,
   loadLastProbeTime,
@@ -23,6 +24,7 @@ import {
 import { findModerationSender, loadModerationMessageIds } from '../../db/moderation';
 import { createDriver } from '../../driver';
 import { createDriverInputBus } from '../../driver/input-bus';
+import { renderOldMessagesXml } from '../../driver/read-old-messages';
 import {
   createTelegramDriverHooks,
   createTelegramEventSink,
@@ -134,6 +136,8 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       loadMessageAttachments: (chatId, messageId) => loadMessageAttachments(db, chatId, messageId),
       messageExists: (chatId, messageId) => messageExists(db, chatId, messageId),
       downloadMessageMedia: telegram.downloadMessageMedia,
+      readOldMessages: (chatId, messageIds) =>
+        renderOldMessagesXml(chatId, loadEventsByMessageIds(db, chatId, messageIds), pipeline.getRenderParams(chatId)),
       resolveModel: name => resolveModel(config, name),
       backgroundTask: {
         startTask: (typeName, sessionId, params, intention, timeoutMs) =>

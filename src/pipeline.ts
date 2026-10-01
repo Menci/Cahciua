@@ -26,14 +26,24 @@ export const createPipeline = (
   const renderedSessions = new Map<string, RenderedContext>();
   const cursors = new Map<string, number>();
 
-  // Compute effective RenderParams for a chat, merging per-chat cursor + block list with base params.
-  const effectiveParams = (chatId: string): RenderParams => {
-    const cursor = cursors.get(chatId);
+  // Base RenderParams for a chat: shared params + the per-chat block list.
+  // Exposed so callers that render ad-hoc contexts (e.g. read_old_messages) use
+  // the exact same sender/contact formatting and block rules as the live context.
+  const getRenderParams = (chatId: string): RenderParams => {
     const blockedUserIds = getBlockedUserIds(chatId);
     return {
       ...renderParams,
-      ...(cursor != null ? { compactCursorMs: cursor } : {}),
       ...(blockedUserIds?.size ? { blockedUserIds } : {}),
+    };
+  };
+
+  // Effective RenderParams additionally carry the per-chat compaction cursor, so
+  // live renders exclude segments that were compacted away.
+  const effectiveParams = (chatId: string): RenderParams => {
+    const cursor = cursors.get(chatId);
+    return {
+      ...getRenderParams(chatId),
+      ...(cursor != null ? { compactCursorMs: cursor } : {}),
     };
   };
 
@@ -92,5 +102,5 @@ export const createPipeline = (
   const getIC = (chatId: string) => sessions.get(chatId);
   const getRenderedChats = (): Array<[string, RenderedContext]> => [...renderedSessions.entries()];
 
-  return { pushEvent, replayChat, setCompactCursor, getCompactCursor, getIC, getRenderedChats };
+  return { pushEvent, replayChat, setCompactCursor, getCompactCursor, getIC, getRenderParams, getRenderedChats };
 };

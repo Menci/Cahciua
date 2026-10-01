@@ -11,6 +11,7 @@ import {
   createKillTaskTool,
   createReactTool,
   createReadImageTool,
+  createReadOldMessagesTool,
   createReadTaskOutputTool,
   createSendMessageTool,
   createSleepTool,
@@ -49,6 +50,7 @@ export interface PrimaryToolsDependencies {
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
   messageExists: (chatId: string, messageId: number) => boolean;
   downloadMessageMedia: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
+  readOldMessages: (chatId: string, messageIds: string[]) => Promise<string> | string;
   resolveModel: (name: string) => LlmEndpoint;
   backgroundTask: {
     startTask: (
@@ -164,6 +166,7 @@ export const createPrimaryTools = (deps: PrimaryToolsDependencies): CahciuaTool[
     createKillTaskTool(taskId => deps.backgroundTask.killTask(taskId)),
     createReadTaskOutputTool((taskId, offset, limit) =>
       deps.backgroundTask.readTaskOutput(taskId, offset, limit)),
+    createReadOldMessagesTool(messageIds => deps.readOldMessages(deps.chatId, messageIds)),
     createSleepTool(),
     createEndTurnTool(),
   );

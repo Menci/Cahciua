@@ -164,6 +164,7 @@ describe('probe vs primary view of bot\'s own messages', () => {
         loadMessageAttachments: () => undefined,
         messageExists: () => true,
         downloadMessageMedia: async () => undefined,
+        readOldMessages: () => '',
         resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock', apiFormat: 'openai-chat' }),
         backgroundTask: {
           startTask: () => 0,
@@ -299,6 +300,7 @@ describe('probe vs primary view of bot\'s own messages', () => {
         loadMessageAttachments: () => undefined,
         messageExists: () => true,
         downloadMessageMedia: async () => undefined,
+        readOldMessages: () => '',
         resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock', apiFormat: 'openai-chat' }),
         backgroundTask: {
           startTask: () => 0,
