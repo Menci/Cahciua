@@ -241,7 +241,14 @@ export const findWorkingWindowCursor = (
   let accum = 0;
   for (const entry of entries) {
     accum += entry.tokens;
-    if (accum > budgetTokens) return entry.timeMs;
+    if (accum > budgetTokens) {
+      // This entry overflows the working budget, so it must be compacted away.
+      // Callers retain entries with `receivedAtMs >= cursor`, so returning this
+      // entry's own timestamp would keep it in the working window forever and
+      // pin the cursor (`newCursorMs === oldCursorMs`), leaving every later
+      // compaction window empty. Cut strictly after it so it is excluded.
+      return entry.timeMs + 1;
+    }
   }
   return entries.at(-1)!.timeMs;
 };

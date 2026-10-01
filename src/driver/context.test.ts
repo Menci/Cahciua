@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { composeContext, loopEndedWithoutSendMessage } from './context';
+import { composeContext, findWorkingWindowCursor, loopEndedWithoutSendMessage } from './context';
 import type { TurnResponseV2 } from './types';
 import type { RenderedContext } from '../rendering/types';
 import type { ConversationEntry, InputPart, ToolResult } from '../unified-api/types';
@@ -314,5 +314,48 @@ describe('loopEndedWithoutSendMessage', () => {
       endTurnTr(210),
     ];
     expect(loopEndedWithoutSendMessage(trs)).toBe(true);
+  });
+});
+
+describe('findWorkingWindowCursor', () => {
+  // Tokens ≈ ceil(text.length / 2), so 2 chars ≈ 1 token.
+  const textOfTokens = (tokens: number): string => 'x'.repeat(tokens * 2);
+
+  it('excludes the entry that overflows the budget so the cursor advances past it', () => {
+    // Regression: the caller retains entries with `receivedAtMs >= cursor`, so
+    // returning the overflowing entry's own timestamp pinned the cursor
+    // (newCursorMs === oldCursorMs) and every later compaction window was empty.
+    const oldCursorMs = 100;
+    const rc = [
+      textSeg(300, textOfTokens(50)),
+      textSeg(200, textOfTokens(50)),
+      textSeg(100, textOfTokens(5000)), // huge boundary entry, same time as cursor
+    ];
+    const cursor = findWorkingWindowCursor(rc, [], 200);
+    expect(cursor).toBeGreaterThan(oldCursorMs);
+    // The overflowing entry is dropped: only the two 50-token segments remain.
+    const retained = rc.filter(seg => seg.receivedAtMs >= cursor);
+    expect(retained.map(seg => seg.receivedAtMs)).toEqual([300, 200]);
+  });
+
+  it('returns the oldest timestamp when everything fits within the budget', () => {
+    const rc = [
+      textSeg(300, textOfTokens(50)),
+      textSeg(200, textOfTokens(50)),
+    ];
+    expect(findWorkingWindowCursor(rc, [], 1000)).toBe(200);
+  });
+
+  it('strictly advances even when the single newest entry overflows alone', () => {
+    const rc = [textSeg(500, textOfTokens(5000))];
+    expect(findWorkingWindowCursor(rc, [], 200)).toBe(501);
+  });
+
+  it('counts turn responses on the same timeline as rendered segments', () => {
+    const rc = [textSeg(300, textOfTokens(50))];
+    const trs = [tr(100, [assistantText(textOfTokens(5000))])];
+    const cursor = findWorkingWindowCursor(rc, trs, 200);
+    expect(cursor).toBe(101);
+    expect(rc.filter(seg => seg.receivedAtMs >= cursor).length).toBe(1);
   });
 });

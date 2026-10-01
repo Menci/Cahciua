@@ -62,6 +62,10 @@ export const createCompactionController = (deps: {
             turnResponses,
             deps.chatConfig.compaction.workingWindowEstTokens,
           );
+          // The cursor must strictly advance; otherwise the window
+          // [oldCursorMs, newCursorMs) is empty and the compaction would only
+          // re-summarize the existing summary while burning an LLM call.
+          if (newCursorMs <= oldCursorMs) return;
           deps.log.withFields({
             chatId: deps.chatId,
             oldCursorMs,
