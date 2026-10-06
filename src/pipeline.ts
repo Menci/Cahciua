@@ -64,6 +64,10 @@ export const createPipeline = (renderParams: RenderParams) => {
   const setCompactCursor = (chatId: string, cursorMs: number): void => {
     cursors.set(chatId, cursorMs);
     renderers.get(chatId)?.retainAfter(cursorMs);
+    // Keep the diff baseline inside residency: the next event should not diff
+    // all compacted messages as deletions. Driver retains its own input snapshot.
+    const rc = renderedSessions.get(chatId);
+    if (rc) renderedSessions.set(chatId, rc.filter(record => record.receivedAtMs >= cursorMs));
   };
 
   const getCompactCursor = (chatId: string) => cursors.get(chatId);

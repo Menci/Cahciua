@@ -57,7 +57,9 @@ describe('Pipeline rendering reuse', () => {
     const other = pipeline.pushEvent('other', { ...message('3', 1000), chatId: 'other' });
     pipeline.setCompactCursor('chat', 2000);
     const snapshot = pipeline.getRenderedChats().find(([id]) => id === 'chat')![1];
-    expect(snapshot).toBe(before);
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]).toBe(before[1]);
+    expect(before).toHaveLength(2);
     const retained = selectContextView(snapshot, { cursorMs: pipeline.getCompactCursor('chat') });
     expect(retained).toHaveLength(1);
     expect(retained[0]!.content).toBe(before[1]!.content);
