@@ -61,7 +61,7 @@ Rendering converts resident IC nodes into ordered base records. Every record car
 
 Pipeline caches records per chat by immutable IC node revision (with complete-source value matching for equivalent replay nodes) and a value snapshot of display parameters (bot identity and contact names). Unchanged records reuse body XML and Sharp handles. Edits, deletes, authoritative echoes, media description changes during replay, and display parameter changes refresh affected records. The cache is replaced with the resident node set each render and evicted before the cursor on compaction; it never accumulates a separate historical RC. IC retains its existing projection lifetime, including reply snapshots. Cold replay continues to load only the active event window.
 
-Cursor advancement releases obsolete cached records without invoking rendering or publishing new input. A Driver may retain its last published base snapshot until the next event; it does not accumulate snapshots. Summary/model/budget changes belong entirely to downstream consumers.
+Cursor advancement evicts obsolete cache entries without invoking rendering or publishing new input. Pipeline and Driver retain the last actual base-rendering snapshot until the next event; neither accumulates snapshots or rewrites that snapshot to apply a cursor. Only the pure Driver view selects the model window. Summary/model/budget changes belong entirely to downstream consumers.
 
 User-controlled identity is encoded in XML attributes. Content is escaped and cannot inject sibling message attributes. Attachments expose stable logical file IDs in `messageId:index` form; TDLib-local IDs are not persisted.
 

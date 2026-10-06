@@ -134,7 +134,7 @@ it('persists before advancing a pure view and never republishes rendering on met
     expect(publication).toHaveBeenCalledOnce();
     metadata({ ...meta(1001), summary: 'revised summary' });
     expect(publication).toHaveBeenCalledOnce();
-    expect(pipeline.getRenderedChats()[0]![1]).toEqual([]);
+    expect(pipeline.getRenderedChats()[0]![1]).toBe(records);
   } finally {
     disposeObserver();
     controller.dispose();

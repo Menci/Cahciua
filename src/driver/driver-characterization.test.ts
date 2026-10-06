@@ -11,7 +11,7 @@ import type { ResolvedChatConfig } from '../config/config';
 import type { LlmCallUsage } from '../llm/call';
 import { callLlm } from '../llm/call';
 import { createPipeline } from '../pipeline';
-import type { RenderedNodes } from '../rendering/types';
+import type { BaseRenderedContext } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 
 initLogger(LogLevel.Error, Format.Pretty);
@@ -50,7 +50,7 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
 });
 
-const buildExternalContext = (receivedAtMs = 1000): RenderedNodes => [{
+const buildExternalContext = (receivedAtMs = 1000): BaseRenderedContext => [{
   chatId: 'chat',
   source: { type: 'message', messageId: '1', receivedAtMs, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] },
   receivedAtMs,

@@ -56,9 +56,11 @@ describe('Pipeline rendering reuse', () => {
     });
     const other = pipeline.pushEvent('other', { ...message('3', 1000), chatId: 'other' });
     pipeline.setCompactCursor('chat', 2000);
-    const retained = pipeline.getRenderedChats().find(([id]) => id === 'chat')![1];
-    expect(retained).toEqual([before[1]]);
-    expect(retained[0]).toBe(before[1]);
+    const snapshot = pipeline.getRenderedChats().find(([id]) => id === 'chat')![1];
+    expect(snapshot).toBe(before);
+    const retained = selectContextView(snapshot, { cursorMs: pipeline.getCompactCursor('chat') });
+    expect(retained).toHaveLength(1);
+    expect(retained[0]!.content).toBe(before[1]!.content);
     expect(pipeline.getRenderedChats().find(([id]) => id === 'other')![1]).toBe(other);
     const after = pipeline.pushEvent('chat', message('4', 3000));
     expect(after.map(node => node.source.type === 'message' && node.source.messageId)).toEqual(['2', '4']);

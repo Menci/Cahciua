@@ -13,7 +13,7 @@ export type RenderedContentPiece =
   | { type: 'text'; text: string }
   | { type: 'image'; image: Sharp };
 
-// Rendered Context (RC) — the output of the Rendering layer.
+// Model-view Rendered Context (RC), derived from base rendering records.
 // One segment per IC node. Carries receivedAtMs from the source event for merge ordering.
 // Driver merges RC + TRs by timestamp, grouping consecutive segments between TRs
 // into user messages.
@@ -47,10 +47,10 @@ export type RenderedContext = RenderedContextSegment[];
 
 // Base records precede model-view policy and retain structured source identity.
 // Sharp handles remain runtime-only; consumers must choose their own storage form.
-export interface RenderedNode extends RenderedContextSegment {
+export interface RenderedRecord extends RenderedContextSegment {
   chatId: string;
   source: ICNode;
   blockedContent?: RenderedContentPiece[];
 }
 
-export type RenderedNodes = RenderedNode[];
+export type BaseRenderedContext = RenderedRecord[];

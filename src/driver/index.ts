@@ -13,7 +13,7 @@ import { executeWakeup } from './wakeup';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import type { LlmEndpoint } from '../llm/types';
-import type { RenderedContext, RenderedNodes } from '../rendering/types';
+import type { RenderedContext, BaseRenderedContext } from '../rendering/types';
 import type { Attachment } from '../telegram/message/types';
 import type { BanSpammerResult } from '../telegram/moderation-types';
 
@@ -64,7 +64,7 @@ export const createDriver = (config: DriverConfig, deps: {
   };
 
   const chatScopes = new Map<string, {
-    base: ReturnType<typeof signal<RenderedNodes>>;
+    base: ReturnType<typeof signal<BaseRenderedContext>>;
     notifyTyping: () => void;
     cleanup: () => void;
   }>();
@@ -75,7 +75,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
     const chatConfig = config.resolveChatConfig(chatId);
 
-    const base = signal<RenderedNodes>([]);
+    const base = signal<BaseRenderedContext>([]);
     const lastProcessedMs = signal(0);
     // A persisted requiresFollowUp result keeps the wake-up eligible after restart.
     const lastTRInterrupted = signal(false);
@@ -182,7 +182,7 @@ export const createDriver = (config: DriverConfig, deps: {
     return entry;
   };
 
-  const handleEvent = (chatId: string, newRC: RenderedNodes) => {
+  const handleEvent = (chatId: string, newRC: BaseRenderedContext) => {
     if (!chatIds.has(chatId)) return;
     getOrCreateScope(chatId).base(newRC);
   };

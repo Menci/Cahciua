@@ -1,10 +1,10 @@
 import sharp from 'sharp';
 
-import type { RenderParams, RenderedContentPiece, RenderedContext, RenderedNode, RenderedNodes } from './types';
+import type { RenderParams, RenderedContentPiece, RenderedContext, RenderedRecord, BaseRenderedContext } from './types';
 import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICNode, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
 
-export type { RenderParams, RenderedContentPiece, RenderedContext, RenderedNode, RenderedNodes } from './types';
+export type { RenderParams, RenderedContentPiece, RenderedContext, RenderedContextSegment, RenderedRecord, BaseRenderedContext } from './types';
 
 // --- Helpers ---
 
@@ -244,7 +244,7 @@ const renderRuntimeEvent = (event: ICRuntimeEvent): string => {
 
 // --- Public API ---
 
-const renderNode = (chatId: string, node: ICNode, params: RenderParams): RenderedNode => {
+const renderNode = (chatId: string, node: ICNode, params: RenderParams): RenderedRecord => {
   const source = { chatId, source: node, receivedAtMs: node.receivedAtMs };
   if (node.type === 'message') {
     const { content, blockedContent, senderId, isMyself, isSelfSent, mentionsMe, repliesToMe } = renderMessage(node, params);
@@ -255,7 +255,7 @@ const renderNode = (chatId: string, node: ICNode, params: RenderParams): Rendere
   return { ...source, content: [{ type: 'text', text: renderSystemEvent(node, params.contactNames) }] };
 };
 
-export const render = (ic: IntermediateContext, params: RenderParams = {}): RenderedNodes =>
+export const render = (ic: IntermediateContext, params: RenderParams = {}): BaseRenderedContext =>
   ic.nodes.map(node => renderNode(ic.sessionId, node, params));
 
 export const rcToXml = (rc: RenderedContext): string =>
@@ -267,11 +267,11 @@ export const rcToXml = (rc: RenderedContext): string =>
 /** One cache per resident chat. Immutable IC nodes are revisions; formatting is
  * snapshotted by value so mutating a contact map cannot reuse stale XML. */
 export const createRenderer = () => {
-  type CachedNode = { revision: string; record: RenderedNode };
+  type CachedNode = { revision: string; record: RenderedRecord };
   let cache = new Map<ICNode, CachedNode>();
   let formatKey: string | undefined;
   return {
-    render(ic: IntermediateContext, params: RenderParams): RenderedNodes {
+    render(ic: IntermediateContext, params: RenderParams): BaseRenderedContext {
       const nextFormatKey = JSON.stringify([ic.sessionId, params.botUserId, [...(params.contactNames ?? [])]]);
       if (nextFormatKey !== formatKey) cache.clear();
       formatKey = nextFormatKey;

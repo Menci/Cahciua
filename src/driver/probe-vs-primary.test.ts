@@ -13,7 +13,7 @@ import { createDriver } from './index';
 import type { TurnResponseV2 } from './types';
 import type { ResolvedChatConfig } from '../config/config';
 import { callLlm } from '../llm/call';
-import type { RenderedNodes } from '../rendering/types';
+import type { BaseRenderedContext } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 
 initLogger(LogLevel.Log, Format.Pretty);
@@ -39,7 +39,7 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
 });
 
-const buildRC = (): RenderedNodes => [
+const buildRC = (): BaseRenderedContext => [
   {
     chatId: 'chat',
     source: { type: 'message', messageId: '1', receivedAtMs: 1000, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] },
