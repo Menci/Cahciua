@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createTelegramEventSink } from './event-sink';
 import type { CanonicalMessageEvent } from '../adaptation/types';
+import { render } from '../rendering';
 import type { BaseRenderedContext } from '../rendering/types';
 
 const event = (chatId: string): CanonicalMessageEvent => ({
@@ -40,7 +41,7 @@ describe('createTelegramEventSink', () => {
 
   it('publishes configured events in hydrate, pipeline, driver order', () => {
     const order: string[] = [];
-    const rendered: BaseRenderedContext = [{ chatId: 'configured', source: { type: 'message', messageId: '1', receivedAtMs: 1, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] }, receivedAtMs: 1, content: [{ type: 'text', text: 'x' }] }];
+    const rendered: BaseRenderedContext = render({ sessionId: 'configured', nodes: [event('configured')], users: new Map() });
     const sink = createTelegramEventSink({
       configuredChatIds: new Set(['configured']),
       persistEvent: () => order.push('persist'),

@@ -3,8 +3,8 @@ import { computed, effect } from 'alien-signals';
 
 import { runCompaction } from './compaction';
 import { composeContext, findWorkingWindowCursor } from './context';
+import type { RenderedContext } from './context-types';
 import type { CompactionSessionMeta, ResolvedChatConfig, TurnResponseV2 } from './types';
-import type { RenderedContext } from '../rendering/types';
 
 type Signal<T> = {
   (): T;

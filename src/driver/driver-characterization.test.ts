@@ -11,6 +11,7 @@ import type { ResolvedChatConfig } from '../config/config';
 import type { LlmCallUsage } from '../llm/call';
 import { callLlm } from '../llm/call';
 import { createPipeline } from '../pipeline';
+import { render } from '../rendering';
 import type { BaseRenderedContext } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 
@@ -50,16 +51,13 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
 });
 
-const buildExternalContext = (receivedAtMs = 1000): BaseRenderedContext => [{
-  chatId: 'chat',
-  source: { type: 'message', messageId: '1', receivedAtMs, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] },
-  receivedAtMs,
-  senderId: 'user-1',
-  content: [{
-    type: 'text',
-    text: '<message id="1" sender="Alice (@alice)" t="2025-01-01T00:00:01+00:00">hello bot</message>',
+const buildExternalContext = (receivedAtMs = 1000): BaseRenderedContext => render({
+  sessionId: 'chat', users: new Map(), nodes: [{
+    type: 'message', messageId: '1', receivedAtMs, timestampSec: 1, utcOffsetMin: 0,
+    sender: { id: 'user-1', displayName: 'Alice', username: 'alice', isBot: false },
+    content: [{ type: 'text', text: 'hello bot' }], attachments: [],
   }],
-}];
+});
 
 type DriverDeps = Parameters<typeof createDriver>[1];
 
@@ -443,6 +441,6 @@ it('applies blocked-user policy before scheduling probe without leaking base met
       : []).join('\n');
   expect(request).toContain('blocked=\"true\"');
   expect(request).not.toContain('private body');
-  expect(base[0]!.source).toMatchObject({ messageId: '1' });
-  expect(base[0]!.mentionsMe).toBe(true);
+  expect(base[0]!.metadata).toMatchObject({ messageId: '1' });
+  expect(base[0]!.kind === 'message' && base[0]!.activation.mentionsMe).toBe(true);
 });

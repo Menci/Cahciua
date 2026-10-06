@@ -1,8 +1,8 @@
 import { computed, effect, signal } from 'alien-signals';
 
 import { latestExternalEventMs, triggerSenderLatestMs } from './context';
+import type { RenderedContext } from './context-types';
 import type { DebounceConfig } from './types';
-import type { RenderedContext } from '../rendering/types';
 
 type Signal<T> = {
   (): T;

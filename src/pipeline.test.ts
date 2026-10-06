@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { selectContextView } from './driver/context-view';
 import { createPipeline } from './pipeline';
 import type { PipelineEvent } from './projection';
-import { rcToXml } from './rendering';
+import { renderedRecordsToXml } from './rendering';
 
 initLogger(LogLevel.Error, Format.Pretty);
 
@@ -25,15 +25,15 @@ describe('Pipeline model timeline characterization', () => {
     pipeline.pushEvent('chat', message('1', 1000, 'original'));
     pipeline.pushEvent('chat', { ...message('2', 2000, 'reply'), replyToMessageId: '1' });
     const edited = pipeline.pushEvent('chat', edit('1', 3000, 'replacement'));
-    expect(edited.map(segment => segment.receivedAtMs)).toEqual([1000, 2000]);
-    expect(rcToXml(edited)).toContain('>original</in-reply-to>');
-    expect(rcToXml(edited)).toContain('replacement');
+    expect(edited.map(segment => segment.metadata.receivedAtMs)).toEqual([1000, 2000]);
+    expect(renderedRecordsToXml(edited)).toContain('>original</in-reply-to>');
+    expect(renderedRecordsToXml(edited)).toContain('replacement');
     const deleted = pipeline.pushEvent('chat', {
       type: 'delete', chatId: 'chat', messageIds: ['1'], receivedAtMs: 4000, timestampSec: 4, utcOffsetMin: 0,
     });
-    expect(rcToXml(deleted)).toContain('deleted="true"');
-    expect(rcToXml(deleted)).not.toContain('replacement');
-    expect(rcToXml(deleted)).toContain('>original</in-reply-to>');
+    expect(renderedRecordsToXml(deleted)).toContain('deleted="true"');
+    expect(renderedRecordsToXml(deleted)).not.toContain('replacement');
+    expect(renderedRecordsToXml(deleted)).toContain('>original</in-reply-to>');
   });
 
   it('replaces a synthetic send with its authoritative echo without moving it', () => {
@@ -41,9 +41,9 @@ describe('Pipeline model timeline characterization', () => {
     pipeline.pushEvent('chat', { ...message('1', 1000, 'synthetic'), isSelfSent: true });
     const echoed = pipeline.pushEvent('chat', message('1', 2000, 'authoritative'));
     expect(echoed).toHaveLength(1);
-    expect(echoed[0]).toMatchObject({ receivedAtMs: 1000, isSelfSent: true });
-    expect(rcToXml(echoed)).toContain('authoritative');
-    expect(rcToXml(echoed)).not.toContain('synthetic');
+    expect(echoed[0]!.metadata).toMatchObject({ receivedAtMs: 1000, isSelfSent: true });
+    expect(renderedRecordsToXml(echoed)).toContain('authoritative');
+    expect(renderedRecordsToXml(echoed)).not.toContain('synthetic');
   });
 });
 
@@ -62,12 +62,12 @@ describe('Pipeline rendering reuse', () => {
     expect(before).toHaveLength(2);
     const retained = selectContextView(snapshot, { cursorMs: pipeline.getCompactCursor('chat') });
     expect(retained).toHaveLength(1);
-    expect(retained[0]!.content).toBe(before[1]!.content);
+    expect(retained[0]!.content).toBe(before[1]!.presentation.body);
     expect(pipeline.getRenderedChats().find(([id]) => id === 'other')![1]).toBe(other);
     const after = pipeline.pushEvent('chat', message('4', 3000));
-    expect(after.map(node => node.source.type === 'message' && node.source.messageId)).toEqual(['2', '4']);
+    expect(after.map(node => node.kind === 'message' && node.metadata.messageId)).toEqual(['2', '4']);
     expect(after[0]).toBe(before[1]);
-    expect(after[0]!.content[1]).toBe(before[1]!.content[1]);
+    expect(after[0]!.presentation.body[1]).toBe(before[1]!.presentation.body[1]);
     expect(pipeline.getCompactCursor('other')).toBeUndefined();
   });
 
@@ -80,13 +80,13 @@ describe('Pipeline rendering reuse', () => {
     });
     expect(after[0]).not.toBe(before[0]);
     expect(after[1]).toBe(before[1]);
-    expect(rcToXml(after)).toContain('a lighthouse');
-    expect(after[0]!.source).toMatchObject({ messageId: '1', receivedAtMs: 1000, editedAtSec: 3 });
+    expect(renderedRecordsToXml(after)).toContain('a lighthouse');
+    expect(after[0]!.metadata).toMatchObject({ messageId: '1', receivedAtMs: 1000, editedAtSec: 3 });
     const deleted = pipeline.pushEvent('chat', {
       type: 'delete', chatId: 'chat', messageIds: ['1'], receivedAtMs: 4000, timestampSec: 4, utcOffsetMin: 0,
     });
     expect(deleted[1]).toBe(before[1]);
-    expect(rcToXml(deleted)).not.toContain('a lighthouse');
+    expect(renderedRecordsToXml(deleted)).not.toContain('a lighthouse');
   });
 
   it('invalidates formatting when the same contact map changes', () => {
@@ -97,10 +97,11 @@ describe('Pipeline rendering reuse', () => {
     contacts.set('user', 'After');
     const after = pipeline.pushEvent('chat', message('2', 2000));
     expect(after[0]).not.toBe(before[0]);
-    expect(rcToXml(after)).not.toContain('sender="Before"');
-    expect(rcToXml(after)).toContain('sender="After"');
+    expect(renderedRecordsToXml(after)).not.toContain('sender="Before"');
+    expect(renderedRecordsToXml(after)).toContain('sender="After"');
     params.botUserId = 'user';
-    expect(pipeline.pushEvent('chat', message('3', 3000))[0]!.isMyself).toBe(true);
+    const mine = pipeline.pushEvent('chat', message('3', 3000))[0]!;
+    expect(mine.kind === 'message' && mine.activation.isMyself).toBe(true);
   });
 
   it('replays only resident records while preserving source state for replies', () => {
@@ -110,7 +111,7 @@ describe('Pipeline rendering reuse', () => {
       ...message('2', 2000), replyToMessageId: '1',
     }]);
     expect(records).toHaveLength(1);
-    expect(rcToXml(records)).toContain('>old</in-reply-to>');
+    expect(renderedRecordsToXml(records)).toContain('>old</in-reply-to>');
     expect(selectContextView(records, { cursorMs: 2000 })).toHaveLength(1);
   });
 });
@@ -128,6 +129,6 @@ it('reuses unchanged replay records and refreshes only newly hydrated media', ()
   }]);
   expect(hydrated[0]).toBe(before[0]);
   expect(hydrated[1]).not.toBe(before[1]);
-  expect(hydrated[1]!.content).toHaveLength(1);
-  expect(rcToXml(hydrated)).toContain('a harbour');
+  expect(hydrated[1]!.presentation.body).toHaveLength(1);
+  expect(renderedRecordsToXml(hydrated)).toContain('a harbour');
 });

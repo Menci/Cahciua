@@ -13,6 +13,7 @@ import { createDriver } from './index';
 import type { TurnResponseV2 } from './types';
 import type { ResolvedChatConfig } from '../config/config';
 import { callLlm } from '../llm/call';
+import { render } from '../rendering';
 import type { BaseRenderedContext } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 
@@ -39,31 +40,25 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
 });
 
-const buildRC = (): BaseRenderedContext => [
-  {
-    chatId: 'chat',
-    source: { type: 'message', messageId: '1', receivedAtMs: 1000, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] },
-    receivedAtMs: 1000,
-    senderId: 'user1',
-    content: [{ type: 'text', text: '<message id="1" sender="Alice (@alice)" t="2025-01-01T00:00:01+00:00">hello bot</message>' }],
-  },
-  {
-    chatId: 'chat',
-    source: { type: 'message', messageId: '2', receivedAtMs: 2000, timestampSec: 2, utcOffsetMin: 0, content: [], attachments: [] },
-    receivedAtMs: 2000,
-    senderId: 'bot',
-    isMyself: true,
-    isSelfSent: true,
-    content: [{ type: 'text', text: '<message id="2" sender="Bot (@bot)" myself="true" t="2025-01-01T00:00:02+00:00">hi alice</message>' }],
-  },
-  {
-    chatId: 'chat',
-    source: { type: 'message', messageId: '3', receivedAtMs: 3000, timestampSec: 3, utcOffsetMin: 0, content: [], attachments: [] },
-    receivedAtMs: 3000,
-    senderId: 'user1',
-    content: [{ type: 'text', text: '<message id="3" sender="Alice (@alice)" t="2025-01-01T00:00:03+00:00">how are you?</message>' }],
-  },
-];
+const buildRC = (): BaseRenderedContext => render({
+  sessionId: 'chat', users: new Map(), nodes: [
+    {
+      type: 'message', messageId: '1', receivedAtMs: 1000, timestampSec: 1, utcOffsetMin: 0,
+      sender: { id: 'user1', displayName: 'Alice', username: 'alice', isBot: false },
+      content: [{ type: 'text', text: 'hello bot' }], attachments: [],
+    },
+    {
+      type: 'message', messageId: '2', receivedAtMs: 2000, timestampSec: 2, utcOffsetMin: 0,
+      sender: { id: 'bot', displayName: 'Bot', username: 'bot', isBot: true }, isSelfSent: true,
+      content: [{ type: 'text', text: 'hi alice' }], attachments: [],
+    },
+    {
+      type: 'message', messageId: '3', receivedAtMs: 3000, timestampSec: 3, utcOffsetMin: 0,
+      sender: { id: 'user1', displayName: 'Alice', username: 'alice', isBot: false },
+      content: [{ type: 'text', text: 'how are you?' }], attachments: [],
+    },
+  ],
+}, { botUserId: 'bot' });
 
 const buildTRs = (): TurnResponseV2[] => [{
   requestedAtMs: 2000,

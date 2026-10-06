@@ -9,7 +9,7 @@ import { createCompactionController } from './compaction-controller';
 import { selectContextView } from './context-view';
 import type { CompactionSessionMeta } from './types';
 import { createPipeline } from '../pipeline';
-import type { RenderedContext } from '../rendering/types';
+import type { RenderedContext } from './context-types';
 
 initLogger(LogLevel.Error, Format.Pretty);
 

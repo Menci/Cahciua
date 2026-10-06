@@ -3,6 +3,7 @@ import { computed, signal } from 'alien-signals';
 
 import { createCompactionController } from './compaction-controller';
 import { wasToolLoopInterrupted } from './context';
+import type { RenderedContext } from './context-types';
 import { selectContextView } from './context-view';
 import { createPrimaryTools } from './primary-tools';
 import { createRunner } from './runner';
@@ -13,7 +14,7 @@ import { executeWakeup } from './wakeup';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import type { LlmEndpoint } from '../llm/types';
-import type { RenderedContext, BaseRenderedContext } from '../rendering/types';
+import type { BaseRenderedContext } from '../rendering/types';
 import type { Attachment } from '../telegram/message/types';
 import type { BanSpammerResult } from '../telegram/moderation-types';
 

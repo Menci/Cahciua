@@ -1,10 +1,10 @@
 import sharp from 'sharp';
 
-import type { RenderParams, RenderedContentPiece, RenderedContext, RenderedRecord, BaseRenderedContext } from './types';
+import type { RenderParams, RenderedContentPiece, RenderedRecord, RenderedMessageRecord, RenderedMessageMetadata, RenderedAttachmentMetadata, BaseRenderedContext } from './types';
 import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICNode, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
 
-export type { RenderParams, RenderedContentPiece, RenderedContext, RenderedContextSegment, RenderedRecord, BaseRenderedContext } from './types';
+export type { RenderParams, RenderedContentPiece, RenderedRecord, BaseRenderedContext } from './types';
 
 // --- Helpers ---
 
@@ -112,12 +112,12 @@ const hasMention = (nodes: ContentNode[], userId: string): boolean =>
 
 // --- ICNode → content pieces ---
 
-const renderMessage = (msg: ICMessage, params: RenderParams): { content: RenderedContentPiece[]; blockedContent: RenderedContentPiece[]; senderId?: string; isMyself: boolean; isSelfSent: boolean; mentionsMe: boolean; repliesToMe: boolean } => {
+const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessageRecord, 'presentation' | 'activation'> => {
   const isMyself = !!(params.botUserId && msg.sender?.id === params.botUserId);
-  const isSelfSent = !!msg.isSelfSent;
 
   const mentionsMe = !!(params.botUserId && hasMention(msg.content, params.botUserId));
   const repliesToMe = !!(params.botUserId && msg.replyToSender?.id === params.botUserId);
+  const activation = Object.freeze({ isMyself, mentionsMe, repliesToMe });
   const attrs: string[] = [
     `id="${escapeXml(msg.messageId)}"`,
   ];
@@ -137,11 +137,11 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
     attrs.push(`forwarded_from="${escapeXml(from)}"`);
   }
 
-  const blockedContent: RenderedContentPiece[] = [{ type: 'text', text: `<message ${attrs.join(' ')} blocked="true"/>` }];
+  const blocked: readonly RenderedContentPiece[] = Object.freeze([{ type: 'text', text: `<message ${attrs.join(' ')} blocked="true"/>` }]);
 
   if (msg.deleted) {
     attrs.push('deleted="true"');
-    return { blockedContent, content: [{ type: 'text', text: `<message ${attrs.join(' ')}/>` }], senderId: msg.sender?.id, isMyself, isSelfSent, mentionsMe, repliesToMe };
+    return { presentation: Object.freeze({ blocked, body: Object.freeze([{ type: 'text' as const, text: `<message ${attrs.join(' ')}/>` }]) }), activation };
   }
 
   const parts: string[] = [];
@@ -177,7 +177,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
       pieces.push({ type: 'image', image: sharp(Buffer.from(att.thumbnailWebp, 'base64')) });
   }
 
-  return { blockedContent, content: pieces, senderId: msg.sender?.id, isMyself, isSelfSent, mentionsMe, repliesToMe };
+  return { presentation: Object.freeze({ body: Object.freeze(pieces), blocked }), activation };
 };
 
 const renderSystemEvent = (event: ICSystemEvent, contactNames?: Map<string, string>): string => {
@@ -244,25 +244,76 @@ const renderRuntimeEvent = (event: ICRuntimeEvent): string => {
 
 // --- Public API ---
 
+const snapshotUser = (user: CanonicalUser | undefined): Readonly<CanonicalUser> | undefined =>
+  user && Object.freeze({ id: user.id, displayName: user.displayName, username: user.username, isBot: user.isBot });
+
+const snapshotAttachment = (attachment: CanonicalAttachment): RenderedAttachmentMetadata => Object.freeze({
+  type: attachment.type,
+  mimeType: attachment.mimeType,
+  fileName: attachment.fileName,
+  width: attachment.width,
+  height: attachment.height,
+  duration: attachment.duration,
+  animationHash: attachment.animationHash,
+  stickerSetId: attachment.stickerSetId,
+  stickerSetName: attachment.stickerSetName,
+  format: attachment.format,
+  altText: attachment.altText,
+});
+
+const messageMetadata = (chatId: string, message: ICMessage): RenderedMessageMetadata => Object.freeze({
+  chatId,
+  receivedAtMs: message.receivedAtMs,
+  timestampSec: message.timestampSec,
+  utcOffsetMin: message.utcOffsetMin,
+  messageId: message.messageId,
+  sender: snapshotUser(message.sender),
+  replyTo: message.replyToMessageId ? Object.freeze({
+    messageId: message.replyToMessageId,
+    sender: snapshotUser(message.replyToSender),
+    preview: message.replyToPreview,
+    quoted: !!message.replyQuoteContent,
+  }) : undefined,
+  forwardInfo: message.forwardInfo ? Object.freeze({
+    fromUserId: message.forwardInfo.fromUserId,
+    fromChatId: message.forwardInfo.fromChatId,
+    sender: snapshotUser(message.forwardInfo.sender),
+    senderName: message.forwardInfo.senderName,
+    date: message.forwardInfo.date,
+  }) : undefined,
+  attachments: Object.freeze(message.attachments.map(snapshotAttachment)),
+  editedAtSec: message.editedAtSec,
+  editUtcOffsetMin: message.editUtcOffsetMin,
+  deleted: !!message.deleted,
+  isSelfSent: !!message.isSelfSent,
+});
+
 const renderNode = (chatId: string, node: ICNode, params: RenderParams): RenderedRecord => {
-  const source = { chatId, source: node, receivedAtMs: node.receivedAtMs };
-  if (node.type === 'message') {
-    const { content, blockedContent, senderId, isMyself, isSelfSent, mentionsMe, repliesToMe } = renderMessage(node, params);
-    return { ...source, content, blockedContent, ...(senderId && { senderId }), ...(isMyself && { isMyself }), ...(isSelfSent && { isSelfSent }), ...(mentionsMe && { mentionsMe }), ...(repliesToMe && { repliesToMe }) };
+  if (node.type === 'message')
+    return Object.freeze({ kind: 'message', metadata: messageMetadata(chatId, node), ...renderMessage(node, params) });
+
+  const metadata = { chatId, receivedAtMs: node.receivedAtMs, timestampSec: node.timestampSec, utcOffsetMin: node.utcOffsetMin };
+  if (node.type === 'runtime_event') {
+    return Object.freeze({
+      kind: 'runtime',
+      metadata: Object.freeze({ ...metadata, taskId: node.taskId, taskType: node.taskType }),
+      presentation: Object.freeze({ body: Object.freeze([{ type: 'text' as const, text: renderRuntimeEvent(node) }]) }),
+    });
   }
-  if (node.type === 'runtime_event')
-    return { ...source, content: [{ type: 'text', text: renderRuntimeEvent(node) }], isRuntimeEvent: true };
-  return { ...source, content: [{ type: 'text', text: renderSystemEvent(node, params.contactNames) }] };
+  return Object.freeze({
+    kind: 'system', metadata: Object.freeze(metadata),
+    presentation: Object.freeze({ body: Object.freeze([{ type: 'text' as const, text: renderSystemEvent(node, params.contactNames) }]) }),
+  });
 };
 
 export const render = (ic: IntermediateContext, params: RenderParams = {}): BaseRenderedContext =>
-  ic.nodes.map(node => renderNode(ic.sessionId, node, params));
+  Object.freeze(ic.nodes.map(node => renderNode(ic.sessionId, node, params)));
 
-export const rcToXml = (rc: RenderedContext): string =>
-  rc.map(seg =>
-    seg.content
-      .map(p => p.type === 'text' ? p.text : '[thumbnail]')
-      .join('\n')).join('\n');
+export const contentToXml = (pieces: readonly RenderedContentPiece[]): string =>
+  pieces.map(piece => piece.type === 'text' ? piece.text : '[thumbnail]').join('\n');
+
+export const renderedRecordsToXml = (records: BaseRenderedContext): string =>
+  records.map(record => contentToXml(record.presentation.body)).join('\n');
 
 /** One cache per resident chat. Immutable IC nodes are revisions; formatting is
  * snapshotted by value so mutating a contact map cannot reuse stale XML. */
@@ -289,7 +340,7 @@ export const createRenderer = () => {
         return entry.record;
       });
       cache = nextCache;
-      return nodes;
+      return Object.freeze(nodes);
     },
     retainAfter(cursorMs: number): void {
       for (const node of cache.keys())

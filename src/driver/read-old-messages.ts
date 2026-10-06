@@ -1,8 +1,8 @@
-import { selectContextView } from './context-view';
+import { rcToXml, selectContextView } from './context-view';
 import type { ContextViewParams } from './context-view';
 import { createEmptyIC, reduce } from '../projection';
 import type { PipelineEvent } from '../projection';
-import { rcToXml, render } from '../rendering';
+import { render } from '../rendering';
 import type { RenderParams } from '../rendering';
 
 /**

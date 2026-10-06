@@ -1,56 +1,80 @@
 import type { Sharp } from 'sharp';
 
-import type { ICNode } from '../projection/types';
+import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser } from '../adaptation/types';
 
 export interface RenderParams {
   botUserId?: string;
   contactNames?: Map<string, string>;
 }
 
-// Provider-agnostic content piece — maps to LLM API content parts.
-// Driver converts to provider-specific format at the wire boundary.
 export type RenderedContentPiece =
-  | { type: 'text'; text: string }
-  | { type: 'image'; image: Sharp };
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly image: Sharp };
 
-// Model-view Rendered Context (RC), derived from base rendering records.
-// One segment per IC node. Carries receivedAtMs from the source event for merge ordering.
-// Driver merges RC + TRs by timestamp, grouping consecutive segments between TRs
-// into user messages.
-export interface RenderedContextSegment {
-  receivedAtMs: number;
-  content: RenderedContentPiece[];
-  // Sender's user id. Used by the Driver debounce to anchor the wait to the
-  // "trigger sender" (only their further messages extend the window). Absent for
-  // system/runtime-event segments that have no sender.
-  senderId?: string;
-  // Sender is this bot account (used by Driver debounce to ignore bot's own messages
-  // when deciding whether new external input arrived). True for all messages from this
-  // bot regardless of origin — including messages sent by other programs controlling
-  // the same bot account.
-  isMyself?: boolean;
-  // Message originated from this bot instance's send_message tool call (used by
-  // trimSelfMessagesCoveredBySendToolCalls to deduplicate — these messages already
-  // exist as tool results in TRs). A message can be isMyself without isSelfSent
-  // if another program sent it through the same bot account.
-  isSelfSent?: boolean;
-  // Content contains a <mention> node targeting this bot's userId
-  mentionsMe?: boolean;
-  // Reply-to target is a message sent by this bot
-  repliesToMe?: boolean;
-  // Segment is a runtime event (e.g. background task completion). Runtime events
-  // wake scheduling but still pass through the mandatory probe gate.
-  isRuntimeEvent?: boolean;
+export interface RenderedMetadata {
+  readonly chatId: string;
+  readonly receivedAtMs: number;
+  readonly timestampSec: number;
+  readonly utcOffsetMin: number;
 }
 
-export type RenderedContext = RenderedContextSegment[];
-
-// Base records precede model-view policy and retain structured source identity.
-// Sharp handles remain runtime-only; consumers must choose their own storage form.
-export interface RenderedRecord extends RenderedContextSegment {
-  chatId: string;
-  source: ICNode;
-  blockedContent?: RenderedContentPiece[];
+export interface RenderedReplyMetadata {
+  readonly messageId: string;
+  readonly sender?: Readonly<CanonicalUser>;
+  readonly preview?: string;
+  readonly quoted: boolean;
 }
 
-export type BaseRenderedContext = RenderedRecord[];
+export type RenderedForwardMetadata = Readonly<Omit<CanonicalForwardInfo, 'sender'>> & {
+  readonly sender?: Readonly<CanonicalUser>;
+};
+
+// Archive-facing attachment metadata excludes image bytes and runtime handles.
+export type RenderedAttachmentMetadata = Readonly<Pick<CanonicalAttachment,
+  | 'type' | 'mimeType' | 'fileName' | 'width' | 'height' | 'duration'
+  | 'animationHash' | 'stickerSetId' | 'stickerSetName' | 'format' | 'altText'
+>>;
+
+export interface RenderedMessageMetadata extends RenderedMetadata {
+  readonly messageId: string;
+  readonly sender?: Readonly<CanonicalUser>;
+  readonly replyTo?: RenderedReplyMetadata;
+  readonly forwardInfo?: RenderedForwardMetadata;
+  readonly attachments: readonly RenderedAttachmentMetadata[];
+  readonly editedAtSec?: number;
+  readonly editUtcOffsetMin?: number;
+  readonly deleted: boolean;
+  readonly isSelfSent: boolean;
+}
+
+export interface RenderedMessageRecord {
+  readonly kind: 'message';
+  readonly metadata: RenderedMessageMetadata;
+  // Rendering owns both XML forms; consumers own the visibility decision.
+  readonly presentation: {
+    readonly body: readonly RenderedContentPiece[];
+    readonly blocked: readonly RenderedContentPiece[];
+  };
+  readonly activation: {
+    readonly isMyself: boolean;
+    readonly mentionsMe: boolean;
+    readonly repliesToMe: boolean;
+  };
+}
+
+export interface RenderedSystemRecord {
+  readonly kind: 'system';
+  readonly metadata: RenderedMetadata;
+  readonly presentation: { readonly body: readonly RenderedContentPiece[] };
+}
+
+export interface RenderedRuntimeRecord {
+  readonly kind: 'runtime';
+  readonly metadata: RenderedMetadata & { readonly taskId: number; readonly taskType: string };
+  readonly presentation: { readonly body: readonly RenderedContentPiece[] };
+}
+
+// IC nodes and cache revisions stay private to Rendering. These records have a
+// distinct shape from Driver's model segments and cannot enter model consumers.
+export type RenderedRecord = RenderedMessageRecord | RenderedSystemRecord | RenderedRuntimeRecord;
+export type BaseRenderedContext = readonly RenderedRecord[];

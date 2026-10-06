@@ -3,7 +3,7 @@ import { createPatch } from 'diff';
 import { useLogger } from './config/logger';
 import { createEmptyIC, reduce } from './projection';
 import type { PipelineEvent, IntermediateContext } from './projection';
-import { createRenderer, rcToXml } from './rendering';
+import { createRenderer, renderedRecordsToXml } from './rendering';
 import type { BaseRenderedContext, RenderParams } from './rendering';
 
 export type { PipelineEvent } from './projection';
@@ -30,8 +30,8 @@ export const createPipeline = (renderParams: RenderParams) => {
 
   const logRendering = (chatId: string, oldRC: BaseRenderedContext | undefined, newRC: BaseRenderedContext): void => {
     if (!oldRC) return;
-    const oldXml = rcToXml(oldRC);
-    const newXml = rcToXml(newRC);
+    const oldXml = renderedRecordsToXml(oldRC);
+    const newXml = renderedRecordsToXml(newRC);
     if (oldXml === newXml) return;
     const patch = createPatch(`RC(${chatId})`, oldXml, newXml, 'before', 'after', { context: 3 });
     renderLogger.log(`RC diff:\n${patch}`);
@@ -67,7 +67,7 @@ export const createPipeline = (renderParams: RenderParams) => {
     // Keep the diff baseline inside residency: the next event should not diff
     // all compacted messages as deletions. Driver retains its own input snapshot.
     const rc = renderedSessions.get(chatId);
-    if (rc) renderedSessions.set(chatId, rc.filter(record => record.receivedAtMs >= cursorMs));
+    if (rc) renderedSessions.set(chatId, Object.freeze(rc.filter(record => record.metadata.receivedAtMs >= cursorMs)));
   };
 
   const getCompactCursor = (chatId: string) => cursors.get(chatId);
