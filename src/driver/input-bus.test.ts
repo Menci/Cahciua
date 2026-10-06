@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createDriverInputBus } from './input-bus';
-import type { RenderedContext } from '../rendering/types';
+import type { RenderedNodes } from '../rendering/types';
 
-const context = (receivedAtMs: number): RenderedContext => [{
+const context = (receivedAtMs: number): RenderedNodes => [{
+  chatId: 'chat',
+  source: { type: 'message', messageId: '1', receivedAtMs, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] },
   receivedAtMs,
   content: [{ type: 'text', text: String(receivedAtMs) }],
 }];

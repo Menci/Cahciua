@@ -14,11 +14,11 @@ type Signal<T> = {
 export const createCompactionController = (deps: {
   chatId: string;
   chatConfig: ResolvedChatConfig;
-  context: Signal<RenderedContext>;
+  context: () => RenderedContext;
   compactionMeta: Signal<CompactionSessionMeta | null>;
   loadTurnResponses: (chatId: string, afterMs?: number) => Promise<TurnResponseV2[]>;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
-  setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext;
+  setCompactCursor: (chatId: string, cursorMs: number) => void;
   log: Logger;
 }) => {
   const cursorMs = computed(() => deps.compactionMeta()?.newCursorMs);
@@ -27,7 +27,7 @@ export const createCompactionController = (deps: {
   const disposeCursorEffect = effect(() => {
     const cursor = cursorMs();
     if (cursor == null) return;
-    deps.context(deps.setCompactCursor(deps.chatId, cursor));
+    deps.setCompactCursor(deps.chatId, cursor);
   });
 
   let running = false;

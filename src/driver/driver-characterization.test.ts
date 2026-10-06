@@ -10,7 +10,8 @@ import type { ProbeResponseV2, TurnResponseV2 } from './types';
 import type { ResolvedChatConfig } from '../config/config';
 import type { LlmCallUsage } from '../llm/call';
 import { callLlm } from '../llm/call';
-import type { RenderedContext } from '../rendering/types';
+import { createPipeline } from '../pipeline';
+import type { RenderedNodes } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 
 initLogger(LogLevel.Error, Format.Pretty);
@@ -49,7 +50,9 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
 });
 
-const buildExternalContext = (receivedAtMs = 1000): RenderedContext => [{
+const buildExternalContext = (receivedAtMs = 1000): RenderedNodes => [{
+  chatId: 'chat',
+  source: { type: 'message', messageId: '1', receivedAtMs, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] },
   receivedAtMs,
   senderId: 'user-1',
   content: [{
@@ -98,10 +101,10 @@ const makeDriverDeps = (overrides: Partial<DriverDeps> = {}): DriverDeps => ({
 
 const activeDrivers: ReturnType<typeof createDriver>[] = [];
 
-const startDriver = (chatId: string, deps: DriverDeps) => {
+const startDriver = (chatId: string, deps: DriverDeps, chatConfig = makeChatConfig()) => {
   const driver = createDriver({
     chatIds: [chatId],
-    resolveChatConfig: () => makeChatConfig(),
+    resolveChatConfig: () => chatConfig,
   }, deps);
   activeDrivers.push(driver);
   return driver;
@@ -413,4 +416,33 @@ describe('Runner persistence and force-tool characterization', () => {
     expect(sendExecute).not.toHaveBeenCalled();
     expect(onStepComplete).not.toHaveBeenCalled();
   });
+});
+
+it('applies blocked-user policy before scheduling probe without leaking base metadata', async () => {
+  const pipeline = createPipeline({ botUserId: 'bot' });
+  const base = pipeline.pushEvent('chat', {
+    type: 'message', chatId: 'chat', messageId: '1', receivedAtMs: 1000, timestampSec: 1, utcOffsetMin: 0,
+    sender: { id: 'blocked', displayName: 'Blocked', isBot: false },
+    content: [{ type: 'mention', userId: 'bot', children: [{ type: 'text', text: 'private body' }] }],
+    attachments: [],
+  });
+  mockCallLlm.mockResolvedValueOnce({
+    entries: toolCallEntries('decision', 'decide', '{"should_act":"no_action","reason":"blocked"}'),
+    usage: makeUsage(),
+  });
+  const persistedProbe = vi.fn();
+  const driver = startDriver('chat', makeDriverDeps({ persistProbeResponse: persistedProbe }), {
+    ...makeChatConfig(), blockedUserIds: ['blocked'],
+  });
+  driver.handleEvent('chat', base);
+  await vi.waitFor(() => expect(persistedProbe).toHaveBeenCalledOnce());
+  expect(mockCallLlm).toHaveBeenCalledOnce();
+  const request = mockCallLlm.mock.calls[0]![1].flatMap(entry =>
+    entry.kind === 'message' && entry.role === 'user'
+      ? entry.parts.flatMap(part => part.kind === 'text' ? [part.text] : [])
+      : []).join('\n');
+  expect(request).toContain('blocked=\"true\"');
+  expect(request).not.toContain('private body');
+  expect(base[0]!.source).toMatchObject({ messageId: '1' });
+  expect(base[0]!.mentionsMe).toBe(true);
 });

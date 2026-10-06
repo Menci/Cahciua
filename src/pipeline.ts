@@ -3,104 +3,68 @@ import { createPatch } from 'diff';
 import { useLogger } from './config/logger';
 import { createEmptyIC, reduce } from './projection';
 import type { PipelineEvent, IntermediateContext } from './projection';
-import { rcToXml, render } from './rendering';
-import type { RenderedContext, RenderParams } from './rendering';
+import { createRenderer, rcToXml } from './rendering';
+import type { RenderedNodes, RenderParams } from './rendering';
 
 export type { PipelineEvent } from './projection';
 
-// Per-chat IC/RC state manager. Encapsulates the Projection → Rendering
-// pipeline, debug dumping, and diff logging.
-//
-// `getBlockedUserIds` is looked up per render so that a config-driven block
-// change takes effect on the next re-render without any state migration —
-// nothing is filtered at ingress or in storage; the rendering layer simply
-// masks blocked senders' messages.
-export const createPipeline = (
-  renderParams: RenderParams,
-  getBlockedUserIds: (chatId: string) => ReadonlySet<string> | undefined = () => undefined,
-) => {
+export const createPipeline = (renderParams: RenderParams) => {
   const logger = useLogger('pipeline');
   const renderLogger = useLogger('rendering');
-
   const sessions = new Map<string, IntermediateContext>();
-  const renderedSessions = new Map<string, RenderedContext>();
+  const renderedSessions = new Map<string, RenderedNodes>();
+  const renderers = new Map<string, ReturnType<typeof createRenderer>>();
   const cursors = new Map<string, number>();
 
-  // Base RenderParams for a chat: shared params + the per-chat block list.
-  // Exposed so callers that render ad-hoc contexts (e.g. read_old_messages) use
-  // the exact same sender/contact formatting and block rules as the live context.
-  const getRenderParams = (chatId: string): RenderParams => {
-    const blockedUserIds = getBlockedUserIds(chatId);
-    return {
-      ...renderParams,
-      ...(blockedUserIds?.size ? { blockedUserIds } : {}),
-    };
-  };
-
-  // Effective RenderParams additionally carry the per-chat compaction cursor, so
-  // live renders exclude segments that were compacted away.
-  const effectiveParams = (chatId: string): RenderParams => {
+  const renderResident = (chatId: string, ic: IntermediateContext): RenderedNodes => {
+    let renderer = renderers.get(chatId);
+    if (!renderer) {
+      renderer = createRenderer();
+      renderers.set(chatId, renderer);
+    }
     const cursor = cursors.get(chatId);
-    return {
-      ...getRenderParams(chatId),
-      ...(cursor != null ? { compactCursorMs: cursor } : {}),
-    };
+    // Select residency before construction: old IC remains available for reply
+    // snapshots, but messages outside the active window need no XML or Sharp.
+    return renderer.render({ ...ic, nodes: ic.nodes.filter(node => cursor == null || node.receivedAtMs >= cursor) }, renderParams);
   };
 
-  const logRendering = (sessionId: string, oldRC: RenderedContext | undefined, newRC: RenderedContext) => {
-    if (!oldRC) return; // Skip full RC log on cold start — too noisy
+  const logRendering = (chatId: string, oldRC: RenderedNodes | undefined, newRC: RenderedNodes): void => {
+    if (!oldRC) return;
     const oldXml = rcToXml(oldRC);
     const newXml = rcToXml(newRC);
     if (oldXml === newXml) return;
-    const patch = createPatch(`RC(${sessionId})`, oldXml, newXml, 'before', 'after', { context: 3 });
-    renderLogger.log(`RC diff:\n${patch}`);
+    renderLogger.log(`RC diff:\n${createPatch(`RC(${chatId})`, oldXml, newXml, 'before', 'after', { context: 3 })}`);
   };
 
-  // Push a single event through the pipeline: reduce IC → render RC → log diff.
-  const pushEvent = (chatId: string, event: PipelineEvent): RenderedContext => {
-    const oldIC = sessions.get(chatId) ?? createEmptyIC(chatId);
-    const newIC = reduce(oldIC, event);
-    sessions.set(chatId, newIC);
-
-    const oldRC = renderedSessions.get(chatId);
-    const newRC = render(newIC, effectiveParams(chatId));
-    renderedSessions.set(chatId, newRC);
-    logRendering(chatId, oldRC, newRC);
-
-    return newRC;
-  };
-
-  // Cold-start replay: rebuild IC from persisted events, then render RC.
-  const replayChat = (chatId: string, events: PipelineEvent[]): RenderedContext => {
-    let ic = createEmptyIC(chatId);
-    for (const event of events)
-      ic = reduce(ic, event);
+  const pushEvent = (chatId: string, event: PipelineEvent): RenderedNodes => {
+    const ic = reduce(sessions.get(chatId) ?? createEmptyIC(chatId), event);
     sessions.set(chatId, ic);
-
-    const rc = render(ic, effectiveParams(chatId));
+    const rc = renderResident(chatId, ic);
+    logRendering(chatId, renderedSessions.get(chatId), rc);
     renderedSessions.set(chatId, rc);
+    return rc;
+  };
 
+  const replayChat = (chatId: string, events: PipelineEvent[]): RenderedNodes => {
+    let ic = createEmptyIC(chatId);
+    for (const event of events) ic = reduce(ic, event);
+    sessions.set(chatId, ic);
+    const rc = renderResident(chatId, ic);
+    renderedSessions.set(chatId, rc);
     logger.withFields({ chatId, events: events.length, nodes: ic.nodes.length, users: ic.users.size }).log('Replayed session');
     return rc;
   };
 
-  // Update compact cursor for a chat. Re-renders RC with the new cursor so
-  // segments before the cursor are excluded.
-  const setCompactCursor = (chatId: string, cursorMs: number): RenderedContext | undefined => {
+  const setCompactCursor = (chatId: string, cursorMs: number): void => {
     cursors.set(chatId, cursorMs);
-    const ic = sessions.get(chatId);
-    if (!ic) return;
-    const oldRC = renderedSessions.get(chatId);
-    const rc = render(ic, effectiveParams(chatId));
-    renderedSessions.set(chatId, rc);
-    logRendering(chatId, oldRC, rc);
-    logger.withFields({ chatId, cursorMs }).log('Compact cursor updated');
-    return rc;
+    renderers.get(chatId)?.retainAfter(cursorMs);
+    const rc = renderedSessions.get(chatId);
+    if (rc) renderedSessions.set(chatId, rc.filter(node => node.receivedAtMs >= cursorMs));
   };
 
   const getCompactCursor = (chatId: string) => cursors.get(chatId);
   const getIC = (chatId: string) => sessions.get(chatId);
-  const getRenderedChats = (): Array<[string, RenderedContext]> => [...renderedSessions.entries()];
-
+  const getRenderParams = (): RenderParams => renderParams;
+  const getRenderedChats = (): Array<[string, RenderedNodes]> => [...renderedSessions.entries()];
   return { pushEvent, replayChat, setCompactCursor, getCompactCursor, getIC, getRenderParams, getRenderedChats };
 };

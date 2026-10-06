@@ -2,9 +2,9 @@ import * as tdl from 'tdl';
 
 import { contentToPlainText } from '../adaptation/content';
 import { buildContainer } from '../container';
+import { selectStartupReplayChatIds } from './chat-selection';
 import { TOKENS } from '../container/tokens';
 import { loadCompaction, loadEventsWithId, loadKnownChatIds, migrateV1ToV2 } from '../db';
-import { selectStartupReplayChatIds } from './chat-selection';
 import { resolveTdjson } from '../telegram/tdjson';
 
 tdl.configure({ tdjson: resolveTdjson() });

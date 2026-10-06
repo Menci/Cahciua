@@ -15,6 +15,8 @@ Telegram update
   -> Projection reducer
   -> IntermediateContext (IC)
   -> Rendering
+  -> reusable unmasked base records
+  -> Driver window/masking view
   -> RenderedContext segments (RC)
 
 RC + Driver TurnResponses
@@ -55,11 +57,15 @@ Projection never performs I/O and never receives LLM output.
 
 ## Rendering
 
-Rendering converts IC into ordered RC segments. Each segment retains `receivedAtMs` and metadata used by scheduling (`senderId`, `isMyself`, `isSelfSent`, mention/reply flags).
+Rendering converts resident IC nodes into ordered base records. Every record carries `chatId`, the immutable source node, unmasked XML/content, `receivedAtMs`, and scheduling metadata (`senderId`, `isMyself`, `isSelfSent`, mention/reply flags). Message identity, sender/reply snapshots, attachments, and edit/delete state are available structurally without parsing XML. The formatter prepares a header-only blocked representation from the same attributes, but policy does not select it during rendering.
+
+Pipeline caches records per chat by immutable IC node revision (with complete-source value matching for equivalent replay nodes) and a value snapshot of display parameters (bot identity and contact names). Unchanged records reuse body XML and Sharp handles. Edits, deletes, authoritative echoes, media description changes during replay, and display parameter changes refresh affected records. The cache is replaced with the resident node set each render and evicted before the cursor on compaction; it never accumulates a separate historical RC. IC retains its existing projection lifetime, including reply snapshots. Cold replay continues to load only the active event window.
+
+Cursor advancement releases obsolete cached records without invoking rendering or publishing new input. A Driver may retain its last published base snapshot until the next event; it does not accumulate snapshots. Summary/model/budget changes belong entirely to downstream consumers.
 
 User-controlled identity is encoded in XML attributes. Content is escaped and cannot inject sibling message attributes. Attachments expose stable logical file IDs in `messageId:index` form; TDLib-local IDs are not persisted.
 
-Configured blocked senders are masked at render time. Their source events remain in persistence and IC so changing configuration can restore them after replay.
+Driver derives the model RC through the pure `selectContextView()` transform: select records at or after the chat cursor, then mask configured blocked senders. Masking removes body/images and mention/reply flags while retaining scheduling identity. Internal source metadata stays out of the model view. Source events remain in persistence and IC; another authorized consumer can use the unmasked base representation. Historical `read_old_messages` uses this same policy transform without the live cursor.
 
 ## Driver Context
 
@@ -160,7 +166,7 @@ Compaction is an independent per-chat controller parallel to reply scheduling.
 - High water mark: `maxContextEstTokens` over raw RC + TR content after the cursor.
 - Low water mark: `workingWindowEstTokens`, used to choose the new cursor.
 
-The selected old window is summarized into structured plain text. A new row is appended to `compactions`, then the compaction signal updates Pipeline's render cursor. Compaction is not a turn response and never deletes historical events or TR rows.
+The selected old window is summarized into structured plain text. A new row is appended to `compactions`, then compaction metadata advances the pure Driver view and releases obsolete Pipeline rendering records. The cursor effect performs no rendering and never writes the base input signal. Compaction is not a turn response and never deletes historical events or TR rows.
 
 ## Telegram Runtime
 
@@ -175,7 +181,8 @@ The manager owns raw clients, ordered ingress, and blocking transforms. Live han
 persist platform message/edit/delete row
 -> persist canonical event
 -> if configured: hydrate cached alt text
--> project/render
+-> project/render base records
+-> apply model-view policy
 -> notify DriverInputBus
 ```
 
@@ -203,7 +210,7 @@ Cached alt text is applied transiently during replay/live publication. It is nev
 
 No business factory receives the container. No registrar is discovered from the filesystem. This keeps the dependency graph visible and compatible with the single-entry tsdown bundle.
 
-`DriverInputBus` breaks event-producer/Driver construction cycles. It buffers only the newest RC per chat while attached but inactive. Typing is ephemeral and is ignored before activation.
+`DriverInputBus` breaks event-producer/Driver construction cycles. It buffers only the newest base rendering per chat while attached but inactive. Typing is ephemeral and is ignored before activation.
 
 Startup and shutdown order is documented in `AGENTS.md` and implemented by `src/startup/index.ts`.
 

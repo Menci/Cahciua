@@ -122,11 +122,7 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       loadCompaction: chatId => loadCompaction(db, chatId),
       loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
       persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
-      setCompactCursor: (chatId, cursorMs) => {
-        const context = pipeline.setCompactCursor(chatId, cursorMs);
-        if (!context) throw new Error(`Cannot compact non-resident chat ${chatId}`);
-        return context;
-      },
+      setCompactCursor: pipeline.setCompactCursor,
       getChatTitle: chatId => {
         const context = pipeline.getIC(chatId);
         if (!context) throw new Error(`Missing Pipeline context for chat ${chatId}`);
@@ -137,7 +133,7 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       messageExists: (chatId, messageId) => messageExists(db, chatId, messageId),
       downloadMessageMedia: telegram.downloadMessageMedia,
       readOldMessages: (chatId, messageIds) =>
-        renderOldMessagesXml(chatId, loadEventsByMessageIds(db, chatId, messageIds), pipeline.getRenderParams(chatId)),
+        renderOldMessagesXml(chatId, loadEventsByMessageIds(db, chatId, messageIds), pipeline.getRenderParams(), { blockedUserIds: new Set(resolveChatConfig(config, chatId).blockedUserIds) }),
       resolveModel: name => resolveModel(config, name),
       backgroundTask: {
         startTask: (typeName, sessionId, params, intention, timeoutMs) =>

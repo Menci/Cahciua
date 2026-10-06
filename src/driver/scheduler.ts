@@ -12,7 +12,7 @@ type Signal<T> = {
 export const createReplyScheduler = (deps: {
   chatId: string;
   debounce: DebounceConfig;
-  context: Signal<RenderedContext>;
+  context: () => RenderedContext;
   lastProcessedMs: Signal<number>;
   lastTurnInterrupted: Signal<boolean>;
   failedContext: Signal<RenderedContext | null>;

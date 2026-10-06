@@ -1,3 +1,5 @@
+import { selectContextView } from './context-view';
+import type { ContextViewParams } from './context-view';
 import { createEmptyIC, reduce } from '../projection';
 import type { PipelineEvent } from '../projection';
 import { rcToXml, render } from '../rendering';
@@ -17,9 +19,10 @@ export const renderOldMessagesXml = (
   sessionId: string,
   events: PipelineEvent[],
   renderParams: RenderParams,
+  viewParams: ContextViewParams = {},
 ): string => {
   let ic = createEmptyIC(sessionId);
   for (const event of events)
     ic = reduce(ic, event);
-  return rcToXml(render(ic, renderParams));
+  return rcToXml(selectContextView(render(ic, renderParams), viewParams));
 };

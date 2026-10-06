@@ -524,25 +524,4 @@ describe('render', () => {
 
   });
 
-  describe('viewport filtering', () => {
-    it('skips nodes before compactCursorMs', () => {
-      const rc = render(
-        ic([
-          message({ receivedAtMs: 1000 }),
-          message({ messageId: '43', receivedAtMs: 3000, timestampSec: 1741776660 }),
-        ]),
-        { compactCursorMs: 2000 },
-      );
-      expect(rc).toHaveLength(1);
-      expect(rc[0]!.receivedAtMs).toBe(3000);
-    });
-
-    it('includes nodes at exactly compactCursorMs', () => {
-      const rc = render(
-        ic([message({ receivedAtMs: 2000 })]),
-        { compactCursorMs: 2000 },
-      );
-      expect(rc).toHaveLength(1);
-    });
-  });
 });

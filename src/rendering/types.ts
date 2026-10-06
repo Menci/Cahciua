@@ -1,17 +1,11 @@
+import type { Sharp } from 'sharp';
+
+import type { ICNode } from '../projection/types';
+
 export interface RenderParams {
-  compactCursorMs?: number;
   botUserId?: string;
   contactNames?: Map<string, string>;
-  // Users whose messages should render as a self-closing `<message blocked="true"/>`
-  // with no content. Sender info is kept so the model can see who was blocked.
-  // Blocked messages also suppress `mentionsMe` / `repliesToMe`, so they can't
-  // trick the bot into responding. Lookup is per-chat, computed lazily at render
-  // time — so toggling a user in/out of the block list takes effect on next
-  // re-render (e.g. after restart). Nothing is filtered at ingress or in storage.
-  blockedUserIds?: ReadonlySet<string>;
 }
-
-import type { Sharp } from 'sharp';
 
 // Provider-agnostic content piece — maps to LLM API content parts.
 // Driver converts to provider-specific format at the wire boundary.
@@ -50,3 +44,13 @@ export interface RenderedContextSegment {
 }
 
 export type RenderedContext = RenderedContextSegment[];
+
+// Base records precede model-view policy and retain structured source identity.
+// Sharp handles remain runtime-only; consumers must choose their own storage form.
+export interface RenderedNode extends RenderedContextSegment {
+  chatId: string;
+  source: ICNode;
+  blockedContent?: RenderedContentPiece[];
+}
+
+export type RenderedNodes = RenderedNode[];

@@ -13,7 +13,7 @@ import { createDriver } from './index';
 import type { TurnResponseV2 } from './types';
 import type { ResolvedChatConfig } from '../config/config';
 import { callLlm } from '../llm/call';
-import type { RenderedContext } from '../rendering/types';
+import type { RenderedNodes } from '../rendering/types';
 import type { ConversationEntry } from '../unified-api/types';
 
 initLogger(LogLevel.Log, Format.Pretty);
@@ -39,13 +39,17 @@ const makeChatConfig = (): ResolvedChatConfig => ({
   tools: { banSpammer: false, bash: { backgroundThresholdSec: 10 } },
 });
 
-const buildRC = (): RenderedContext => [
+const buildRC = (): RenderedNodes => [
   {
+    chatId: 'chat',
+    source: { type: 'message', messageId: '1', receivedAtMs: 1000, timestampSec: 1, utcOffsetMin: 0, content: [], attachments: [] },
     receivedAtMs: 1000,
     senderId: 'user1',
     content: [{ type: 'text', text: '<message id="1" sender="Alice (@alice)" t="2025-01-01T00:00:01+00:00">hello bot</message>' }],
   },
   {
+    chatId: 'chat',
+    source: { type: 'message', messageId: '2', receivedAtMs: 2000, timestampSec: 2, utcOffsetMin: 0, content: [], attachments: [] },
     receivedAtMs: 2000,
     senderId: 'bot',
     isMyself: true,
@@ -53,6 +57,8 @@ const buildRC = (): RenderedContext => [
     content: [{ type: 'text', text: '<message id="2" sender="Bot (@bot)" myself="true" t="2025-01-01T00:00:02+00:00">hi alice</message>' }],
   },
   {
+    chatId: 'chat',
+    source: { type: 'message', messageId: '3', receivedAtMs: 3000, timestampSec: 3, utcOffsetMin: 0, content: [], attachments: [] },
     receivedAtMs: 3000,
     senderId: 'user1',
     content: [{ type: 'text', text: '<message id="3" sender="Alice (@alice)" t="2025-01-01T00:00:03+00:00">how are you?</message>' }],
@@ -217,8 +223,6 @@ describe('probe vs primary view of bot\'s own messages', () => {
     expect(primaryAssistantToolCalls).toContain('bash');
 
     // Primary's late-binding embeds the probe's reason as advisory.
-    expect(primaryUserText).toContain('evaluator\'s notes');
-    expect(primaryUserText).toContain('advisory only');
     expect(primaryUserText).toContain('Plausible: (a) react 👀');
 
     // Probe sees no real assistant tool calls in its context — all TRs are

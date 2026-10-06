@@ -11,7 +11,7 @@ import { sql } from 'drizzle-orm';
 import type { ActiveTaskInfo, BackgroundTask, BackgroundTaskFactory, TaskContext } from './types';
 import type { DB } from '../db/client';
 import { insertBackgroundTask, loadBackgroundTask, loadCompletedBackgroundTasks, loadIncompleteBackgroundTasks, markBackgroundTaskCompleted, updateBackgroundTaskCheckpoint } from '../db/persistence';
-import type { RenderedContext } from '../rendering/types';
+import type { RenderedNodes } from '../rendering/types';
 import type { RuntimeTaskCompletedEvent } from '../runtime-event';
 
 interface ManagedTask {
@@ -32,8 +32,8 @@ interface ManagedTask {
 interface BackgroundTaskManagerDeps {
   db: DB;
   persistEvent: (event: RuntimeTaskCompletedEvent) => void;
-  pushPipelineEvent: (chatId: string, event: RuntimeTaskCompletedEvent) => RenderedContext;
-  handleDriverEvent: (chatId: string, rc: RenderedContext) => void;
+  pushPipelineEvent: (chatId: string, event: RuntimeTaskCompletedEvent) => RenderedNodes;
+  handleDriverEvent: (chatId: string, rc: RenderedNodes) => void;
   taskOutputDir: string;
   retentionCount: number;
   logger: Logger;
