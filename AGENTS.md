@@ -10,7 +10,7 @@ Cahciua is a Telegram group-chat bot built around the **Deterministic Context Pi
 
 1. **Telegram adaptation** (`src/telegram/adaptation.ts`) converts Telegram events to `CanonicalIMEvent`.
 2. **Projection** (`src/projection/`) applies the pure reducer `IC' = reduce(IC, event)`.
-3. **Rendering** (`src/rendering/`) serializes resident IC nodes to reusable, unmasked records with structured source identity and provider-independent XML.
+3. **Rendering** (`src/rendering/`) selects a caller-supplied chat window before serializing IC nodes to reusable, unmasked records with structured source identity and provider-independent XML.
 4. **Driver** (`src/driver/`) derives the model RC view (window and blocked-user policy), merges it with stored turn responses, runs the probe gate and primary tool loop, schedules wake-ups, and compacts context.
 
 LLM calls support `openai-chat`, `anthropic-messages`, and `responses` through direct, non-streaming `fetch`. Provider transports live in `src/llm/`; `src/unified-api/` owns the provider-independent `ConversationEntry[]` representation and wire codecs. Turn responses persist that IR, not provider wire objects.
@@ -31,7 +31,7 @@ Node >=22, TypeScript, pnpm, tdl/libtdjson, better-sqlite3 + Drizzle, Immer, ali
 src/
 ├── adaptation/   Canonical event/content types and platform-neutral content helpers
 ├── projection/   Pure IC reducer
-├── rendering/    Resident IC -> reusable unmasked records and XML
+├── rendering/    Consumer-owned IC + output range -> reusable unmasked records and XML
 ├── unified-api/  Provider-independent LLM conversation IR and codecs
 ├── llm/          Non-streaming provider transports, request prep, request dumps
 ├── media/        Thumbnails, frame extraction, alt-text resolvers, media runtime
@@ -120,7 +120,9 @@ Message edits/deletes mutate the target node in place. Entity metadata changes a
 
 Rendering owns a read-only record contract, distinct from Driver's model context. Records expose explicit metadata (message identity, sender/reply/forward snapshots, edit/delete/self-send state and attachment descriptions), presentation bodies and activation facts. They never expose IC nodes, source trees, thumbnail bytes in metadata, or cache revisions. IC identity and complete-source revision matching are private cache details. Rendering prepares full and blocked XML forms but never chooses policy; only source revisions and display parameters invalidate rendering.
 
-Pipeline selects rendering residency and evicts obsolete cache entries on cursor advancement without rendering or publication. It also filters its stored base-record array to keep the next diff baseline inside residency. Driver retains its own input snapshot until the next event. Cold replay still loads only the active event window; this is not an all-history cache.
+Rendering accepts consumer-owned IC and an explicit inclusive-start/exclusive-end output range on `receivedAtMs`. Window selection precedes XML, metadata, revision and image construction; it does not recover state or discard reply/edit/delete dependencies. Online Pipeline and future historical consumers own separate IC, renderer caches and ranges. A rendering range is not a durable build-progress cursor.
+
+Pipeline passes its per-chat rendering window to that common entry and evicts obsolete cache entries on window changes without rendering or publication. Startup maps the saved compaction cursor to an online window before replay; the Driver adapter requires a resident chat before mapping a completed compaction to that window. Pipeline also filters its stored base-record array to keep the next diff baseline inside residency. Driver retains its own input snapshot until the next event. Cold replay still loads only the active event window; this is not an all-history cache.
 
 Driver owns `RenderedContext` / `RenderedContextSegment` in `context-types.ts`. `selectContextView()` explicitly converts base records before scheduling, probe, primary or compaction, selects the cursor window, and masks blocked senders' bodies/images and mention/reply flags. Base records and model segments have incompatible shapes; neither can be substituted for the other. `read_old_messages` uses the same conversion with current policy and no live cursor. Model segments carry no record metadata. Read-only body arrays and Sharp handles are reused; codecs clone Sharp before request-specific processing. See `docs/rendering-interfaces.md` for the contracts and ownership rationale.
 

@@ -82,7 +82,7 @@ export const startApp = async (): Promise<void> => {
 
     for (const chatId of replayChatIds) {
       const compaction = loadCompaction(db, chatId);
-      if (compaction) pipeline.setCompactCursor(chatId, compaction.newCursorMs);
+      if (compaction) pipeline.setRenderWindow(chatId, { fromReceivedAtMs: compaction.newCursorMs });
       const events = loadEventsWithId(db, chatId, compaction?.newCursorMs).map(({ event }) => event);
       const imageResolver = media.imageResolvers.get(chatId);
       if (imageResolver) {

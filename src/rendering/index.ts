@@ -1,10 +1,10 @@
 import sharp from 'sharp';
 
-import type { RenderParams, RenderedContentPiece, RenderedRecord, RenderedMessageRecord, RenderedMessageMetadata, RenderedAttachmentMetadata, BaseRenderedContext } from './types';
+import type { RenderParams, RenderedContentPiece, RenderedRecord, RenderedMessageRecord, RenderedMessageMetadata, RenderedAttachmentMetadata, BaseRenderedContext, RenderWindow } from './types';
 import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICNode, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
 
-export type { RenderParams, RenderedContentPiece, RenderedRecord, BaseRenderedContext } from './types';
+export type { RenderParams, RenderedContentPiece, RenderedRecord, BaseRenderedContext, RenderWindow } from './types';
 
 // --- Helpers ---
 
@@ -306,8 +306,17 @@ const renderNode = (chatId: string, node: ICNode, params: RenderParams): Rendere
   });
 };
 
-export const render = (ic: IntermediateContext, params: RenderParams = {}): BaseRenderedContext =>
-  Object.freeze(ic.nodes.map(node => renderNode(ic.sessionId, node, params)));
+export const isInRenderWindow = (receivedAtMs: number, window: RenderWindow): boolean =>
+  (window.fromReceivedAtMs == null || receivedAtMs >= window.fromReceivedAtMs)
+  && (window.untilReceivedAtMs == null || receivedAtMs < window.untilReceivedAtMs);
+
+// Selection precedes formatting, metadata copying, revision comparison and Sharp.
+// IC is supplied by the consumer and may contain dependencies outside the range.
+const selectNodes = (ic: IntermediateContext, window: RenderWindow): ICNode[] =>
+  ic.nodes.filter(node => isInRenderWindow(node.receivedAtMs, window));
+
+export const render = (ic: IntermediateContext, params: RenderParams = {}, window: RenderWindow = {}): BaseRenderedContext =>
+  Object.freeze(selectNodes(ic, window).map(node => renderNode(ic.sessionId, node, params)));
 
 export const contentToXml = (pieces: readonly RenderedContentPiece[]): string =>
   pieces.map(piece => piece.type === 'text' ? piece.text : '[thumbnail]').join('\n');
@@ -315,20 +324,20 @@ export const contentToXml = (pieces: readonly RenderedContentPiece[]): string =>
 export const renderedRecordsToXml = (records: BaseRenderedContext): string =>
   records.map(record => contentToXml(record.presentation.body)).join('\n');
 
-/** One cache per resident chat. Immutable IC nodes are revisions; formatting is
+/** One cache per consumer/chat. Immutable IC nodes are revisions; formatting is
  * snapshotted by value so mutating a contact map cannot reuse stale XML. */
 export const createRenderer = () => {
   type CachedNode = { revision: string; record: RenderedRecord };
   let cache = new Map<ICNode, CachedNode>();
   let formatKey: string | undefined;
   return {
-    render(ic: IntermediateContext, params: RenderParams): BaseRenderedContext {
+    render(ic: IntermediateContext, params: RenderParams, window: RenderWindow = {}): BaseRenderedContext {
       const nextFormatKey = JSON.stringify([ic.sessionId, params.botUserId, [...(params.contactNames ?? [])]]);
       if (nextFormatKey !== formatKey) cache.clear();
       formatKey = nextFormatKey;
       const previousRevisions = new Map([...cache.values()].map(entry => [entry.revision, entry.record]));
       const nextCache = new Map<ICNode, CachedNode>();
-      const nodes = ic.nodes.map(node => {
+      const nodes = selectNodes(ic, window).map(node => {
         let entry = cache.get(node);
         if (!entry) {
           // Replay creates new immutable nodes even when their data is unchanged.
@@ -342,9 +351,9 @@ export const createRenderer = () => {
       cache = nextCache;
       return Object.freeze(nodes);
     },
-    retainAfter(cursorMs: number): void {
+    retainWindow(window: RenderWindow): void {
       for (const node of cache.keys())
-        if (node.receivedAtMs < cursorMs) cache.delete(node);
+        if (!isInRenderWindow(node.receivedAtMs, window)) cache.delete(node);
     },
   };
 };

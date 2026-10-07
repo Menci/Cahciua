@@ -122,7 +122,10 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       loadCompaction: chatId => loadCompaction(db, chatId),
       loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
       persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
-      setCompactCursor: pipeline.setCompactCursor,
+      setCompactCursor: (chatId, cursorMs) => {
+        if (!pipeline.getIC(chatId)) throw new Error(`Cannot compact non-resident chat ${chatId}`);
+        pipeline.setRenderWindow(chatId, { fromReceivedAtMs: cursorMs });
+      },
       getChatTitle: chatId => {
         const context = pipeline.getIC(chatId);
         if (!context) throw new Error(`Missing Pipeline context for chat ${chatId}`);

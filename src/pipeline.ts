@@ -3,8 +3,8 @@ import { createPatch } from 'diff';
 import { useLogger } from './config/logger';
 import { createEmptyIC, reduce } from './projection';
 import type { PipelineEvent, IntermediateContext } from './projection';
-import { createRenderer, renderedRecordsToXml } from './rendering';
-import type { BaseRenderedContext, RenderParams } from './rendering';
+import { createRenderer, isInRenderWindow, renderedRecordsToXml } from './rendering';
+import type { BaseRenderedContext, RenderParams, RenderWindow } from './rendering';
 
 export type { PipelineEvent } from './projection';
 
@@ -14,7 +14,7 @@ export const createPipeline = (renderParams: RenderParams) => {
   const sessions = new Map<string, IntermediateContext>();
   const renderedSessions = new Map<string, BaseRenderedContext>();
   const renderers = new Map<string, ReturnType<typeof createRenderer>>();
-  const cursors = new Map<string, number>();
+  const windows = new Map<string, RenderWindow>();
 
   const renderResident = (chatId: string, ic: IntermediateContext): BaseRenderedContext => {
     let renderer = renderers.get(chatId);
@@ -22,10 +22,7 @@ export const createPipeline = (renderParams: RenderParams) => {
       renderer = createRenderer();
       renderers.set(chatId, renderer);
     }
-    const cursor = cursors.get(chatId);
-    // Select residency before construction: old IC remains available for reply
-    // snapshots, but messages outside the active window need no XML or Sharp.
-    return renderer.render({ ...ic, nodes: ic.nodes.filter(node => cursor == null || node.receivedAtMs >= cursor) }, renderParams);
+    return renderer.render(ic, renderParams, windows.get(chatId));
   };
 
   const logRendering = (chatId: string, oldRC: BaseRenderedContext | undefined, newRC: BaseRenderedContext): void => {
@@ -61,18 +58,21 @@ export const createPipeline = (renderParams: RenderParams) => {
     return rc;
   };
 
-  const setCompactCursor = (chatId: string, cursorMs: number): void => {
-    cursors.set(chatId, cursorMs);
-    renderers.get(chatId)?.retainAfter(cursorMs);
+  // Startup can seed a range before replay. Driver separately requires residency
+  // when mapping a completed compaction to an online window.
+  const setRenderWindow = (chatId: string, window: RenderWindow): void => {
+    const snapshot = Object.freeze({ ...window });
+    windows.set(chatId, snapshot);
+    renderers.get(chatId)?.retainWindow(snapshot);
     // Keep the diff baseline inside residency: the next event should not diff
     // all compacted messages as deletions. Driver retains its own input snapshot.
     const rc = renderedSessions.get(chatId);
-    if (rc) renderedSessions.set(chatId, Object.freeze(rc.filter(record => record.metadata.receivedAtMs >= cursorMs)));
+    if (rc) renderedSessions.set(chatId, Object.freeze(rc.filter(record => isInRenderWindow(record.metadata.receivedAtMs, snapshot))));
   };
 
-  const getCompactCursor = (chatId: string) => cursors.get(chatId);
+  const getRenderWindow = (chatId: string) => windows.get(chatId);
   const getIC = (chatId: string) => sessions.get(chatId);
   const getRenderParams = (): RenderParams => renderParams;
   const getRenderedChats = (): Array<[string, BaseRenderedContext]> => [...renderedSessions.entries()];
-  return { pushEvent, replayChat, setCompactCursor, getCompactCursor, getIC, getRenderParams, getRenderedChats };
+  return { pushEvent, replayChat, setRenderWindow, getRenderWindow, getIC, getRenderParams, getRenderedChats };
 };

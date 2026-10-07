@@ -7,6 +7,13 @@ export interface RenderParams {
   contactNames?: Map<string, string>;
 }
 
+// Output range in one IC's chat, not an event-loading range or build progress.
+// The start is inclusive, the end exclusive; omitted bounds are unbounded.
+export interface RenderWindow {
+  readonly fromReceivedAtMs?: number;
+  readonly untilReceivedAtMs?: number;
+}
+
 export type RenderedContentPiece =
   | { readonly type: 'text'; readonly text: string }
   | { readonly type: 'image'; readonly image: Sharp };

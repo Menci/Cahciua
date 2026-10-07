@@ -119,7 +119,7 @@ it('persists before advancing a pure view and never republishes rendering on met
       expect(metadata()).toBeNull();
       order.push('persist');
     },
-    setCompactCursor: (id, cursor) => { order.push('cursor'); pipeline.setCompactCursor(id, cursor); },
+    setCompactCursor: (id, cursor) => { order.push('cursor'); pipeline.setRenderWindow(id, { fromReceivedAtMs: cursor }); },
     log: useLogger('compaction-controller-test'),
   });
   try {

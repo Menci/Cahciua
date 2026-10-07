@@ -55,12 +55,12 @@ describe('Pipeline rendering reuse', () => {
       ...message('2', 2000), attachments: [{ type: 'photo', thumbnailWebp: 'aGVsbG8=' }],
     });
     const other = pipeline.pushEvent('other', { ...message('3', 1000), chatId: 'other' });
-    pipeline.setCompactCursor('chat', 2000);
+    pipeline.setRenderWindow('chat', { fromReceivedAtMs: 2000 });
     const snapshot = pipeline.getRenderedChats().find(([id]) => id === 'chat')![1];
     expect(snapshot).toHaveLength(1);
     expect(snapshot[0]).toBe(before[1]);
     expect(before).toHaveLength(2);
-    const retained = selectContextView(snapshot, { cursorMs: pipeline.getCompactCursor('chat') });
+    const retained = selectContextView(snapshot, { cursorMs: pipeline.getRenderWindow('chat')?.fromReceivedAtMs });
     expect(retained).toHaveLength(1);
     expect(retained[0]!.content).toBe(before[1]!.presentation.body);
     expect(pipeline.getRenderedChats().find(([id]) => id === 'other')![1]).toBe(other);
@@ -68,7 +68,7 @@ describe('Pipeline rendering reuse', () => {
     expect(after.map(node => node.kind === 'message' && node.metadata.messageId)).toEqual(['2', '4']);
     expect(after[0]).toBe(before[1]);
     expect(after[0]!.presentation.body[1]).toBe(before[1]!.presentation.body[1]);
-    expect(pipeline.getCompactCursor('other')).toBeUndefined();
+    expect(pipeline.getRenderWindow('other')).toBeUndefined();
   });
 
   it('refreshes edits, deletion and attachment descriptions without rebuilding neighbours', () => {
@@ -106,7 +106,7 @@ describe('Pipeline rendering reuse', () => {
 
   it('replays only resident records while preserving source state for replies', () => {
     const pipeline = createPipeline({});
-    pipeline.setCompactCursor('chat', 2000);
+    pipeline.setRenderWindow('chat', { fromReceivedAtMs: 2000 });
     const records = pipeline.replayChat('chat', [message('1', 1000, 'old'), {
       ...message('2', 2000), replyToMessageId: '1',
     }]);
