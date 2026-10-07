@@ -231,6 +231,10 @@ const flattenRichText = (rt: Td.RichText): string => {
     return flattenRichText(rt.text);
   case 'richTextCustomEmoji':
     return rt.alternative_text;
+  case 'richTextButton':
+    return flattenRichText(rt.button.text);
+  case 'richTextDiff':
+    return flattenRichText(rt.text);
   case 'richTextIcon':
     return '';
   case 'richTextMathematicalExpression':
