@@ -280,13 +280,13 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
         content = { _: 'inputMessageAudio', audio: { _: 'inputAudio', audio: inputFile }, caption };
         break;
       case 'voice':
-        content = { _: 'inputMessageVoiceNote', voice_note: inputFile, duration: 0, caption };
+        content = { _: 'inputMessageVoiceNote', voice_note: { _: 'inputVoiceNote', voice_note: inputFile, duration: 0 }, caption };
         break;
       case 'animation':
         content = { _: 'inputMessageAnimation', animation: { _: 'inputAnimation', animation: inputFile }, caption };
         break;
       case 'video_note':
-        content = { _: 'inputMessageVideoNote', video_note: inputFile, duration: 0, length: 240 };
+        content = { _: 'inputMessageVideoNote', video_note: { _: 'inputVideoNote', video_note: inputFile, duration: 0, length: 240 } };
         break;
       case 'document':
       default:
