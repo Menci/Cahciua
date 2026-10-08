@@ -1,0 +1,134 @@
+import { Format, initLogger, LogLevel } from '@guiiai/logg';
+import { describe, expect, it } from 'vitest';
+
+import { selectContextView } from './driver/context-view';
+import { createPipeline } from './pipeline';
+import type { PipelineEvent } from './projection';
+import { renderedRecordsToXml } from './rendering';
+
+initLogger(LogLevel.Error, Format.Pretty);
+
+const message = (id: string, at: number, text = id): Extract<PipelineEvent, { type: 'message' }> => ({
+  type: 'message', chatId: 'chat', messageId: id,
+  receivedAtMs: at, timestampSec: at / 1000, utcOffsetMin: 0,
+  sender: { id: 'user', displayName: 'User', isBot: false },
+  content: [{ type: 'text', text }], attachments: [],
+});
+
+const edit = (id: string, at: number, text: string): Extract<PipelineEvent, { type: 'edit' }> => ({
+  ...message(id, at, text), type: 'edit',
+});
+
+describe('Pipeline model timeline characterization', () => {
+  it('keeps original order and reply snapshots across edits and deletes', () => {
+    const pipeline = createPipeline({ botUserId: 'bot' });
+    pipeline.pushEvent('chat', message('1', 1000, 'original'));
+    pipeline.pushEvent('chat', { ...message('2', 2000, 'reply'), replyToMessageId: '1' });
+    const edited = pipeline.pushEvent('chat', edit('1', 3000, 'replacement'));
+    expect(edited.map(segment => segment.metadata.receivedAtMs)).toEqual([1000, 2000]);
+    expect(renderedRecordsToXml(edited)).toContain('>original</in-reply-to>');
+    expect(renderedRecordsToXml(edited)).toContain('replacement');
+    const deleted = pipeline.pushEvent('chat', {
+      type: 'delete', chatId: 'chat', messageIds: ['1'], receivedAtMs: 4000, timestampSec: 4, utcOffsetMin: 0,
+    });
+    expect(renderedRecordsToXml(deleted)).toContain('deleted="true"');
+    expect(renderedRecordsToXml(deleted)).not.toContain('replacement');
+    expect(renderedRecordsToXml(deleted)).toContain('>original</in-reply-to>');
+  });
+
+  it('replaces a synthetic send with its authoritative echo without moving it', () => {
+    const pipeline = createPipeline({ botUserId: 'bot' });
+    pipeline.pushEvent('chat', { ...message('1', 1000, 'synthetic'), isSelfSent: true });
+    const echoed = pipeline.pushEvent('chat', message('1', 2000, 'authoritative'));
+    expect(echoed).toHaveLength(1);
+    expect(echoed[0]!.metadata).toMatchObject({ receivedAtMs: 1000, isSelfSent: true });
+    expect(renderedRecordsToXml(echoed)).toContain('authoritative');
+    expect(renderedRecordsToXml(echoed)).not.toContain('synthetic');
+  });
+});
+
+describe('Pipeline rendering reuse', () => {
+  it('advances one chat cursor without regenerating retained bodies or images', () => {
+    const pipeline = createPipeline({});
+    pipeline.pushEvent('chat', message('1', 1000));
+    const before = pipeline.pushEvent('chat', {
+      ...message('2', 2000), attachments: [{ type: 'photo', thumbnailWebp: 'aGVsbG8=' }],
+    });
+    const other = pipeline.pushEvent('other', { ...message('3', 1000), chatId: 'other' });
+    pipeline.setRenderWindow('chat', { fromReceivedAtMs: 2000 });
+    const snapshot = pipeline.getRenderedChats().find(([id]) => id === 'chat')![1];
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]).toBe(before[1]);
+    expect(before).toHaveLength(2);
+    const retained = selectContextView(snapshot, { cursorMs: pipeline.getRenderWindow('chat')?.fromReceivedAtMs });
+    expect(retained).toHaveLength(1);
+    expect(retained[0]!.content).toBe(before[1]!.presentation.body);
+    expect(pipeline.getRenderedChats().find(([id]) => id === 'other')![1]).toBe(other);
+    const after = pipeline.pushEvent('chat', message('4', 3000));
+    expect(after.map(node => node.kind === 'message' && node.metadata.messageId)).toEqual(['2', '4']);
+    expect(after[0]).toBe(before[1]);
+    expect(after[0]!.presentation.body[1]).toBe(before[1]!.presentation.body[1]);
+    expect(pipeline.getRenderWindow('other')).toBeUndefined();
+  });
+
+  it('refreshes edits, deletion and attachment descriptions without rebuilding neighbours', () => {
+    const pipeline = createPipeline({});
+    pipeline.pushEvent('chat', message('1', 1000));
+    const before = pipeline.pushEvent('chat', message('2', 2000));
+    const after = pipeline.pushEvent('chat', {
+      ...edit('1', 3000, 'updated'), attachments: [{ type: 'photo', altText: 'a lighthouse' }],
+    });
+    expect(after[0]).not.toBe(before[0]);
+    expect(after[1]).toBe(before[1]);
+    expect(renderedRecordsToXml(after)).toContain('a lighthouse');
+    expect(after[0]!.metadata).toMatchObject({ messageId: '1', receivedAtMs: 1000, editedAtSec: 3 });
+    const deleted = pipeline.pushEvent('chat', {
+      type: 'delete', chatId: 'chat', messageIds: ['1'], receivedAtMs: 4000, timestampSec: 4, utcOffsetMin: 0,
+    });
+    expect(deleted[1]).toBe(before[1]);
+    expect(renderedRecordsToXml(deleted)).not.toContain('a lighthouse');
+  });
+
+  it('invalidates formatting when the same contact map changes', () => {
+    const contacts = new Map([['user', 'Before']]);
+    const params = { contactNames: contacts, botUserId: 'bot' };
+    const pipeline = createPipeline(params);
+    const before = pipeline.pushEvent('chat', message('1', 1000));
+    contacts.set('user', 'After');
+    const after = pipeline.pushEvent('chat', message('2', 2000));
+    expect(after[0]).not.toBe(before[0]);
+    expect(renderedRecordsToXml(after)).not.toContain('sender="Before"');
+    expect(renderedRecordsToXml(after)).toContain('sender="After"');
+    params.botUserId = 'user';
+    const mine = pipeline.pushEvent('chat', message('3', 3000))[0]!;
+    expect(mine.kind === 'message' && mine.activation.isMyself).toBe(true);
+  });
+
+  it('replays only resident records while preserving source state for replies', () => {
+    const pipeline = createPipeline({});
+    pipeline.setRenderWindow('chat', { fromReceivedAtMs: 2000 });
+    const records = pipeline.replayChat('chat', [message('1', 1000, 'old'), {
+      ...message('2', 2000), replyToMessageId: '1',
+    }]);
+    expect(records).toHaveLength(1);
+    expect(renderedRecordsToXml(records)).toContain('>old</in-reply-to>');
+    expect(selectContextView(records, { cursorMs: 2000 })).toHaveLength(1);
+  });
+});
+
+it('reuses unchanged replay records and refreshes only newly hydrated media', () => {
+  const pipeline = createPipeline({});
+  const first = message('1', 1000);
+  const image = { ...message('2', 2000), attachments: [{ type: 'photo' as const, thumbnailWebp: 'aGVsbG8=' }] };
+  const before = pipeline.replayChat('chat', [first, image]);
+  const equivalent = pipeline.replayChat('chat', [structuredClone(first), structuredClone(image)]);
+  expect(equivalent[0]).toBe(before[0]);
+  expect(equivalent[1]).toBe(before[1]);
+  const hydrated = pipeline.replayChat('chat', [first, {
+    ...image, attachments: [{ ...image.attachments[0]!, altText: 'a harbour' }],
+  }]);
+  expect(hydrated[0]).toBe(before[0]);
+  expect(hydrated[1]).not.toBe(before[1]);
+  expect(hydrated[1]!.presentation.body).toHaveLength(1);
+  expect(renderedRecordsToXml(hydrated)).toContain('a harbour');
+});
