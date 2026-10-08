@@ -14,7 +14,7 @@ const require = createRequire(import.meta.url);
  * 2. `prebuilt-tdlib` — the npm-published TDLib binary for normal operation.
  *
  * The prebuilt-tdlib package is loaded dynamically rather than via a static
- * `import` to keep its bundled tdlib-types declaration (which pins TDLib 1.8.64
+ * `import` to keep its bundled tdlib-types declaration (which pins TDLib 1.8.67
  * and may shadow our locally generated types/tdlib-types.d.ts) out of the
  * TypeScript program. Our generated types are the single source of truth.
  */
