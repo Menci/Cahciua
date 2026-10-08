@@ -29,7 +29,7 @@ describe('renderOldMessagesXml', () => {
       ...message('1', 'buy now', 1000) as Extract<PipelineEvent, { type: 'message' }>,
       sender: fromBan,
     };
-    const xml = renderOldMessagesXml('chat', [event], { blockedUserIds: new Set(['u1']) });
+    const xml = renderOldMessagesXml('chat', [event], {}, { blockedUserIds: new Set(['u1']) });
     expect(xml).toContain('blocked="true"');
     expect(xml).not.toContain('buy now');
   });
