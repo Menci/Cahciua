@@ -1,6 +1,7 @@
 import type { Logger } from '@guiiai/logg';
 import sharp from 'sharp';
 
+import { emojiCacheKey } from './alt-text-cache';
 import { renderCustomEmojiToTextSystemPrompt } from './custom-emoji-to-text-prompt';
 import { deduplicateFrames, extractFrames } from './frame-extractor';
 import type { ImageAltTextRecord } from './image-to-text';
@@ -25,8 +26,6 @@ export interface CustomEmojiMedia {
 export interface CustomEmojiToTextResolver {
   resolve(items: CustomEmojiResolveItem[]): Promise<void>;
 }
-
-const emojiCacheKey = (customEmojiId: string): string => `emoji:${customEmojiId}`;
 
 const prepareStaticImageBuffer = async (buffer: Buffer): Promise<Buffer> =>
   await sharp(buffer)
@@ -165,5 +164,3 @@ export const createCustomEmojiToTextResolver = (params: {
     },
   };
 };
-
-export { emojiCacheKey };

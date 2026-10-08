@@ -1,15 +1,14 @@
 import type { Logger } from '@guiiai/logg';
 
-import { visitCustomEmoji } from '../adaptation/content';
-import type { Config } from '../config/config';
-import { getChatIds, resolveChatConfig, resolveModel } from '../config/config';
-import type { PipelineEvent } from '../pipeline';
+import { createCachedAltTextHydrator } from './alt-text-cache';
 import { createAnimationToTextResolver } from './animation-to-text';
 import type { AnimationToTextResolver } from './animation-to-text';
-import { createCustomEmojiToTextResolver, emojiCacheKey } from './custom-emoji-to-text';
+import { createCustomEmojiToTextResolver } from './custom-emoji-to-text';
 import type { CustomEmojiMedia, CustomEmojiToTextResolver } from './custom-emoji-to-text';
-import { computeThumbnailHash, createImageToTextResolver } from './image-to-text';
+import { createImageToTextResolver } from './image-to-text';
 import type { ImageAltTextRecord, ImageToTextResolver } from './image-to-text';
+import { getChatIds, resolveChatConfig, resolveModel } from '../config/config';
+import type { Config } from '../config/config';
 
 export const createMediaRuntime = (deps: {
   config: Config;
@@ -63,36 +62,11 @@ export const createMediaRuntime = (deps: {
     }
   }
 
-  const hydrateAltText = (event: PipelineEvent): void => {
-    if (event.type !== 'message' && event.type !== 'edit') return;
-    for (const attachment of event.attachments) {
-      if (attachment.altText) continue;
-      if (attachment.thumbnailWebp && imageResolvers.has(event.chatId)) {
-        const cached = deps.lookupAltText(computeThumbnailHash(attachment.thumbnailWebp));
-        if (cached) {
-          attachment.altText = cached.altText;
-          continue;
-        }
-      }
-      if (attachment.animationHash && animationResolvers.has(event.chatId)) {
-        const cached = deps.lookupAltText(attachment.animationHash);
-        if (cached) {
-          attachment.altText = cached.altText;
-          if (cached.stickerSetName) attachment.stickerSetName = cached.stickerSetName;
-        }
-      }
-    }
-
-    if (!customEmojiResolvers.has(event.chatId)) return;
-    visitCustomEmoji(event.content, node => {
-      if (node.altText) return;
-      const cached = deps.lookupAltText(emojiCacheKey(node.customEmojiId));
-      if (cached) {
-        node.altText = cached.altText;
-        if (cached.stickerSetName) node.stickerSetName = cached.stickerSetName;
-      }
-    });
-  };
+  const hydrateAltText = createCachedAltTextHydrator({
+    lookup: deps.lookupAltText,
+    enabled: (kind, chatId) => kind === 'image' ? imageResolvers.has(chatId)
+      : kind === 'animation' ? animationResolvers.has(chatId) : customEmojiResolvers.has(chatId),
+  });
 
   return {
     imageResolvers,

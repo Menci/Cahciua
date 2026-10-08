@@ -35,6 +35,7 @@ src/
 ├── unified-api/  Provider-independent LLM conversation IR and codecs
 ├── llm/          Non-streaming provider transports, request prep, request dumps
 ├── media/        Thumbnails, frame extraction, alt-text resolvers, media runtime
+├── history/      Independent archive input construction, IR expansion and saved-item upserts
 ├── driver/       Scheduling, probe/primary wake-up, runner, tools, compaction
 ├── telegram/     TDLib clients, manager, adaptation, ingress/egress adapters
 ├── container/    Typed tsyringe tokens and statically imported registrars
@@ -131,6 +132,12 @@ RC uses `receivedAtMs`; turn responses use `requestedAtMs`. Equal timestamps ord
 The runner performs model-call retries for ignored forced tool choices, aggregates retry usage, and executes/persists only the selected/final response. A completed step is persisted before `checkInterrupt`; interruption is cooperative at step boundaries, never preemptive during model/tool/persistence work.
 
 `send_message.still_working=true` keeps the tool loop open. Without it, `send_message` is terminal unless another parallel tool result requires follow-up.
+
+### Historical Input
+
+`src/db/history-archive.ts` owns per-chat/per-source ID upper fences, `(time, id)` keyset pages and archive evidence fingerprints. `src/history/` owns a separate IC, renderer and output ranges, and emits JSON-safe keyed upserts for messages, readable TR outputs/tools/results and every compaction. Rendering supplies a full host-internal transcript alongside unchanged runtime previews/tombstones; saved history never carries Sharp, image bytes or reasoning. Message events persist explicit reply quotes for replay.
+
+Historical builds retain all message/user dependencies within one chat across pages, revisit old edit/delete targets, and release each rendering batch. Page size does not bound total IC memory. Recovery currently replays from the origin into an idempotent writer; a saved source cursor alone cannot restore Projection state. ID fences freeze membership, not mutable attachment/cache values; those need rebuild reconciliation. History has no worker/startup wiring or live mutation log yet. Task completion association requires explicit bash result task identity. See `docs/history-input.md` for source/output contracts and deferred integration.
 
 ### Mandatory Probe Gate
 
