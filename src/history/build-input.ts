@@ -1,29 +1,12 @@
-import { createHash } from 'node:crypto';
-
-import type { ArchivedEvent, ArchiveKey, ArchiveRef, HistoryArchive, HistoryArchiveBounds } from '../db/history-archive';
+import type { ArchivedEvent, ArchiveKey, HistoryArchive, HistoryArchiveBounds } from '../db/history-archive';
 import { createEmptyIC, reduce } from '../projection';
 import type { PipelineEvent } from '../projection';
-import { createRenderer } from '../rendering';
 import type { RenderParams } from '../rendering';
+import { buildMessageItems, updateMessageSource } from './message-items';
+import type { MessageSource } from './message-items';
+import { startedTaskId } from './task-items';
 import { buildTurnItems, historyKey } from './turn-items';
-import type { HistoryBatch, HistoryChange, HistoryMessage, HistoryNotice, HistoryResult, HistoryTool } from './types';
-
-interface MessageSource {
-  origin: ArchiveRef;
-  changedBy: ArchiveRef;
-  revision: string;
-}
-
-const startedTaskId = (tool: HistoryTool, result: HistoryResult): number | undefined => {
-  // This is the explicit identity emitted by the current bash tool contract.
-  // Arbitrary JSON or a task_id argument on read/kill tools is not a start.
-  if (tool.name !== 'bash' || result.pairing !== 'matched' || typeof result.payload !== 'string') return undefined;
-  let payload: unknown;
-  try { payload = JSON.parse(result.payload); } catch { return undefined; }
-  if (typeof payload !== 'object' || payload === null || !('background_task_id' in payload)) return undefined;
-  const id = payload.background_task_id;
-  return typeof id === 'number' && Number.isSafeInteger(id) && id > 0 ? id : undefined;
-};
+import type { HistoryBatch, HistoryChange, HistoryNotice, HistoryTool } from './types';
 
 // One build owns one chat's IC/cache. Consume with `for await` and atomically
 // upsert each batch with its progress. Restart by replaying from the origin:
@@ -37,7 +20,6 @@ export const buildHistoryInput = async function* (deps: {
 }): AsyncGenerator<HistoryBatch> {
   const { archive, bounds, pageSize } = deps;
   const chatId = bounds.chatId;
-  const renderer = createRenderer();
   let ic = createEmptyIC(chatId);
   const messageSources = new Map<string, MessageSource>();
   const tasks = new Map<number, HistoryTool[]>();
@@ -65,14 +47,8 @@ export const buildHistoryInput = async function* (deps: {
   }
 
   const applySource = (messageId: string, row: ArchivedEvent): void => {
-    const previous = messageSources.get(messageId);
-    if (!previous && row.event.type !== 'message') return;
-    messageSources.set(messageId, {
-      origin: previous?.origin ?? row.ref,
-      changedBy: row.ref,
-      // Derived from archive evidence, never from renderer's private revision.
-      revision: createHash('sha256').update(JSON.stringify([previous?.revision, row.revision])).digest('hex'),
-    });
+    const source = updateMessageSource(messageSources.get(messageId), row);
+    if (source) messageSources.set(messageId, source);
   };
   after = undefined;
   for (;;) {
@@ -113,28 +89,7 @@ export const buildHistoryInput = async function* (deps: {
     // Keep users/chat state and every message, including deleted targets.
     ic = { ...ic, nodes: ic.nodes.filter(node => node.type === 'message') };
     const nodes = ic.nodes.filter(node => node.type === 'message' && touched.has(node.messageId));
-    if (nodes.length > 0) {
-      const times = nodes.map(node => node.receivedAtMs);
-      // The consumer supplies only changed, already projected nodes to this
-      // rendering pass. Tied-time neighbors cannot inflate the page's output.
-      // Dependency state remains in ic; reply snapshots already live on nodes.
-      const records = renderer.render({ ...ic, nodes }, deps.renderParams ?? {}, {
-        fromReceivedAtMs: times.reduce((min, time) => Math.min(min, time)),
-        untilReceivedAtMs: times.reduce((max, time) => Math.max(max, time)) + 1,
-      });
-      for (const record of records) {
-        if (record.kind !== 'message') continue;
-        const source = messageSources.get(record.metadata.messageId)!;
-        const item: HistoryMessage = {
-          kind: 'message', key: historyKey(chatId, 'message', record.metadata.messageId), chatId,
-          source: source.origin, changedBy: source.changedBy, sourceRevision: source.revision,
-          order: { timeMs: record.metadata.receivedAtMs, sourceOrder: 0, sourceId: source.origin.id, entryIndex: -1, partIndex: -1 },
-          metadata: record.metadata, transcript: record.transcript,
-        };
-        changes.push({ operation: 'upsert', item });
-      }
-    }
-    renderer.retainWindow({ fromReceivedAtMs: 0, untilReceivedAtMs: 0 });
+    changes.push(...buildMessageItems({ ...ic, nodes }, messageSources, deps.renderParams).map(item => ({ operation: 'upsert' as const, item })));
     yield { changes, notices, progress: { bounds, source: 'events', after: page.next ?? after, done: page.done } };
     if (page.done) break;
     after = page.next;

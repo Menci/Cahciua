@@ -10,8 +10,12 @@ export const compareHistoryOrder = (a: HistoryOrder, b: HistoryOrder): number =>
 
 // Associations are scoped to one archived TR. Duplicate call IDs within that
 // TR remain ambiguous rather than choosing a candidate by position or time.
-export const buildTurnItems = (turn: ArchivedTurn): HistoryItem[] => {
+export const buildTurnItems = (turn: ArchivedTurn, maxItems = Infinity): HistoryItem[] => {
   const items: HistoryItem[] = [];
+  const addItem = (item: HistoryItem): void => {
+    if (items.length >= maxItems) throw new Error(`History output exceeds item budget (${maxItems}); cursor unchanged`);
+    items.push(item);
+  };
   const tools = new Map<string, HistoryTool[]>();
   const results = new Map<string, HistoryResult[]>();
   const base = (entryIndex: number, partIndex = -1) => ({
@@ -32,7 +36,7 @@ export const buildTurnItems = (turn: ArchivedTurn): HistoryItem[] => {
         }),
       };
       results.set(entry.callId, [...(results.get(entry.callId) ?? []), result]);
-      items.push(result);
+      addItem(result);
       continue;
     }
     if (entry.role !== 'assistant') continue;
@@ -53,7 +57,7 @@ export const buildTurnItems = (turn: ArchivedTurn): HistoryItem[] => {
         };
         toolKeys.push(tool.key);
         tools.set(part.callId, [...(tools.get(part.callId) ?? []), tool]);
-        items.push(tool);
+        addItem(tool);
       }
     }
     // Keep outputs containing only tools; reasoning-only outputs expose no data.
@@ -61,7 +65,7 @@ export const buildTurnItems = (turn: ArchivedTurn): HistoryItem[] => {
       ...base(entryIndex), key: key(entryIndex), kind: 'model-output', entryIndex,
       modelName: turn.modelName, parts, toolKeys,
     };
-    if (parts.length > 0 || toolKeys.length > 0) items.push(output);
+    if (parts.length > 0 || toolKeys.length > 0) addItem(output);
   }
   return items.map((item): HistoryItem => {
     if (item.kind !== 'tool-result' && item.kind !== 'tool-execution') return item;
