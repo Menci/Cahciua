@@ -1,7 +1,7 @@
-import type { RenderedContext } from '../rendering/types';
+import type { BaseRenderedContext } from '../rendering/types';
 
 export interface DriverInputTarget {
-  handleEvent(chatId: string, context: RenderedContext): void;
+  handleEvent(chatId: string, context: BaseRenderedContext): void;
   handleTyping(chatId: string): void;
 }
 
@@ -9,7 +9,7 @@ export const createDriverInputBus = () => {
   let target: DriverInputTarget | undefined;
   let active = false;
   let closed = false;
-  const pendingContexts = new Map<string, RenderedContext>();
+  const pendingContexts = new Map<string, BaseRenderedContext>();
 
   const requireTarget = (): DriverInputTarget => {
     if (!target) throw new Error('Driver input received before Driver activation');
@@ -35,7 +35,7 @@ export const createDriverInputBus = () => {
       target = undefined;
       pendingContexts.clear();
     },
-    handleEvent(chatId: string, context: RenderedContext): void {
+    handleEvent(chatId: string, context: BaseRenderedContext): void {
       if (closed) return;
       const current = requireTarget();
       if (active) current.handleEvent(chatId, context);

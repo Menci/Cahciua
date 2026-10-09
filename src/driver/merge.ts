@@ -1,4 +1,5 @@
-import type { RenderedContext, RenderedContentPiece } from '../rendering/types';
+import type { RenderedContext } from './context-types';
+import type { RenderedContentPiece } from '../rendering/types';
 import type { ConversationEntry, InputMessage, InputPart } from '../unified-api/types';
 
 const pieceToPart = (piece: RenderedContentPiece): InputPart =>
@@ -23,7 +24,7 @@ const rcUserMessage = (pieces: RenderedContentPiece[]): InputMessage => ({
 // the assistant turn they triggered — Anthropic role alternation stays valid).
 export const mergeContext = (rc: RenderedContext, trs: { requestedAtMs: number; entries: ConversationEntry[] }[]): ConversationEntry[] => {
   type Slot =
-    | { kind: 'rc'; time: number; step: -1; content: RenderedContentPiece[] }
+    | { kind: 'rc'; time: number; step: -1; content: readonly RenderedContentPiece[] }
     | { kind: 'tr'; time: number; step: number; entry: ConversationEntry };
 
   const slots: Slot[] = [];

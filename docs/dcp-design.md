@@ -15,6 +15,8 @@ Telegram update
   -> Projection reducer
   -> IntermediateContext (IC)
   -> Rendering
+  -> reusable unmasked base records
+  -> Driver window/masking view
   -> RenderedContext segments (RC)
 
 RC + Driver TurnResponses
@@ -55,11 +57,27 @@ Projection never performs I/O and never receives LLM output.
 
 ## Rendering
 
-Rendering converts IC into ordered RC segments. Each segment retains `receivedAtMs` and metadata used by scheduling (`senderId`, `isMyself`, `isSelfSent`, mention/reply flags).
+Rendering selects a caller-supplied output window from a consumer-owned IC and converts its nodes into ordered read-only base records, using its own public contract rather than exporting IC nodes. A record has a `kind` discriminator, explicit `metadata`, and `presentation.body`; message records also carry a preformatted blocked representation and activation facts. Message metadata includes chat/message identity, ingress/server timestamps, sender/reply/forward snapshots, edit/delete/self-send state and attachment descriptions. It contains neither the source content tree nor thumbnail bytes. Metadata is copied into independent frozen snapshots. Formatting remains common to all consumers.
+
+Pipeline caches records per chat by immutable IC node identity, complete-source revision matching for equivalent replay nodes, and a value snapshot of display parameters (bot identity and contact names). IC nodes and revision strings stay private to the renderer. Unchanged records reuse body XML and Sharp handles. Edits, deletes, authoritative echoes, media description changes during replay, and display parameter changes refresh affected records. Each render replaces the cache with the selected node set; `retainWindow()` evicts entries outside a caller-supplied range without formatting. IC retains its existing projection lifetime, including reply snapshots. Cold replay continues to load only the active event window.
+
+Online window advancement also filters Pipeline's stored base-record array without invoking rendering or publishing new input. This prevents the next event from generating a large deletion diff for already compacted messages; retained records and their XML/Sharp objects are reused. Driver keeps its independently held input snapshot until the next event. Pipeline's array filtering does not update that snapshot or enable earlier collection of records still referenced by Driver. Summary/model/budget changes belong entirely to downstream consumers.
+
+`render(ic, params, window)` and `createRenderer().render(ic, params, window)` share window selection before XML/body/metadata/revision/image construction. `ic.sessionId` scopes the range to one chat. `fromReceivedAtMs` is inclusive and `untilReceivedAtMs` exclusive; omitted bounds are unbounded and equal bounds yield an empty output. All nodes sharing a timestamp are included or excluded together; this time range is not a stable pagination key. Rendering does not understand compaction or index progress.
+
+Online Pipeline owns IC, renderer and rendering-window residency. Startup and the Driver adapter map `compaction.newCursorMs` to the lower bound; Driver compaction rejects non-resident chats, while startup can seed a range before replay. A historical consumer independently restores IC, holds its own renderer and requests bounded output windows through the same entry. Output range does not restrict the state needed to resolve replies or apply later edits/deletes. A consumer must restore those dependencies and revisit affected older output ranges. Rendering never treats an arbitrary event batch as complete state.
 
 User-controlled identity is encoded in XML attributes. Content is escaped and cannot inject sibling message attributes. Attachments expose stable logical file IDs in `messageId:index` form; TDLib-local IDs are not persisted.
 
-Configured blocked senders are masked at render time. Their source events remain in persistence and IC so changing configuration can restore them after replay.
+Driver owns the model segment contract in `context-types.ts`. Its pure `selectContextView()` converts base records to that distinct shape: select records at or after the chat cursor, choose a message's normal or blocked XML, suppress blocked images and activation flags, and retain scheduling identity. It explicitly copies model fields; record metadata is never spread into model segments. Base records cannot be passed directly to model consumers or used as model context types. Source events remain in persistence and IC; other consumers can use the explicit unmasked record contract without learning Projection internals. Historical `read_old_messages` uses the same conversion without the live cursor.
+
+See [Rendering interfaces](rendering-interfaces.md) for contract examples, ownership and lifetime rules.
+
+## Historical Input
+
+`src/history/build-input.ts` is an independent archival consumer of Projection and Rendering, with its own IC, cache and output range. `src/db/history-archive.ts` captures per-chat/per-source ID fences and keyset-pages events, TR and compactions. History emits keyed saved-item upserts with stable archive references and original timeline positions. Rendering provides a full, image-free host-internal transcript separately from runtime previews/tombstones; explicit reply quotes now persist in events.
+
+The builder keeps all messages/users needed by future edits, deletes and reply snapshots, strips standalone service/runtime nodes after each page, and renders only changed projected messages. Total dependency memory remains proportional to one chat's history. Recovery replays from the origin; source cursors alone are insufficient. All summaries and readable IR tools/results survive independently of online compaction/masking/token transforms. No worker, query service or history database is registered. See [Historical archive input](history-input.md) for contracts, exact task association and limitations.
 
 ## Driver Context
 
@@ -160,7 +178,7 @@ Compaction is an independent per-chat controller parallel to reply scheduling.
 - High water mark: `maxContextEstTokens` over raw RC + TR content after the cursor.
 - Low water mark: `workingWindowEstTokens`, used to choose the new cursor.
 
-The selected old window is summarized into structured plain text. A new row is appended to `compactions`, then the compaction signal updates Pipeline's render cursor. Compaction is not a turn response and never deletes historical events or TR rows.
+The selected old window is summarized into structured plain text. A new row is appended to `compactions`, then compaction metadata advances the pure Driver view and releases obsolete Pipeline rendering records. The cursor effect performs no rendering and never writes the base input signal. Compaction is not a turn response and never deletes historical events or TR rows.
 
 ## Telegram Runtime
 
@@ -175,7 +193,8 @@ The manager owns raw clients, ordered ingress, and blocking transforms. Live han
 persist platform message/edit/delete row
 -> persist canonical event
 -> if configured: hydrate cached alt text
--> project/render
+-> project/render base records
+-> apply model-view policy
 -> notify DriverInputBus
 ```
 
@@ -203,7 +222,7 @@ Cached alt text is applied transiently during replay/live publication. It is nev
 
 No business factory receives the container. No registrar is discovered from the filesystem. This keeps the dependency graph visible and compatible with the single-entry tsdown bundle.
 
-`DriverInputBus` breaks event-producer/Driver construction cycles. It buffers only the newest RC per chat while attached but inactive. Typing is ephemeral and is ignored before activation.
+`DriverInputBus` breaks event-producer/Driver construction cycles. It buffers only the newest base rendering per chat while attached but inactive. Typing is ephemeral and is ignored before activation.
 
 Startup and shutdown order is documented in `AGENTS.md` and implemented by `src/startup/index.ts`.
 
