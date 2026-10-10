@@ -83,3 +83,94 @@ export const notices = sqliteTable('history_notices', {
   eventId: integer('event_id').notNull(),
   notice: text('notice_json', { mode: 'json' }).notNull().$type<HistoryNotice>(),
 }, t => [primaryKey({ columns: [t.generation, t.chatId, t.eventId] })]);
+
+export const consumers = sqliteTable('history_consumers', {
+  generation: text('generation').primaryKey(),
+  baselineSeq: integer('baseline_seq').notNull(),
+  reconcileSeq: integer('reconcile_seq'),
+  consumeSeq: integer('consume_seq').notNull(),
+  pendingSeq: integer('pending_seq'),
+  baselineComplete: integer('baseline_complete', { mode: 'boolean' }).notNull().default(false),
+  status: text('status_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+});
+export const consumeTasks = sqliteTable('history_consume_tasks', {
+  generation: text('generation').notNull(),
+  taskKey: text('task_key').notNull(),
+  chatId: text('chat_id').notNull(),
+  kind: text('kind').notNull().$type<'message' | 'events' | 'turn_responses_v2' | 'compactions' | 'cache' | 'replies' | 'completion'>(),
+  done: integer('done', { mode: 'boolean' }).notNull().default(false),
+  sourceKey: text('source_key').notNull(),
+}, t => [primaryKey({ columns: [t.generation, t.taskKey] }), index('history_tasks_pending_idx').on(t.generation, t.done, t.taskKey)]);
+export const mediaDependencies = sqliteTable('history_media_dependencies', {
+  generation: text('generation').notNull(),
+  chatId: text('chat_id').notNull(),
+  messageId: text('message_id').notNull(),
+  cacheKey: text('cache_key').notNull(),
+}, t => [
+  primaryKey({ columns: [t.generation, t.chatId, t.messageId, t.cacheKey] }),
+  index('history_media_cache_idx').on(t.generation, t.cacheKey, t.chatId, t.messageId),
+]);
+
+// Synchronization belongs exclusively to the rebuildable history database.
+export const sourceObservations = sqliteTable('history_source_observations', {
+  generation: text('generation').notNull(),
+  sourceKind: text('source_kind').notNull(),
+  sourceKey: text('source_key').notNull(),
+  sourceId: integer('source_id'),
+  chatId: text('chat_id'),
+  revision: text('revision').notNull(),
+  observation: text('observation_json').notNull(),
+  messageId: text('message_id'),
+  replyToMessageId: text('reply_to_message_id'),
+  taskId: integer('task_id'),
+  timeMs: integer('time_ms').notNull(),
+}, t => [
+  primaryKey({ columns: [t.generation, t.sourceKind, t.sourceKey] }),
+  index('history_observed_time_idx').on(t.generation, t.sourceKind, t.chatId, t.timeMs, t.sourceId),
+  index('history_observed_id_idx').on(t.generation, t.sourceKind, t.chatId, t.sourceId),
+  index('history_observed_replies_idx').on(t.generation, t.chatId, t.replyToMessageId, t.timeMs, t.sourceId),
+  index('history_observed_tasks_idx').on(t.generation, t.chatId, t.taskId, t.timeMs, t.sourceId),
+]);
+export const sourceChanges = sqliteTable('history_source_changes', {
+  seq: integer('seq').primaryKey({ autoIncrement: true }),
+  generation: text('generation').notNull(),
+  change: text('change_json').notNull(),
+}, t => [index('history_observed_changes_idx').on(t.generation, t.seq)]);
+export const sourceScans = sqliteTable('history_source_scans', {
+  generation: text('generation').primaryKey(),
+  state: text('state_json').notNull(),
+});
+export const eventTargets = sqliteTable('history_event_targets', {
+  generation: text('generation').notNull(),
+  chatId: text('chat_id').notNull(),
+  messageId: text('message_id').notNull(),
+  eventId: integer('event_id').notNull(),
+  receivedAt: integer('received_at').notNull(),
+}, t => [
+  primaryKey({ columns: [t.generation, t.chatId, t.messageId, t.receivedAt, t.eventId] }),
+  index('history_observed_event_idx').on(t.generation, t.eventId),
+]);
+
+export const pendingMedia = sqliteTable('history_pending_media', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  generation: text('generation').notNull(),
+  sourceKind: text('source_kind').notNull().$type<'events' | 'image_alt_texts'>(),
+  sourceKey: text('source_key').notNull(),
+  chatId: text('chat_id'),
+  scheduledSeq: integer('scheduled_seq'),
+}, t => [
+  uniqueIndex('history_pending_media_key').on(t.generation, t.sourceKind, t.sourceKey),
+  index('history_pending_media_recovery_idx').on(t.generation, t.id),
+]);
+
+export const buildInputs = sqliteTable('history_build_inputs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  generation: text('generation').notNull(),
+  sourceKind: text('source_kind').notNull().$type<'events' | 'image_alt_texts' | 'pending'>(),
+  sourceKey: text('source_key').notNull(),
+  afterId: integer('after_id').notNull().default(0),
+  upperId: integer('upper_id'),
+}, t => [
+  uniqueIndex('history_build_inputs_key').on(t.generation, t.sourceKind, t.sourceKey),
+  index('history_build_inputs_order').on(t.generation, t.id),
+]);

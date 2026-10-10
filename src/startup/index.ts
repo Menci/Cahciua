@@ -33,6 +33,7 @@ export const startApp = async (): Promise<void> => {
   const driverInput = container.get(TOKENS.DRIVER_INPUT_BUS);
   const backgroundTasks = container.get(TOKENS.BACKGROUND_TASK_MANAGER);
   const liveHandlers = container.get(TOKENS.TELEGRAM_LIVE_HANDLERS);
+  const history = container.get(TOKENS.HISTORY_RUNTIME);
   const postStartup = container.get(TOKENS.TELEGRAM_POST_STARTUP_TASKS);
 
   let telegramStartAttempted = false;
@@ -49,9 +50,12 @@ export const startApp = async (): Promise<void> => {
           errors.push(error);
         }
       };
+      postStartup.stop();
       await attempt(driver.stop);
       await attempt(backgroundTasks.shutdown);
       if (telegramStartAttempted) await attempt(telegram.stop);
+      media.stop();
+      await attempt(history.stop);
       await attempt(() => {
         db.$client.close();
       });
@@ -73,6 +77,9 @@ export const startApp = async (): Promise<void> => {
   process.once('SIGTERM', handleSignal);
 
   try {
+    // The independent worker only reads the archive; its synchronization state
+    // lives in history.db. Disabled startup creates no history-owned resources.
+    history.start(pipeline.getRenderParams());
     const knownChatIds = loadKnownChatIds(db);
     const replayChatIds = selectStartupReplayChatIds(knownChatIds, chatIds);
     logger.withFields({

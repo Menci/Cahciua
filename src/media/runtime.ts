@@ -17,6 +17,9 @@ export const createMediaRuntime = (deps: {
   persistAltText: (record: ImageAltTextRecord) => void;
   getCustomEmojiInfo: (ids: string[]) => Promise<CustomEmojiMedia[]>;
 }) => {
+  let stopped = false;
+  const lookupAltText = (hash: string) => stopped ? null : deps.lookupAltText(hash);
+  const persistAltText = (record: ImageAltTextRecord) => { if (!stopped) deps.persistAltText(record); };
   const imageResolvers = new Map<string, ImageToTextResolver>();
   const animationResolvers = new Map<string, AnimationToTextResolver>();
   const customEmojiResolvers = new Map<string, CustomEmojiToTextResolver>();
@@ -31,8 +34,8 @@ export const createMediaRuntime = (deps: {
         model: resolveModel(deps.config, config.imageToText.model),
         maxConcurrency: config.imageToText.maxConcurrency,
         logger: deps.logger,
-        lookupByHash: deps.lookupAltText,
-        persist: deps.persistAltText,
+        lookupByHash: lookupAltText,
+        persist: persistAltText,
       }));
     }
     if (config.animationToText.enabled) {
@@ -42,8 +45,8 @@ export const createMediaRuntime = (deps: {
         model: resolveModel(deps.config, config.animationToText.model),
         maxConcurrency: config.animationToText.maxConcurrency,
         logger: deps.logger,
-        lookupByHash: deps.lookupAltText,
-        persist: deps.persistAltText,
+        lookupByHash: lookupAltText,
+        persist: persistAltText,
       }));
       animationMaxFrames.set(chatId, config.animationToText.maxFrames);
     }
@@ -55,20 +58,21 @@ export const createMediaRuntime = (deps: {
         maxFrames: config.customEmojiToText.maxFrames,
         maxConcurrency: config.customEmojiToText.maxConcurrency,
         logger: deps.logger,
-        lookupByHash: deps.lookupAltText,
-        persist: deps.persistAltText,
+        lookupByHash: lookupAltText,
+        persist: persistAltText,
         getCustomEmojiInfo: deps.getCustomEmojiInfo,
       }));
     }
   }
 
   const hydrateAltText = createCachedAltTextHydrator({
-    lookup: deps.lookupAltText,
+    lookup: lookupAltText,
     enabled: (kind, chatId) => kind === 'image' ? imageResolvers.has(chatId)
       : kind === 'animation' ? animationResolvers.has(chatId) : customEmojiResolvers.has(chatId),
   });
 
   return {
+    stop(): void { stopped = true; },
     imageResolvers,
     animationResolvers,
     customEmojiResolvers,

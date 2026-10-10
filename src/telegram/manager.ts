@@ -281,6 +281,7 @@ export const createTelegramManager = (
   };
 
   const stop = async () => {
+    await ingressQueue.stop();
     await Promise.all([
       bot.stop(),
       userbot?.stop(),

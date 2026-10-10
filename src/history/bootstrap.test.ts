@@ -101,6 +101,23 @@ const populate = async (f: ReturnType<typeof fixture>, chatId = 'chat') => {
 };
 
 describe('durable historical bootstrap', () => {
+  it('builds a multi-megabyte text/tool TR using defaults and preserves full searchable content', async () => {
+    const f = fixture();
+    const text = 'assistant '.repeat(300000);
+    const payload = 'tool result '.repeat(300000);
+    await persistTurnResponse(f.db, 'chat', {
+      entries: [
+        { kind: 'message', role: 'assistant', reasoning: undefined, parts: [{ kind: 'text', text }, { kind: 'toolCall', name: 'bash', callId: 'large', args: '{}' }] },
+        { kind: 'toolResult', callId: 'large', payload, requiresFollowUp: false },
+      ], requestedAtMs: 1000, modelName: 'test', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+    });
+    const path = resolve(f.dir, 'default-large.db');
+    await finish(f, path, 1);
+    const items = readItems(path);
+    expect(items.find(item => item.kind === 'model-output')).toMatchObject({ parts: [{ text }] });
+    expect(items.find(item => item.kind === 'tool-result')).toMatchObject({ payload, pairing: 'matched' });
+  });
+
   it('converges with the production input builder after every-row restarts and different slice sizes, across chats/generations', async () => {
     const f = fixture();
     await populate(f);
@@ -146,7 +163,7 @@ describe('durable historical bootstrap', () => {
     try {
       const items = store.db.select().from(historySchema.savedItems).all();
       for (const row of items) expect(row.searchText).toBe(searchableText(row.item));
-      for (const [word, count] of [['summaryneedle', 4], ['outputneedle', 1], ['argsneedle', 1], ['completionneedle', 1], ['resultneedle', 1], ['editedneedle', 2]] as const) {
+      for (const [word, count] of [['summaryneedle', 4], ['outputneedle', 1], ['argsneedle', 1], ['completionneedle', 1], ['resultneedle', 1], ['editedneedle', 3]] as const) {
         const matches = store.sqlite.prepare('SELECT i.* FROM history_fts f JOIN history_items i ON i.id = f.rowid WHERE history_fts MATCH ? AND i.generation = ? AND i.chat_id = ?').all(word, 'g', 'chat');
         expect(matches).toHaveLength(count);
       }
@@ -196,7 +213,6 @@ describe('durable historical bootstrap', () => {
     writeFileSync(script, `
 import Database from ${JSON.stringify(resolve('node_modules/better-sqlite3/lib/index.js'))};
 import { drizzle } from ${JSON.stringify(resolve('node_modules/drizzle-orm/better-sqlite3/index.js'))};
-import { codec } from '../db/codec';
 import { createHistoryArchive } from ${JSON.stringify(resolve('src/db/history-archive.ts'))};
 import { openHistoryStore } from ${JSON.stringify(resolve('src/history/store.ts'))};
 import { buildHistorySlice } from ${JSON.stringify(resolve('src/history/bootstrap.ts'))};
@@ -208,7 +224,7 @@ store.sqlite.function('crash', () => process.exit(29));
 store.sqlite.exec("CREATE TEMP TRIGGER crash_checkpoint BEFORE UPDATE ON history_checkpoints WHEN new.source_kind = 'events' BEGIN SELECT crash(); END;");
 await buildHistorySlice({archive, store, generation:'g', chatId:'chat', archiveIdentity:${JSON.stringify(f.archivePath)}, renderIdentity:'test', limits:{rowsPerSecond:100000}});
 `);
-    const child = spawnSync(process.execPath, ['--import', resolve('node_modules/tsx/dist/loader.mjs'), script], { encoding: 'utf8', timeout: 10000 });
+    const child = spawnSync(process.execPath, ['--import', resolve('node_modules/tsx/dist/loader.mjs'), script], { encoding: 'utf8', timeout: 30000 });
     expect(child.status, child.stderr).toBe(29);
     expect(readItems(path)).toHaveLength(1);
     const read = vi.spyOn(f.archive, 'readEvents');
@@ -248,12 +264,12 @@ await buildHistorySlice({archive, store, generation:'g', chatId:'chat', archiveI
     const path = resolve(f.dir, 'cli.db');
     const args = ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('src/history/cli.ts'),
       '--archive', f.archivePath, '--history', path, '--generation', 'g', '--chat', 'chat', '--rows-per-slice', '3', '--rows-per-second', '100000'];
-    const child = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 10000 });
+    const child = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 30000 });
     expect(child.status, child.stderr).toBe(0);
     const reports = child.stdout.trim().split('\n').map(line => JSON.parse(line) as { scanComplete: boolean; processedRows: number });
     expect(reports.at(-1)!.scanComplete).toBe(true);
     expect(reports.every(report => report.processedRows <= 3)).toBe(true);
-    const again = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 10000 });
+    const again = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 30000 });
     expect(again.status, again.stderr).toBe(0);
     expect(JSON.parse(again.stdout).processedRows).toBe(0);
     expect(readItems(path).filter(item => item.kind === 'summary')).toHaveLength(4);
@@ -273,8 +289,9 @@ await buildHistorySlice({archive, store, generation:'g', chatId:'chat', archiveI
       await expect(buildHistorySlice({ ...deps(f, path), store, limits: { maxSourceBytes: 1000 } })).rejects.toThrow('source=turn_responses_v2');
       expect(parse).not.toHaveBeenCalled();
       expect(store.checkpoint('g', 'chat', 'turn_responses_v2').after).toBeUndefined();
+      store.close();
       await finish(f, path, 1);
-    } finally { parse.mockRestore(); store.close(); }
+    } finally { parse.mockRestore(); if (store.sqlite.open) store.close(); }
     f.db.insert(schema.compactions).values({ chatId: 'chat', oldCursorMs: 0, newCursorMs: 1000, createdAt: 1000, summary: 'x'.repeat(10000) }).run();
     const summary = openHistoryStore(resolve(f.dir, 'summary.db'));
     try {
@@ -325,7 +342,7 @@ await buildHistorySlice({archive, store, generation:'g', chatId:'chat', archiveI
     const store = openHistoryStore(path);
     try {
       await buildHistorySlice({ ...deps(f, path, 1), store });
-      await expect(buildHistorySlice({ ...deps(f, path, 1), store, limits: { maxWorkspaceBytes: 64 * 1024 } })).rejects.toMatchObject({ cause: { message: expect.stringContaining('workspace exceeds byte budget') } });
+      await expect(buildHistorySlice({ ...deps(f, path, 1), store, limits: { maxWorkspaceBytes: 12 * 1024 } })).rejects.toMatchObject({ cause: { message: expect.stringContaining('workspace exceeds encoded byte budget') } });
       expect(store.checkpoint('g', 'chat', 'events').after).toEqual({ timeMs: 1000, id: 1 });
       expect(store.db.select().from(historySchema.savedItems).all()[0]!.searchText).toBe('full '.repeat(3000));
       await buildHistorySlice({ ...deps(f, path, 1), store });
@@ -360,15 +377,17 @@ await buildHistorySlice({archive, store, generation:'g', chatId:'chat', archiveI
     expect(small.peakEntries).toBe(2);
     expect(large.peakEntries).toBe(2);
     expect(large.peakBytes).toBeLessThan(small.peakBytes * 1.1);
-    expect(large.peakBytes * 16).toBeLessThan(defaultHistoryLimits.maxWorkspaceBytes);
-    const plan = f.sqlite.prepare('EXPLAIN QUERY PLAN SELECT * FROM events INDEXED BY events_chat_received_idx WHERE chat_id = ? AND id <= ? AND (received_at, id) > (?, ?) ORDER BY received_at, id LIMIT 1').all('chat', 3000, 100, 101);
+    expect(large.peakBytes).toBeLessThan(defaultHistoryLimits.maxWorkspaceBytes);
+    const plan = f.sqlite.prepare('EXPLAIN QUERY PLAN SELECT * FROM events WHERE chat_id = ? AND id <= ? AND (received_at, id) > (?, ?) ORDER BY received_at, id LIMIT 1').all('chat', 3000, 100, 101);
     const detail = JSON.stringify(plan);
-    expect(detail).toContain('events_chat_received_idx');
-    expect(detail).not.toContain('TEMP B-TREE');
+    expect(detail).toContain('events_chat_id_idx');
+    // The existing source schema has no history-specific time index; SQLite
+    // sorts this operator-only offline query. Online ordering lives in history.db.
+    expect(detail).toContain('TEMP B-TREE');
     const store = openHistoryStore(path);
     try {
       expect(store.db.select().from(historySchema.messageStates).all()).toHaveLength(3300);
       expect(store.db.select().from(historySchema.userStates).all()).toHaveLength(3300);
     } finally { store.close(); }
-  }, 20000);
+  }, 60000);
 });

@@ -1,0 +1,15 @@
+
+> cahciua@0.1.0 typecheck /verify/code
+> tsc --noEmit
+
+
+> cahciua@0.1.0 lint:fix /verify/code
+> eslint --cache . --fix
+
+
+ Test Files  52 passed (52)
+      Tests  520 passed (520)
+   Start at  06:05:02
+   Duration  75.18s (transform 3.44s, setup 0ms, collect 15.51s, tests 44.67s, environment 5ms, prepare 6.42s)
+
+✔ Build complete in 9684ms

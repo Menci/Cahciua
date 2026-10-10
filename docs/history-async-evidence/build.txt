@@ -1,0 +1,23 @@
+
+> cahciua@0.1.0 build /workspace
+> tsdown
+
+ℹ tsdown v0.22.7 powered by rolldown v1.1.5
+ℹ config file: /workspace/tsdown.config.ts
+ℹ entry: src/index.ts, src/history/worker.ts
+ℹ target: node22.0.0
+ℹ tsconfig: tsconfig.json
+ℹ Build start
+ℹ Cleaning 10 files
+ℹ dist/index.mjs                        272.48 kB │ gzip:  67.29 kB
+ℹ dist/history-worker.mjs                85.25 kB │ gzip:  19.14 kB
+ℹ dist/index.mjs.map                    574.74 kB │ gzip: 134.68 kB
+ℹ dist/history-worker.mjs.map           171.37 kB │ gzip:  38.35 kB
+ℹ dist/alt-text-cache-CZW9MUcf.mjs.map   97.69 kB │ gzip:  22.88 kB
+ℹ dist/alt-text-cache-CZW9MUcf.mjs       48.45 kB │ gzip:  11.84 kB
+ℹ dist/rolldown-runtime-8H4AJuhK.mjs      0.38 kB │ gzip:   0.27 kB
+ℹ dist/history-worker.d.mts.map           0.25 kB │ gzip:   0.18 kB
+ℹ dist/history-worker.d.mts               0.81 kB │ gzip:   0.36 kB
+ℹ dist/index.d.mts                        0.01 kB │ gzip:   0.03 kB
+ℹ 10 files, total: 1.25 MB
+✔ Build complete in 2620ms

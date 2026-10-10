@@ -7,9 +7,9 @@ export interface HistoryLimits {
   readonly rowsPerSecond: number;
 }
 export const defaultHistoryLimits: HistoryLimits = {
-  maxSourceBytes: 2 * 1024 * 1024,
+  maxSourceBytes: 64 * 1024 * 1024,
   maxStateEntries: 256,
-  maxWorkspaceBytes: 32 * 1024 * 1024,
+  maxWorkspaceBytes: 128 * 1024 * 1024,
   maxOutputItems: 4096,
   maxRowsPerSlice: 64,
   rowsPerSecond: 100,
@@ -19,8 +19,8 @@ export const checkHistoryLimits = (limits: HistoryLimits): void => {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error(`History ${name} must be a positive safe integer`);
   }
 };
-// Serialized bytes bound retained data, not exact V8/RSS usage. Reserve expansion
-// room before reducing/rendering (XML escaping, quote snapshots and JSON copies).
+// Count encoded source/dependency/plan bytes directly. This is a content limit,
+// not an estimate of V8/native memory; RSS is measured separately by the worker.
 export const createWorkspaceBudget = (limits: HistoryLimits) => {
   let bytes = 0;
   let entries = 0;
@@ -28,7 +28,7 @@ export const createWorkspaceBudget = (limits: HistoryLimits) => {
     reserve(size: number): void {
       if (!Number.isSafeInteger(size) || size < 0) throw new Error('Invalid history workspace reservation');
       bytes += size;
-      if (bytes * 16 > limits.maxWorkspaceBytes) throw new Error(`History workspace exceeds byte budget (${limits.maxWorkspaceBytes}); cursor unchanged`);
+      if (bytes > limits.maxWorkspaceBytes) throw new Error(`History workspace exceeds encoded byte budget (${limits.maxWorkspaceBytes}); cursor unchanged`);
     },
     entry(): void {
       if (++entries > limits.maxStateEntries) throw new Error(`History dependencies exceed entry budget (${limits.maxStateEntries}); cursor unchanged`);

@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createCodec } from './codec';
 
@@ -85,5 +85,17 @@ describe('codec', () => {
   it('rejects non-codec JSON', async () => {
     const codec = createTestCodec();
     await expect(codec.parse('{"a":1,"b":"hello"}')).rejects.toThrow('Invalid codec format');
+  });
+
+  it('omits explicitly unwanted custom values without decoding them, while preserving siblings and validating tags', async () => {
+    const codec = createCodec();
+    const deserialize = vi.fn(async (value: string) => Buffer.from(value, 'base64'));
+    codec.register<Buffer, string>({ tag: 'media', isApplicable: Buffer.isBuffer, serialize: async value => value.toString('base64'), deserialize });
+    const encoded = await codec.stringify({ parts: [{ kind: 'image', image: Buffer.from('bytes'), detail: 'high' }], text: 'keep' });
+    expect(await codec.parse(encoded, { omitCustomTypes: ['media'] })).toEqual({ parts: [{ kind: 'image', detail: 'high' }], text: 'keep' });
+    expect(deserialize).not.toHaveBeenCalled();
+    expect(await codec.parse(encoded)).toEqual({ parts: [{ kind: 'image', image: Buffer.from('bytes'), detail: 'high' }], text: 'keep' });
+    expect(deserialize).toHaveBeenCalledOnce();
+    await expect(codec.parse('{"_":{"image":0},"meta":{"/image":"unknown"}}', { omitCustomTypes: ['unknown'] })).rejects.toThrow('Unknown codec type tag');
   });
 });

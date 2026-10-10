@@ -35,7 +35,8 @@ export const buildMessageItems = (ic: IntermediateContext, sources: ReadonlyMap<
       fromReceivedAtMs: times.reduce((min, time) => Math.min(min, time)),
       untilReceivedAtMs: times.reduce((max, time) => Math.max(max, time)) + 1,
     };
-    return renderer.render(ic, params, window).flatMap(record => {
+    const records = renderer.render(ic, params, window);
+    return records.flatMap(record => {
       if (record.kind !== 'message') return [];
       const source = sources.get(record.metadata.messageId);
       if (!source) throw new Error('Missing historical message provenance');

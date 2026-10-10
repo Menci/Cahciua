@@ -7,13 +7,15 @@ import { projectionDependencies } from '../projection/dependencies';
 import type { RenderParams } from '../rendering';
 import { checkHistoryLimits, createWorkspaceBudget, defaultHistoryLimits } from './budget';
 import type { HistoryLimits, WorkspaceBudget } from './budget';
+import { eventCacheKeys } from './media-dependencies';
 import { buildMessageItems, changedMessageIds, updateMessageSource } from './message-items';
 import type { MessageSource } from './message-items';
+import { describeSource } from './source-observer';
 import type { HistoryCheckpoint, HistoryCommit, HistoryStore } from './store';
 import { buildTurnItems, historyKey } from './turn-items';
 import type { HistoryBatch, HistoryItem } from './types';
 
-const summaryItem = (row: ArchivedCompaction): HistoryItem => ({
+export const summaryItem = (row: ArchivedCompaction): HistoryItem => ({
   kind: 'summary', key: historyKey(row.ref.chatId, 'summary', row.ref.id), chatId: row.ref.chatId,
   source: row.ref, sourceRevision: row.revision,
   order: { timeMs: row.createdAtMs, sourceOrder: 2, sourceId: row.ref.id, entryIndex: -1, partIndex: -1 },
@@ -21,13 +23,13 @@ const summaryItem = (row: ArchivedCompaction): HistoryItem => ({
   coverage: { fromReceivedAtMs: row.oldCursorMs, untilReceivedAtMs: row.newCursorMs },
 });
 
-const projectEvent = (deps: {
+export const projectEvent = (deps: {
   store: HistoryStore;
   generation: string;
   row: ArchivedEvent;
   budget: WorkspaceBudget;
   renderParams?: RenderParams;
-}): Pick<HistoryCommit, 'messages' | 'users' | 'chatTitle' | 'event'> & Pick<HistoryBatch, 'changes' | 'notices'> => {
+}): Pick<HistoryCommit, 'messages' | 'users' | 'chatTitle' | 'event' | 'dependencies'> & Pick<HistoryBatch, 'changes' | 'notices'> => {
   const { store, generation, row, budget } = deps;
   const chatId = row.ref.chatId;
   const dependencies = projectionDependencies(row.event);
@@ -70,6 +72,7 @@ const projectEvent = (deps: {
   }
   return {
     messages, users: [...ic.users].map(([id, state]) => ({ id, state })), chatTitle: ic.chatTitle, event: row,
+    dependencies: messages.map(state => ({ messageId: state.node.messageId, cacheKeys: eventCacheKeys(row.event) })),
     changes: items.map(item => ({ operation: 'upsert', item })), notices,
   };
 };
@@ -84,6 +87,7 @@ export interface BootstrapDeps {
   // require an explicit rebuild generation; fences cannot reconcile cache edits.
   readonly renderIdentity: string;
   readonly renderParams?: RenderParams;
+  readonly compactionsById?: boolean;
   readonly hydrateAltText?: (event: PipelineEvent, reserve: (bytes: number) => void) => void;
   readonly signal?: AbortSignal;
   readonly limits?: Partial<HistoryLimits>;
@@ -116,7 +120,7 @@ export const buildHistorySlice = async (deps: BootstrapDeps): Promise<BootstrapS
       if (expected.done) break;
       if (deps.signal?.aborted || processedRows >= limits.maxRowsPerSlice) return { processedRows, scanComplete: false, peakStateEntries, peakEncodedWorkspaceBytes };
       const started = performance.now();
-      const request = { bounds: expected.bounds, after: expected.after, limit: 1, maxBytes: Math.min(limits.maxSourceBytes, Math.floor(limits.maxWorkspaceBytes / 16)) };
+      const request = { bounds: expected.bounds, after: expected.after, limit: 1, maxBytes: Math.min(limits.maxSourceBytes, limits.maxWorkspaceBytes) };
       const budget = createWorkspaceBudget(limits);
       let plan: HistoryCommit;
       try {
@@ -129,7 +133,7 @@ export const buildHistorySlice = async (deps: BootstrapDeps): Promise<BootstrapS
           }
           const projected = row ? projectEvent({ ...deps, row, budget }) : { changes: [], notices: [] };
           plan = {
-            generation, expected, ...projected, batch: {
+            generation, expected, ...projected, observation: row ? describeSource(row) : undefined, batch: {
               changes: projected.changes, notices: projected.notices,
               progress: { bounds: expected.bounds, source, after: page.next ?? expected.after, done: page.done },
             },
@@ -142,20 +146,20 @@ export const buildHistorySlice = async (deps: BootstrapDeps): Promise<BootstrapS
             budget.reserve(row.encodedBytes);
           }
           const items = row ? buildTurnItems(row, limits.maxOutputItems) : [];
-          // Source byte preflight includes encoded image bytes before codec
-          // allocation. Saved items carry locators, never those Sharp objects.
+          // Source preflight includes encoded images. Historical decoding omits
+          // their custom values; saved items retain positions without media handles.
           plan = {
-            generation, expected, batch: {
+            generation, expected, observation: row ? describeSource(row) : undefined, batch: {
               changes: items.map(item => ({ operation: 'upsert', item })), notices: [],
               progress: { bounds: expected.bounds, source, after: page.next ?? expected.after, done: page.done },
             },
           };
         } else {
-          const page = archive.readCompactions(request);
+          const page = archive.readCompactions({ ...request, compactionsById: deps.compactionsById });
           const row = page.rows[0];
           if (row) budget.reserve(Buffer.byteLength(JSON.stringify(row)));
           plan = {
-            generation, expected, batch: {
+            generation, expected, observation: row ? describeSource(row) : undefined, batch: {
               changes: row ? [{ operation: 'upsert', item: summaryItem(row) }] : [], notices: [],
               progress: { bounds: expected.bounds, source, after: page.next ?? expected.after, done: page.done },
             },

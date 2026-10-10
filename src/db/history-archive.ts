@@ -9,7 +9,7 @@ import { codec } from './codec';
 import { reconstructEvent } from './persistence';
 import { compactions, events, turnResponsesV2 } from './schema';
 import type { PipelineEvent } from '../projection';
-import type { ConversationEntry } from '../unified-api/types';
+import type { ImagePart, InputMessage, OutputMessage, TextPart, ToolResult } from '../unified-api/types';
 
 export type HistorySource = 'events' | 'turn_responses_v2' | 'compactions';
 export interface ArchiveRef {
@@ -32,6 +32,8 @@ export interface ArchivePageRequest {
   readonly after?: ArchiveKey;
   readonly limit: number;
   readonly maxBytes?: number;
+  readonly exactId?: number;
+  readonly compactionsById?: boolean;
 }
 export interface ArchiveValue {
   readonly ref: ArchiveRef;
@@ -42,8 +44,14 @@ export interface ArchiveValue {
 export interface ArchivedEvent extends ArchiveValue {
   readonly event: PipelineEvent;
 }
+// The historical consumer needs image positions, not decoded media. It cannot
+// pass this transcript view to a provider as a complete ConversationEntry[].
+type ArchivedInputPart = TextPart | Pick<ImagePart, 'kind' | 'detail'>;
+export type ArchivedConversationEntry = OutputMessage
+  | (Omit<InputMessage, 'parts'> & { readonly parts: readonly ArchivedInputPart[] })
+  | (Omit<ToolResult, 'payload'> & { readonly payload: string | readonly ArchivedInputPart[] });
 export interface ArchivedTurn extends ArchiveValue {
-  readonly entries: readonly ConversationEntry[];
+  readonly entries: readonly ArchivedConversationEntry[];
   readonly modelName: string;
 }
 export interface ArchivedCompaction extends ArchiveValue {
@@ -58,7 +66,7 @@ export interface ArchivePage<T> {
   readonly done: boolean;
 }
 
-const revision = (row: unknown): string => createHash('sha256').update(JSON.stringify(row)).digest('hex');
+export const archiveRevision = (row: unknown): string => createHash('sha256').update(JSON.stringify(row)).digest('hex');
 const checkLimit = (limit: number): void => {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('History page limit must be a positive safe integer');
 };
@@ -75,12 +83,12 @@ const indexedColumns = <T extends SQLiteTable>(table: T) => Object.fromEntries(
 
 // SQLite measures encoded rows before JSON/IR/Sharp decoding. The size query and
 // fetch share a short snapshot, released before asynchronous TR decoding.
-const checkBytes = (db: Pick<DB, 'select'>, table: SQLiteTable, condition: SQL | undefined, order: SQL[], indexName: string, limit: number, maxBytes?: number): number[] | undefined => {
+const checkBytes = (db: Pick<DB, 'select'>, table: SQLiteTable, condition: SQL | undefined, order: SQL[], indexName: string | undefined, limit: number, maxBytes?: number): number[] | undefined => {
   if (maxBytes === undefined) return undefined;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('History maxBytes must be a positive safe integer');
   const columns = Object.values(getTableColumns(table));
   const size = sql<number>`${sql.join(columns.map(column => sql`coalesce(octet_length(${column}), 0)`), sql` + `)} + 1024`;
-  const sizes = db.select({ bytes: size }).from(sql`${table} indexed by ${sql.identifier(indexName)}`).where(condition).orderBy(...order).limit(limit).all();
+  const sizes = db.select({ bytes: size }).from(indexName ? sql`${table} indexed by ${sql.identifier(indexName)}` : table).where(condition).orderBy(...order).limit(limit).all();
   if (sizes.reduce((total, row) => total + row.bytes, 0) > maxBytes) throw new Error(`History source exceeds encoded byte budget (${maxBytes}); cursor unchanged`);
   return sizes.map(row => row.bytes);
 };
@@ -96,34 +104,34 @@ export const createHistoryArchive = (db: DB) => ({
       },
     }));
   },
-  readEvents({ bounds, after, limit, maxBytes }: ArchivePageRequest): ArchivePage<ArchivedEvent> {
+  readEvents({ bounds, after, limit, maxBytes, exactId }: ArchivePageRequest): ArchivePage<ArchivedEvent> {
     checkLimit(limit);
     const condition = and(
-      eq(events.chatId, bounds.chatId), lte(events.id, bounds.upperIds.events),
+      eq(events.chatId, bounds.chatId), exactId === undefined ? undefined : eq(events.id, exactId), lte(events.id, bounds.upperIds.events),
       after && sql`(${events.receivedAtMs}, ${events.id}) > (${after.timeMs}, ${after.id})`,
     );
     const { rows, byteSizes } = db.transaction(tx => {
-      const byteSizes = checkBytes(tx, events, condition, [sql`${events.receivedAtMs}`, sql`${events.id}`], 'events_chat_received_idx', limit, maxBytes);
-      const rows = tx.select(indexedColumns(events)).from(sql`${events} indexed by ${sql.identifier('events_chat_received_idx')}`).where(condition).orderBy(events.receivedAtMs, events.id).limit(limit).all();
+      const byteSizes = checkBytes(tx, events, condition, [sql`${events.receivedAtMs}`, sql`${events.id}`], undefined, limit, maxBytes);
+      const rows = tx.select(indexedColumns(events)).from(events).where(condition).orderBy(events.receivedAtMs, events.id).limit(limit).all();
       return { rows, byteSizes };
     });
     return page(rows.map((row, index) => ({
       ref: { source: 'events', chatId: row.chatId, id: row.id },
       key: { timeMs: row.receivedAtMs, id: row.id },
-      revision: revision(row),
+      revision: archiveRevision(row),
       encodedBytes: byteSizes?.[index],
       event: reconstructEvent(row),
     })), limit);
   },
-  async readTurns({ bounds, after, limit, maxBytes }: ArchivePageRequest): Promise<ArchivePage<ArchivedTurn>> {
+  async readTurns({ bounds, after, limit, maxBytes, exactId }: ArchivePageRequest): Promise<ArchivePage<ArchivedTurn>> {
     checkLimit(limit);
     const condition = and(
-      eq(turnResponsesV2.chatId, bounds.chatId), lte(turnResponsesV2.id, bounds.upperIds.turn_responses_v2),
+      eq(turnResponsesV2.chatId, bounds.chatId), exactId === undefined ? undefined : eq(turnResponsesV2.id, exactId), lte(turnResponsesV2.id, bounds.upperIds.turn_responses_v2),
       after && sql`(${turnResponsesV2.requestedAt}, ${turnResponsesV2.id}) > (${after.timeMs}, ${after.id})`,
     );
     const { rows, byteSizes } = db.transaction(tx => {
-      const byteSizes = checkBytes(tx, turnResponsesV2, condition, [sql`${turnResponsesV2.requestedAt}`, sql`${turnResponsesV2.id}`], 'turn_responses_v2_chat_requested_idx', limit, maxBytes);
-      const rows = tx.select(indexedColumns(turnResponsesV2)).from(sql`${turnResponsesV2} indexed by ${sql.identifier('turn_responses_v2_chat_requested_idx')}`).where(condition).orderBy(turnResponsesV2.requestedAt, turnResponsesV2.id).limit(limit).all();
+      const byteSizes = checkBytes(tx, turnResponsesV2, condition, [sql`${turnResponsesV2.requestedAt}`, sql`${turnResponsesV2.id}`], exactId === undefined ? 'turn_responses_v2_chat_requested_idx' : undefined, limit, maxBytes);
+      const rows = tx.select(indexedColumns(turnResponsesV2)).from(exactId === undefined ? sql`${turnResponsesV2} indexed by ${sql.identifier('turn_responses_v2_chat_requested_idx')}` : turnResponsesV2).where(condition).orderBy(turnResponsesV2.requestedAt, turnResponsesV2.id).limit(limit).all();
       return { rows, byteSizes };
     });
     const decoded: ArchivedTurn[] = [];
@@ -131,29 +139,29 @@ export const createHistoryArchive = (db: DB) => ({
       decoded.push({
         ref: { source: 'turn_responses_v2', chatId: row.chatId, id: row.id },
         key: { timeMs: row.requestedAt, id: row.id },
-        revision: revision(row),
+        revision: archiveRevision(row),
         encodedBytes: byteSizes?.[index],
-        entries: await codec.parse(row.entries) as ConversationEntry[],
+        entries: await codec.parse(row.entries, { omitCustomTypes: ['sharp'] }) as ArchivedConversationEntry[],
         modelName: row.modelName,
       });
     }
     return page(decoded, limit);
   },
-  readCompactions({ bounds, after, limit, maxBytes }: ArchivePageRequest): ArchivePage<ArchivedCompaction> {
+  readCompactions({ bounds, after, limit, maxBytes, exactId, compactionsById }: ArchivePageRequest): ArchivePage<ArchivedCompaction> {
     checkLimit(limit);
     const condition = and(
-      eq(compactions.chatId, bounds.chatId), lte(compactions.id, bounds.upperIds.compactions),
-      after && sql`(${compactions.createdAt}, ${compactions.id}) > (${after.timeMs}, ${after.id})`,
+      eq(compactions.chatId, bounds.chatId), exactId === undefined ? undefined : eq(compactions.id, exactId), lte(compactions.id, bounds.upperIds.compactions),
+      after && (compactionsById ? sql`${compactions.id} > ${after.id}` : sql`(${compactions.createdAt}, ${compactions.id}) > (${after.timeMs}, ${after.id})`),
     );
     const { rows, byteSizes } = db.transaction(tx => {
-      const byteSizes = checkBytes(tx, compactions, condition, [sql`${compactions.createdAt}`, sql`${compactions.id}`], 'compactions_chat_created_idx', limit, maxBytes);
-      const rows = tx.select(indexedColumns(compactions)).from(sql`${compactions} indexed by ${sql.identifier('compactions_chat_created_idx')}`).where(condition).orderBy(compactions.createdAt, compactions.id).limit(limit).all();
+      const byteSizes = checkBytes(tx, compactions, condition, compactionsById ? [sql`${compactions.id}`] : [sql`${compactions.createdAt}`, sql`${compactions.id}`], exactId === undefined ? 'compactions_chat_id_idx' : undefined, limit, maxBytes);
+      const rows = tx.select(indexedColumns(compactions)).from(exactId === undefined ? sql`${compactions} indexed by ${sql.identifier('compactions_chat_id_idx')}` : compactions).where(condition).orderBy(...(compactionsById ? [compactions.id] : [compactions.createdAt, compactions.id])).limit(limit).all();
       return { rows, byteSizes };
     });
     return page(rows.map((row, index) => ({
       ref: { source: 'compactions', chatId: row.chatId, id: row.id },
       key: { timeMs: row.createdAt, id: row.id },
-      revision: revision(row),
+      revision: archiveRevision(row),
       encodedBytes: byteSizes?.[index],
       summary: row.summary,
       oldCursorMs: row.oldCursorMs,
