@@ -105,3 +105,20 @@ describe('createSessionIngressQueue', () => {
     vi.useRealTimers();
   });
 });
+
+it('stops retries and prevents late transformed events from committing after shutdown', async () => {
+  let finish: ((event: { chatId: string; id: string }) => void) | undefined;
+  const commit = vi.fn();
+  const queue = createSessionIngressQueue({
+    logger: useLogger('test'),
+    transform: (_event: { chatId: string; id: string }) => new Promise<typeof _event>(resolve => { finish = resolve; }),
+    commit,
+  });
+  queue.enqueue({ chatId: 'chat', id: 'late' });
+  await queue.stop();
+  finish!({ chatId: 'chat', id: 'late' });
+  await Promise.resolve();
+  queue.enqueue({ chatId: 'chat', id: 'after-stop' });
+  await Promise.resolve();
+  expect(commit).not.toHaveBeenCalled();
+});

@@ -15,7 +15,7 @@ interface PersistedEvent {
 }
 
 export const createTelegramPostStartupTasks = (deps: {
-  manager: TelegramManager;
+  manager: Pick<TelegramManager, 'downloadMessageMedia'>;
   animationResolvers: ReadonlyMap<string, AnimationToTextResolver>;
   customEmojiResolvers: ReadonlyMap<string, CustomEmojiToTextResolver>;
   animationMaxFrames: ReadonlyMap<string, number>;
@@ -28,11 +28,13 @@ export const createTelegramPostStartupTasks = (deps: {
   replayChat: (chatId: string, events: PipelineEvent[]) => void;
   logger: Logger;
 }) => {
+  let stopped = false;
   const backfillAnimations = async (): Promise<void> => {
     if (deps.animationResolvers.size === 0) return;
     const log = deps.logger.withContext('animation-backfill');
 
     for (const [chatId, animationResolver] of deps.animationResolvers) {
+      if (stopped) return;
       const maxFrames = deps.animationMaxFrames.get(chatId);
       if (maxFrames == null) throw new Error(`Missing animation maxFrames for chat ${chatId}`);
       const compaction = deps.loadCompaction(chatId);
@@ -53,6 +55,7 @@ export const createTelegramPostStartupTasks = (deps: {
             try {
               const messageId = Number(event.messageId);
               const buffer = await deps.manager.downloadMessageMedia(chatId, messageId);
+              if (stopped) return;
               if (!buffer) {
                 log.withFields({ chatId, messageId }).warn('Backfill skipped: download failed');
                 return;
@@ -65,6 +68,7 @@ export const createTelegramPostStartupTasks = (deps: {
                 mimeType: attachment.mimeType,
               };
               const result = await extractFrames(buffer, source, maxFrames);
+              if (stopped) return;
               await animationResolver.resolve({
                 cacheKey: result.cacheKey,
                 frames: result.frames,
@@ -74,6 +78,7 @@ export const createTelegramPostStartupTasks = (deps: {
                 duration: attachment.duration,
                 frameTimestamps: result.frameTimestamps,
               });
+              if (stopped) return;
               attachment.animationHash = result.cacheKey;
               deps.updateEventAttachments(eventId, event.attachments);
             } catch (error) {
@@ -91,6 +96,7 @@ export const createTelegramPostStartupTasks = (deps: {
 
   const resolveCustomEmoji = async (): Promise<void> => {
     for (const [chatId, customEmojiResolver] of deps.customEmojiResolvers) {
+      if (stopped) return;
       const compaction = deps.loadCompaction(chatId);
       const events = deps.loadEvents(chatId, compaction?.newCursorMs);
       const items = new Map<string, CustomEmojiResolveItem>();
@@ -109,15 +115,17 @@ export const createTelegramPostStartupTasks = (deps: {
 
       deps.logger.withFields({ chatId, count: items.size }).log('Cold-start: resolving custom emoji descriptions');
       await customEmojiResolver.resolve([...items.values()]);
+      if (stopped) return;
       for (const event of events) deps.hydrateAltText(event);
       deps.replayChat(chatId, events);
     }
   };
 
   return {
+    stop(): void { stopped = true; },
     async run(): Promise<void> {
       await backfillAnimations();
-      await resolveCustomEmoji();
+      if (!stopped) await resolveCustomEmoji();
     },
   };
 };

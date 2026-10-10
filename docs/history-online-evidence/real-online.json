@@ -1,0 +1,280 @@
+{
+  "backupMs": 121.03470100000004,
+  "counts": {
+    "events": 1057,
+    "turn_responses_v2": 196,
+    "compactions": 0
+  },
+  "sourceSizes": {
+    "largestEncodedTurnBytes": 2224857,
+    "largestEventBodyBytes": 34163
+  },
+  "defaultHistoryLimits": {
+    "maxSourceBytes": 67108864,
+    "maxStateEntries": 256,
+    "maxWorkspaceBytes": 134217728,
+    "maxOutputItems": 4096,
+    "maxRowsPerSlice": 64,
+    "rowsPerSecond": 100
+  },
+  "usedDefaultLimits": true,
+  "chats": 4,
+  "interrupted": [
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "events",
+      "upper_id": 979,
+      "after_json": "{\"timeMs\":1791395102278,\"id\":2}",
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 176,
+      "after_json": "{\"timeMs\":1791553566748,\"id\":176}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "events",
+      "upper_id": 1057,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 196,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "events",
+      "upper_id": 707,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "events",
+      "upper_id": 5,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    }
+  ],
+  "consumer": {
+    "generation": "real-online",
+    "baseline_seq": 0,
+    "reconcile_seq": 2,
+    "consume_seq": 2,
+    "pending_seq": null,
+    "baseline_complete": 1,
+    "status_json": "{\"generation\":\"real-online\",\"baselineSeq\":0,\"reconcileSeq\":2,\"consumeSeq\":2,\"pendingSeq\":null,\"baselineComplete\":true,\"phase\":\"live\",\"peakStateEntries\":4,\"peakEncodedWorkspaceBytes\":106976,\"observedSeq\":2,\"logLag\":0,\"rssBytes\":122654720,\"heapUsedBytes\":16775440,\"externalBytes\":2394571,\"arrayBufferBytes\":82335,\"error\":null,\"totalRows\":1236,\"rowsPerSecond\":57.46737363764951,\"batchMs\":0.998502999998891,\"updatedAt\":1791576543442,\"hintItems\":0,\"hintBytes\":0,\"hintsDropped\":0,\"hintsReused\":0,\"archiveWalBytes\":309032,\"historyWalBytes\":4194192,\"historyBytes\":6029312}"
+  },
+  "coverage": [
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "events",
+      "upper_id": 979,
+      "after_json": "{\"timeMs\":1791553847139,\"id\":979}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 176,
+      "after_json": "{\"timeMs\":1791553566748,\"id\":176}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "events",
+      "upper_id": 1057,
+      "after_json": "{\"timeMs\":1791571024698,\"id\":1057}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 196,
+      "after_json": "{\"timeMs\":1791566753260,\"id\":196}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "events",
+      "upper_id": 707,
+      "after_json": "{\"timeMs\":1791525296377,\"id\":707}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "events",
+      "upper_id": 5,
+      "after_json": "{\"timeMs\":1791395195218,\"id\":5}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    }
+  ],
+  "kinds": [
+    {
+      "kind": "message",
+      "n": 850
+    },
+    {
+      "kind": "model-output",
+      "n": 196
+    },
+    {
+      "kind": "summary",
+      "n": 1
+    },
+    {
+      "kind": "tool-execution",
+      "n": 241
+    },
+    {
+      "kind": "tool-result",
+      "n": 241
+    }
+  ],
+  "relations": [
+    {
+      "kind": "call",
+      "n": 241
+    },
+    {
+      "kind": "output",
+      "n": 241
+    },
+    {
+      "kind": "reply",
+      "n": 367
+    },
+    {
+      "kind": "result",
+      "n": 241
+    },
+    {
+      "kind": "tool-member",
+      "n": 241
+    }
+  ],
+  "expectedItems": 1529,
+  "mismatches": 0,
+  "integrity": "ok",
+  "ftsIntegrity": "passed",
+  "summaryFts": 1,
+  "originalSchemaHashBefore": "251ee5e4c08653b6250f5897cccf6c92b52d8b30f4a5315cd8e03dbce138cbdb",
+  "originalSchemaHashAfter": "251ee5e4c08653b6250f5897cccf6c92b52d8b30f4a5315cd8e03dbce138cbdb",
+  "builtWorkerVerified": true,
+  "errorTail": ""
+}

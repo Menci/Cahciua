@@ -1,0 +1,17 @@
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/verify/code/drizzle.config.ts'
+12 tables
+background_tasks 12 columns 2 indexes 0 fks
+compactions 10 columns 2 indexes 0 fks
+events 19 columns 3 indexes 0 fks
+history_event_targets 4 columns 1 indexes 0 fks
+history_source_changes 8 columns 0 indexes 0 fks
+image_alt_texts 6 columns 1 indexes 0 fks
+messages 15 columns 1 indexes 1 fks
+probe_responses 10 columns 1 indexes 0 fks
+probe_responses_v2 11 columns 1 indexes 0 fks
+turn_responses 9 columns 1 indexes 0 fks
+turn_responses_v2 9 columns 1 indexes 0 fks
+users 7 columns 0 indexes 0 fks
+
+No schema changes, nothing to migrate 😴

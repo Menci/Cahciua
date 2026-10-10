@@ -1,0 +1,32 @@
+Final isolated Docker checks
+Node 22; --network none --cpus 0.5 --memory 1536m
+
+pnpm lint:fix
+exit=0
+
+> cahciua@0.1.0 lint:fix /verify/code
+> eslint --cache . --fix
+
+
+pnpm typecheck
+exit=0
+
+> cahciua@0.1.0 typecheck /verify/code
+> tsc --noEmit
+
+
+pnpm test:run --maxWorkers=1 --no-file-parallelism --testTimeout=60000
+exit=0
+ ✓ src/telegram/message/tdlib.test.ts (1 test) 2ms
+
+ Test Files  52 passed (52)
+      Tests  519 passed (519)
+   Start at  05:12:09
+   Duration  65.07s (transform 2.95s, setup 0ms, collect 15.76s, tests 33.10s, environment 5ms, prepare 6.51s)
+
+
+pnpm build
+exit=0
+ℹ dist/history-worker.mjs                66.26 kB │ gzip:  15.40 kB
+ℹ dist/history-worker.mjs.map           136.58 kB │ gzip:  31.34 kB
+✔ Build complete in 8525ms

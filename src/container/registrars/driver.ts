@@ -169,6 +169,7 @@ export const registerDriver = ({ get, register }: Registrar): void => {
     const db = get(TOKENS.DB);
     const pipeline = get(TOKENS.PIPELINE);
     const media = get(TOKENS.MEDIA_RUNTIME);
+    const history = get(TOKENS.HISTORY_ACCESS).enabled ? get(TOKENS.HISTORY_RUNTIME) : undefined;
     return createTelegramPostStartupTasks({
       manager: get(TOKENS.TELEGRAM_MANAGER),
       animationResolvers: media.animationResolvers,
@@ -178,7 +179,10 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       loadCompaction: chatId => loadCompaction(db, chatId),
       loadEvents: (chatId, afterMs) => loadEvents(db, chatId, afterMs),
       loadEventsWithId: (chatId, afterMs) => loadEventsWithId(db, chatId, afterMs),
-      updateEventAttachments: (eventId, attachments) => updateEventAttachments(db, eventId, attachments),
+      updateEventAttachments: (eventId, attachments) => {
+        updateEventAttachments(db, eventId, attachments);
+        history?.notifyMedia('events', String(eventId));
+      },
       hydrateAltText: media.hydrateAltText,
       replayChat: (chatId, events) => pipeline.replayChat(chatId, events),
       logger: get(TOKENS.LOGGER),

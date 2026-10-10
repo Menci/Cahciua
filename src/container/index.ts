@@ -5,6 +5,7 @@ import { container as rootContainer, instancePerContainerCachingFactory } from '
 import type { Registrar } from './registrar';
 import { registerCore } from './registrars/core';
 import { registerDriver } from './registrars/driver';
+import { registerHistory } from './registrars/history';
 import { registerMedia } from './registrars/media';
 import { registerPersistence } from './registrars/persistence';
 import { registerPipeline } from './registrars/pipeline';
@@ -14,6 +15,7 @@ import type { Token } from './tokens';
 const registrars = [
   registerCore,
   registerPersistence,
+  registerHistory,
   registerTelegram,
   registerMedia,
   registerPipeline,

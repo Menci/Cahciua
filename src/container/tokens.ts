@@ -5,6 +5,8 @@ import type { BackgroundTasksConfig, Config, RuntimeConfig } from '../config/con
 import type { DB } from '../db/client';
 import type { createDriver } from '../driver';
 import type { DriverInputBus } from '../driver/input-bus';
+import type { HistoryAccess } from '../history/access';
+import type { HistoryRuntime } from '../history/runtime';
 import type { MediaRuntime } from '../media/runtime';
 import type { createPipeline } from '../pipeline';
 import type { TelegramDriverHooks, TelegramEventSink, TelegramLiveHandlers, TelegramManager, TelegramPostStartupTasks } from '../telegram';
@@ -27,6 +29,8 @@ export const TOKENS = {
   CHAT_IDS: token<string[]>('ChatIds'),
   CONFIGURED_CHAT_IDS: token<ReadonlySet<string>>('ConfiguredChatIds'),
   DB: token<DB>('Database'),
+  HISTORY_RUNTIME: token<HistoryRuntime>('HistoryRuntime'),
+  HISTORY_ACCESS: token<HistoryAccess>('HistoryAccess'),
   TELEGRAM_CLIENTS: token<TelegramClients>('TelegramClients'),
   MEDIA_RUNTIME: token<MediaRuntime>('MediaRuntime'),
   TELEGRAM_MANAGER: token<TelegramManager>('TelegramManager'),

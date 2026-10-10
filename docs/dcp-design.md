@@ -75,11 +75,11 @@ See [Rendering interfaces](rendering-interfaces.md) for contract examples, owner
 
 ## Historical Input
 
-`src/history/build-input.ts` is an independent archival consumer of Projection and Rendering, with its own IC, cache and output range. `src/db/history-archive.ts` captures per-chat/per-source ID fences and keyset-pages events, TR and compactions. History emits keyed saved-item upserts with stable archive references and original timeline positions. Rendering provides a full, image-free host-internal transcript separately from runtime previews/tombstones; explicit reply quotes now persist in events.
+`src/history/build-input.ts` is an independent archival consumer of Projection and Rendering, with its own IC, cache and output range. `src/db/history-archive.ts` captures per-chat/per-source ID fences and keyset-pages events, TR and compactions. History emits keyed saved-item upserts with stable archive references and original timeline positions. Rendering provides a full, image-free host-internal transcript separately from runtime previews/tombstones; unrecorded explicit reply quotes cannot be reconstructed from the existing archive schema.
 
 `buildHistorySlice` materializes those same saved items into a separate history.db using per-target structured Projection state. It restores only the current event's declared message/user/chat dependencies, applies the shared pure reducer and renders touched nodes. Saved items, relations, full FTS text, dependency state, task identities/notices and source checkpoints commit in one history transaction. Row-ID fences and `(time,id)` keysets belong to generation/chat/source; a restart restores the next row's dependencies without replaying committed prefixes. Version/display/source identities reject incompatible resumes. Single-row decoding/rendering, byte/entry/output budgets and throttled slices bound the bootstrap workspace, while persisted history remains on disk.
 
-`src/history/cli.ts` is an independent offline/bootstrap process with a read-only archive connection and short indexed snapshots. It has no bot startup await. The older origin-replaying `buildHistoryInput` remains an in-memory reference consumer. All summaries and readable IR tools/results survive independently of online compaction/masking/token transforms. Captured fences do not freeze mutable rows/cache values: no live mutation log, reconciliation, baselineComplete or query service is implemented. See [Historical archive input](history-input.md) for operational limits and fixture verification.
+`src/history/cli.ts` is an independent offline/bootstrap process with a read-only archive connection and short indexed snapshots. It has no bot startup await. The older origin-replaying `buildHistoryInput` remains an in-memory reference consumer. All summaries and readable IR tools/results survive independently of online compaction/masking/token transforms. Captured fences do not freeze mutable rows/cache values; the offline CLI does not consume the live log or perform reconciliation. The independent online consumer below adds those capabilities; the query service remains pending. See [Historical archive input](history-input.md) for operational limits and fixture verification.
 
 ## Driver Context
 
@@ -220,9 +220,9 @@ Cached alt text is applied transiently during replay/live publication. It is nev
 
 ## Composition And Lifecycle
 
-`src/container/` is the composition root. Typed symbol tokens are registered through a static registrar list and cached per child container. Registrars are grouped by core configuration, persistence, Telegram clients/manager, media, Pipeline, and Driver/event adapters.
+`src/container/` is the composition root. Typed symbol tokens are registered through a static registrar list and cached per child container. Registrars are grouped by core configuration, persistence, history capability/runtime, Telegram clients/manager, media, Pipeline, and Driver/event adapters.
 
-No business factory receives the container. No registrar is discovered from the filesystem. This keeps the dependency graph visible and compatible with the single-entry tsdown bundle.
+No business factory receives the container. No registrar is discovered from the filesystem. This keeps the dependency graph visible to tsdown for both application and history-worker entry points.
 
 `DriverInputBus` breaks event-producer/Driver construction cycles. It buffers only the newest base rendering per chat while attached but inactive. Typing is ephemeral and is ignored before activation.
 
@@ -231,3 +231,19 @@ Startup and shutdown order is documented in `AGENTS.md` and implemented by `src/
 ## Determinism Boundary
 
 Determinism applies to adaptation, projection, rendering, merge, and request composition for the same stored inputs and parameters. Network responses, local ingress timestamps, scheduling time, tool side effects, and LLM generation are explicitly outside that pure boundary. Their results are persisted before they influence subsequent reconstruction.
+
+## Independent historical consumer
+
+The entire core path remains asynchronous to History, while construction/rendering responsibilities are durable and non-discardable inside History. Media completion enters the same construction chain via durable input receipt; pending reconciliation runs on recovery. Core callers never wait for durable receipt or ACK. See [History asynchronous synchronization](history-sync-design.md).
+
+When top-level YAML `history.enabled` is true (default false), startup launches an independent history child without waiting for its scan/bootstrap/catch-up. `HISTORY_ACCESS` also owns future query tool/API exposure and execution. The existing `read_old_messages` tool remains independent. Disabled history starts no worker and creates no history-owned database or synchronization state; core persistence and compaction retain their existing behavior.
+
+The child opens the core archive read-only against its existing schema. History creates no source fields, indexes, tables, triggers or synchronization writes. It owns source fingerprints, timeline/target indexes, monotone ID cursors and the observed-change queue in history.db. Initial paged source indexing precedes per-chat fenced bootstrap; a finite append poll after bootstrap establishes reconciliation. Later polls read only new event/TR/compaction IDs, including backdated rows and new chats.
+
+Discovery records missing animation hashes by event ID and missing descriptions by cache key in history.db, alongside a one-time registration reread. Composition-root adapters publish completion after existing media/attachment writes. The background sender retries until durable build-input receipt, then the child independently schedules targeted refresh. Pending scheduling and output completion have separate atomic commits; tasks survive ACK loss and child restart. Startup/reconnect/overflow requests finite pending reconciliation with a persistent cursor. Normal pending polling and full old-row/cache sweeps do not occur. Arbitrary old-source/cache rewrites require a new generation.
+
+Local observed sequence numbers describe discovery order, not source transactions. Status reports completed append polls, source ID highwaters, pending-media count and queue lag. Materialization and task progress are atomic within history.db, with no cross-database commit claim. Canonical delete events remain independent evidence.
+
+Pipeline has no History callback. The child restores sparse target/direct-parent state through shared Projection/rendering, with reliable source/consume tasks and atomic progress. Append discovery pauses at a bounded backlog; unobserved sources stay in the core archive. The background notification adapter bounds memory and outstanding writes, preserving recovery requests on saturation. Source schema does not preserve explicit Telegram quotes, so History cannot fabricate them. Nonresident chats remain outside Pipeline residency and are independently discoverable.
+
+Shutdown cancels producers/backfills and late callbacks before closing the worker and database. Backlog and scan state stay in history.db; shutdown need not drain them. Query worker/authorization/SDK and memory remain deferred. See [history input](history-input.md) and [retrieval design](history-retrieval-design.md).

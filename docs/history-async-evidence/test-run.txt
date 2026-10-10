@@ -1,0 +1,157 @@
+
+> cahciua@0.1.0 test:run /workspace
+> vitest run --maxWorkers\=1 --no-file-parallelism --testTimeout\=60000
+
+
+ RUN  v3.2.4 /workspace
+
+ ✓ src/history/worker.integration.test.ts (2 tests) 16804ms
+   ✓ runs producer + independent writer through bootstrap, SIGKILL/restart, reliable inputs and bounded shutdown with backlog  6609ms
+   ✓ ACKs durable media receipt before failed rendering, retries unavailable receipt, and recovers a last undelivered completion  10195ms
+ ✓ src/history/bootstrap.test.ts (11 tests) 15687ms
+   ✓ durable historical bootstrap > builds a multi-megabyte text/tool TR using defaults and preserves full searchable content  465ms
+   ✓ durable historical bootstrap > converges with the production input builder after every-row restarts and different slice sizes, across chats/generations  687ms
+   ✓ durable historical bootstrap > recovers an actual process exit during the writer transaction without replaying committed prefixes  431ms
+   ✓ durable historical bootstrap > runs the standalone readonly-archive CLI and resumes its completed checkpoint  826ms
+   ✓ durable historical bootstrap > bounds serialized dependency residency as unique message/user history grows and uses indexed keyset queries  12452ms
+ ✓ src/history/online.test.ts (15 tests) 4472ms
+   ✓ online history reconciliation > restores a long reply thread from the direct parent without walking all ancestors  1404ms
+   ✓ pauses source discovery at durable backlog pressure and resumes after construction recovers  1619ms
+ ✓ src/media/frame-extractor.test.ts (13 tests) 541ms
+   ✓ extractFrames > MP4: extracts 5 equidistant frames with timestamps  506ms
+ ✓ src/driver/driver-characterization.test.ts (7 tests) 460ms
+stdout | src/driver/probe-vs-primary.test.ts
+2026-10-10T15:41:04.643Z [log] [logger] Logger initialized  { level=Log format=pretty }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > probe sees bot xml in chat history; primary sees only the assistant tool call
+2026-10-10T15:41:04.653Z [log] [driver] Triggering LLM call  { chatId=-100123 entries=5 estimatedTokens=173 }
+2026-10-10T15:41:04.653Z [log] [driver] Running probe  { chatId=-100123 lastProcessedMs=2000 }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > probe sees bot xml in chat history; primary sees only the assistant tool call
+2026-10-10T15:41:04.811Z [log] [driver] Probe result  { chatId=-100123 shouldAct=true reason=Alice asked the bot directly. Plausible: (a) react 👀 to acknowledge then reply, (b) reply with a brief comment, (c) search for current info first then send the findings. }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > probe sees bot xml in chat history; primary sees only the assistant tool call
+2026-10-10T15:41:04.914Z [log] [driver] send_message tool called  { chatId=-100123 text=I am fine, thanks! replyTo=undefined attachments=0 }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > probe sees bot xml in chat history; primary sees only the assistant tool call
+2026-10-10T15:41:04.914Z [log] [driver] Step completed  { chatId=-100123 step=1 hasToolCalls=true newEntries=2 usage={"inputTokens":20,"outputTokens":10,"cacheReadTokens":0,"cacheWriteTokens":0} }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > probe sees bot xml in chat history; primary sees only the assistant tool call
+2026-10-10T15:41:04.915Z [log] [driver] All tool calls completed without follow-up  { chatId=-100123 step=1 }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:04.918Z [log] [driver] Triggering LLM call  { chatId=-100124 entries=1 estimatedTokens=93 }
+2026-10-10T15:41:04.918Z [log] [driver] Running probe  { chatId=-100124 lastProcessedMs=0 }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:05.013Z [log] [driver] Probe result  { chatId=-100124 shouldAct=true reason=addressed }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:05.036Z [log] [driver] Step completed  { chatId=-100124 step=1 hasToolCalls=true newEntries=2 usage={"inputTokens":20,"outputTokens":10,"cacheReadTokens":0,"cacheWriteTokens":0} }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:05.037Z [log] [driver] All tool calls completed without follow-up  { chatId=-100124 step=1 }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:05.037Z [log] [driver] Loop ended without send_message — running forced fallback  { chatId=-100124 }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:05.037Z [log] [driver] send_message tool called  { chatId=-100124 text=forced fallback message replyTo=undefined attachments=0 }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:05.037Z [log] [driver] Step completed  { chatId=-100124 step=1 hasToolCalls=true newEntries=2 usage={"inputTokens":20,"outputTokens":10,"cacheReadTokens":0,"cacheWriteTokens":0} }
+
+stdout | src/driver/probe-vs-primary.test.ts > probe vs primary view of bot's own messages > runs a forced send_message fallback when primary ends loop with end_turn but no send_message
+2026-10-10T15:41:05.037Z [log] [driver] All tool calls completed without follow-up  { chatId=-100124 step=1 }
+
+ ✓ src/driver/probe-vs-primary.test.ts (2 tests) 389ms
+ ✓ src/driver/system-prompt.test.ts (12 tests) 373ms
+stdout | src/telegram/bot.test.ts
+{"@timestamp":1791646866109,"@localetime":"2026-10-10T15:41:06.109Z","level":"log","context":"logger","fields":{"level":"Log","format":"json"},"message":"Logger initialized"}
+
+ ✓ src/telegram/bot.test.ts (2 tests) 112ms
+ ✓ src/history/build-input.test.ts (8 tests) 84ms
+ ✓ src/driver/compaction.test.ts (1 test) 60ms
+ ✓ src/driver/primary-tools.test.ts (9 tests) 24ms
+stdout | src/telegram/session-ingress-queue.test.ts
+{"@timestamp":1791646867343,"@localetime":"2026-10-10T15:41:07.343Z","level":"log","context":"logger","fields":{"level":"Log","format":"json"},"message":"Logger initialized"}
+
+stderr | src/telegram/session-ingress-queue.test.ts > createSessionIngressQueue > retries failed transforms without letting later events pass
+{"@timestamp":1791646867398,"@localetime":"2026-10-10T15:41:07.398Z","level":"error","context":"telegram:ingress-queue","fields":{"error":"boom","stack":"Error: boom\n    at Object.transform (/workspace/src/telegram/session-ingress-queue.test.ts:63:17)\n    at /workspace/src/telegram/session-ingress-queue.ts:119:41\n    at pump (/workspace/src/telegram/session-ingress-queue.ts:140:7)\n    at Object.enqueue (/workspace/src/telegram/session-ingress-queue.ts:162:7)\n    at /workspace/src/telegram/session-ingress-queue.test.ts:73:11\n    at file:///app/node_modules/.pnpm/@vitest+runner@3.2.4/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11\n    at file:///app/node_modules/.pnpm/@vitest+runner@3.2.4/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26\n    at file:///app/node_modules/.pnpm/@vitest+runner@3.2.4/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///app/node_modules/.pnpm/@vitest+runner@3.2.4/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)","chatId":"chat","seq":0,"attempt":1,"retryInMs":1000},"message":"Ingress transform failed; session remains blocked until success"}
+
+stderr | src/telegram/session-ingress-queue.test.ts > createSessionIngressQueue > retries failed commits without advancing the session cursor
+{"@timestamp":1791646867401,"@localetime":"2026-10-10T15:41:07.401Z","level":"error","context":"telegram:ingress-queue","fields":{"error":"commit failed","stack":"Error: commit failed\n    at Object.commit (/workspace/src/telegram/session-ingress-queue.test.ts:94:55)\n    at flushReady (/workspace/src/telegram/session-ingress-queue.ts:82:50)\n    at /workspace/src/telegram/session-ingress-queue.ts:138:14","chatId":"chat","seq":0,"attempt":1,"retryInMs":1000},"message":"Ingress commit failed; session remains blocked until success"}
+
+ ✓ src/telegram/session-ingress-queue.test.ts (4 tests) 58ms
+ ✓ src/history/inbox.test.ts (2 tests) 69ms
+ ✓ src/unified-api/fixtures.test.ts (77 tests) 29ms
+ ✓ src/driver/tools.test.ts (10 tests) 23ms
+stdout | src/config/history-config.test.ts
+{"@timestamp":1791646869199,"@localetime":"2026-10-10T15:41:09.199Z","level":"log","context":"logger","fields":{"level":"Log","format":"json"},"message":"Logger initialized"}
+
+ ✓ src/config/history-config.test.ts (4 tests) 17ms
+stderr | src/history/runtime.test.ts > asynchronous history delivery and lifecycle > defers failing options and spawn work outside startup and stops their independent retries
+2026-10-10T15:41:09.321Z [error] [history] History options failed; retrying independently  { error=invalid History options stack=Error: invalid History options
+    at Object.<anonymous> (/workspace/src/history/runtime.test.ts:37:41)
+    at Object.mockCall (file:///app/node_modules/.pnpm/@vitest+spy@3.2.4/node_modules/@vitest/spy/dist/index.js:96:15)
+    at Object.spy [as options] (file:///app/node_modules/.pnpm/tinyspy@4.0.4/node_modules/tinyspy/dist/index.js:47:80)
+    at prepare (/workspace/src/history/runtime.ts:73:35)
+    at node:internal/process/task_queues:149:7
+    at AsyncResource.runInAsyncScope (node:async_hooks:214:14)
+    at AsyncResource.runMicrotask (node:internal/process/task_queues:146:8) }
+
+stderr | src/history/runtime.test.ts > asynchronous history delivery and lifecycle > defers failing options and spawn work outside startup and stops their independent retries
+2026-10-10T15:41:09.331Z [error] [history] History options failed; retrying independently  { error=invalid History options stack=Error: invalid History options
+    at Object.<anonymous> (/workspace/src/history/runtime.test.ts:37:41)
+    at Object.mockCall (file:///app/node_modules/.pnpm/@vitest+spy@3.2.4/node_modules/@vitest/spy/dist/index.js:96:15)
+    at Object.spy [as options] (file:///app/node_modules/.pnpm/tinyspy@4.0.4/node_modules/tinyspy/dist/index.js:47:80)
+    at prepare (/workspace/src/history/runtime.ts:73:35)
+    at callTimer (file:///app/node_modules/.pnpm/vitest@3.2.4_@types+node@22.19.15_jiti@2.6.1_tsx@4.21.0_yaml@2.8.2/node_modules/vitest/dist/chunks/vi.bdSIJ99Y.js:2211:25)
+    at doTickInner (file:///app/node_modules/.pnpm/vitest@3.2.4_@types+node@22.19.15_jiti@2.6.1_tsx@4.21.0_yaml@2.8.2/node_modules/vitest/dist/chunks/vi.bdSIJ99Y.js:2814:30)
+    at doTick (file:///app/node_modules/.pnpm/vitest@3.2.4_@types+node@22.19.15_jiti@2.6.1_tsx@4.21.0_yaml@2.8.2/node_modules/vitest/dist/chunks/vi.bdSIJ99Y.js:2895:21)
+    at Immediate._onImmediate (file:///app/node_modules/.pnpm/vitest@3.2.4_@types+node@22.19.15_jiti@2.6.1_tsx@4.21.0_yaml@2.8.2/node_modules/vitest/dist/chunks/vi.bdSIJ99Y.js:2915:30)
+    at processImmediate (node:internal/timers:484:21) }
+
+ ✓ src/history/runtime.test.ts (5 tests) 13ms
+ ✓ src/pipeline.test.ts (7 tests) 11ms
+ ✓ src/config/moderation-config.test.ts (3 tests) 11ms
+ ✓ src/rendering/window.test.ts (4 tests) 10ms
+ ✓ src/telegram/moderation.test.ts (20 tests) 54ms
+ ✓ src/unified-api/codec.test.ts (6 tests) 11ms
+ ✓ src/rendering/index.test.ts (52 tests) 9ms
+ ✓ src/driver/compaction-controller.test.ts (2 tests) 9ms
+ ✓ src/driver/tools/ban-spammer.test.ts (5 tests) 7ms
+ ✓ src/telegram/markdown.test.ts (24 tests) 7ms
+ ✓ src/projection/reduce.test.ts (26 tests) 7ms
+ ✓ src/telegram/adaptation.test.ts (68 tests) 45ms
+ ✓ src/db/message-history.test.ts (4 tests) 6ms
+ ✓ src/container/registrars/driver.test.ts (2 tests) 5ms
+ ✓ src/unified-api/anthropic.test.ts (16 tests) 4ms
+ ✓ src/driver/context-view.test.ts (4 tests) 5ms
+ ✓ src/container/registrars/history-notifications.test.ts (2 tests) 5ms
+ ✓ src/telegram/post-startup.test.ts (3 tests) 7ms
+ ✓ src/db/moderation.test.ts (1 test) 5ms
+ ✓ src/driver/runner.test.ts (4 tests) 4ms
+ ✓ src/driver/context.test.ts (23 tests) 4ms
+ ✓ src/driver/tools/read-old-messages.test.ts (6 tests) 4ms
+ ✓ src/telegram/event-sink.test.ts (4 tests) 3ms
+ ✓ src/db/rename-await-response-migration.test.ts (2 tests) 3ms
+ ✓ src/telegram/moderation-api.test.ts (9 tests) 3ms
+ ✓ src/driver/input-bus.test.ts (2 tests) 3ms
+ ✓ src/driver/scheduler.test.ts (2 tests) 3ms
+ ✓ src/driver/merge.test.ts (9 tests) 3ms
+ ✓ src/driver/read-old-messages.test.ts (3 tests) 2ms
+ ✓ src/llm/messages.test.ts (7 tests) 2ms
+ ✓ src/telegram/link-preview.test.ts (11 tests) 2ms
+ ✓ src/telegram/send-tracker.test.ts (6 tests) 2ms
+ ✓ src/media/alt-text-cache.test.ts (2 tests) 2ms
+ ✓ src/history/access.test.ts (2 tests) 2ms
+ ✓ src/telegram/message/tdlib.test.ts (1 test) 1ms
+ ✓ src/history/budget.test.ts (1 test) 46ms
+ ✓ src/telegram/typing-action.test.ts (3 tests) 1ms
+ ✓ src/startup/chat-selection.test.ts (1 test) 1ms
+
+ Test Files  54 passed (54)
+      Tests  531 passed (531)
+   Start at  23:40:23
+   Duration  52.50s (transform 1.14s, setup 0ms, collect 7.04s, tests 39.53s, environment 3ms, prepare 2.09s)

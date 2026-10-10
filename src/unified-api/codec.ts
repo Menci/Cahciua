@@ -21,7 +21,7 @@ interface CustomType<T = unknown, S = unknown> {
 export interface Codec {
   register<T, S>(def: CustomType<T, S>): void;
   stringify(value: unknown): Promise<string>;
-  parse(json: string): Promise<unknown>;
+  parse(json: string, options?: { readonly omitCustomTypes?: readonly string[] }): Promise<unknown>;
 }
 
 export const createCodec = (): Codec => {
@@ -46,7 +46,7 @@ export const createCodec = (): Codec => {
     return value;
   };
 
-  const applyDeserializer = async (root: unknown, pointer: string, tag: string): Promise<void> => {
+  const applyDeserializer = async (root: unknown, pointer: string, tag: string, omit: boolean): Promise<void> => {
     const custom = types.find(t => t.tag === tag);
     if (custom === undefined) throw new Error(`Unknown codec type tag: ${tag}`);
 
@@ -58,7 +58,8 @@ export const createCodec = (): Codec => {
       current = current[segments[i]!] as Record<string, unknown>;
     }
     const last = segments[segments.length - 1]!;
-    current[last] = await custom.deserialize(current[last]);
+    if (omit) delete current[last];
+    else current[last] = await custom.deserialize(current[last]);
   };
 
   return {
@@ -73,7 +74,7 @@ export const createCodec = (): Codec => {
       return JSON.stringify({ _: data, meta });
     },
 
-    parse: async json => {
+    parse: async (json, options) => {
       const parsed: unknown = JSON.parse(json);
       if (
         typeof parsed !== 'object' || parsed === null
@@ -85,7 +86,7 @@ export const createCodec = (): Codec => {
       const data = (parsed as { _: unknown })._;
       const meta = (parsed as { meta: Record<string, string> }).meta;
       for (const [pointer, tag] of Object.entries(meta)) {
-        await applyDeserializer(data, pointer, tag);
+        await applyDeserializer(data, pointer, tag, options?.omitCustomTypes?.includes(tag) ?? false);
       }
       return data;
     },

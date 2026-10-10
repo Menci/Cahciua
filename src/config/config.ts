@@ -166,6 +166,9 @@ const ConfigSchema = v.object({
   database: v.optional(v.object({
     path: v.optional(v.string(), './data/cahciua.db'),
   }), {}),
+  history: v.optional(v.object({
+    enabled: v.optional(v.boolean(), false),
+  }), {}),
   runtime: RuntimeSchema,
   backgroundTasks: BackgroundTasksSchema,
   chats: v.objectWithRest({ default: ChatConfigSchema }, ChatOverrideSchema),
@@ -176,6 +179,7 @@ export type ChatConfig = v.InferOutput<typeof ChatConfigSchema>;
 
 export type RuntimeConfig = Config['runtime'];
 export type BackgroundTasksConfig = Config['backgroundTasks'];
+export type HistoryConfig = Config['history'];
 
 export interface ResolvedChatConfig {
   primary: { model: LlmEndpoint };
