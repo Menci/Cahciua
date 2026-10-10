@@ -8,10 +8,13 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
-import type { ArchivedEvent, ArchiveRef, HistoryArchiveBounds, HistorySource } from '../db/history-archive';
+import type { ArchivedEvent, HistoryArchiveBounds, HistorySource } from '../db/history-archive';
 import type { ICMessage, ICUserState } from '../projection';
 import type { WorkspaceBudget } from './budget';
+import { messageRevision } from './message-items';
 import type { MessageSource } from './message-items';
+import { messageRevisionLocators } from './message-revisions';
+import type { MessageRevisionRange } from './message-revisions';
 import * as schema from './schema';
 import { writeSourceObservation } from './source-observer';
 import type { SourceObservation } from './source-observer';
@@ -33,7 +36,7 @@ export interface HistoryMaterialization {
   readonly users?: readonly { id: string; state: ICUserState }[];
   readonly chatTitle?: string;
   readonly event?: ArchivedEvent;
-  readonly revisions?: readonly { messageId: string; eventId: number; source: ArchiveRef; archiveRevision: string; parentRevision?: string; revision: string }[];
+  readonly revisionRange?: MessageRevisionRange;
   readonly replaceTurnId?: number;
   readonly tasks?: readonly { taskKey: string; chatId: string; kind: typeof schema.consumeTasks.$inferSelect['kind']; sourceKey: string }[];
   readonly dependencies?: readonly { messageId: string; cacheKeys: readonly string[] }[];
@@ -156,14 +159,23 @@ export const openHistoryStore = (path: string, migrationsFolder = resolve('histo
         tx.insert(schema.messageStates).values({ generation, chatId, messageId: state.node.messageId, state })
           .onConflictDoUpdate({ target: [schema.messageStates.generation, schema.messageStates.chatId, schema.messageStates.messageId], set: { state } }).run();
         if (!plan.event) throw new Error('Missing historical state revision source');
-        if (!plan.revisions) tx.insert(schema.messageRevisions).values({
+        if (!plan.revisionRange) tx.insert(schema.messageRevisions).values({
           generation, chatId, messageId: state.node.messageId, eventId: plan.event.ref.id,
           source: plan.event.ref, archiveRevision: plan.event.revision, parentRevision: state.parentRevision, revision: state.source.revision,
         }).onConflictDoUpdate({ target: [schema.messageRevisions.generation, schema.messageRevisions.chatId, schema.messageRevisions.messageId, schema.messageRevisions.eventId], set: { archiveRevision: plan.event.revision, parentRevision: state.parentRevision, revision: state.source.revision } }).run();
       }
-      if (plan.revisions) {
-        for (const state of plan.messages ?? []) tx.delete(schema.messageRevisions).where(and(eq(schema.messageRevisions.generation, generation), eq(schema.messageRevisions.chatId, chatId), eq(schema.messageRevisions.messageId, state.node.messageId))).run();
-        for (const revision of plan.revisions) tx.insert(schema.messageRevisions).values({ generation, chatId, ...revision }).run();
+      if (plan.revisionRange) {
+        const range = plan.revisionRange;
+        if (!range.after) tx.delete(schema.messageRevisions).where(and(eq(schema.messageRevisions.generation, generation), eq(schema.messageRevisions.chatId, chatId), eq(schema.messageRevisions.messageId, range.messageId))).run();
+        let previous = range.parentRevision;
+        const insert = sqlite.prepare(`INSERT INTO history_message_revisions(generation,chat_id,message_id,event_id,source_json,archive_revision,parent_revision,revision)
+          VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(generation,chat_id,message_id,event_id) DO UPDATE SET archive_revision=excluded.archive_revision,parent_revision=excluded.parent_revision,revision=excluded.revision`);
+        for (const row of messageRevisionLocators(sqlite, generation, chatId, range)) {
+          const revision = messageRevision(previous, row.archiveRevision);
+          insert.run(generation, chatId, range.messageId, row.id, JSON.stringify({ source: 'events', chatId, id: row.id }), row.archiveRevision, previous ?? null, revision);
+          previous = revision;
+        }
+        if (previous !== plan.messages?.find(state => state.node.messageId === range.messageId)?.source.revision) throw new Error('Historical revision range changed before commit');
       }
       for (const user of plan.users ?? []) tx.insert(schema.userStates).values({ generation, chatId, userId: user.id, state: user.state })
         .onConflictDoUpdate({ target: [schema.userStates.generation, schema.userStates.chatId, schema.userStates.userId], set: { state: user.state } }).run();

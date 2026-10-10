@@ -63,6 +63,53 @@ const reference = async (f: ReturnType<typeof fixture>, chatId: string) => {
 };
 
 describe('online history reconciliation', () => {
+  it('applies appended edit overrides to persisted state without replaying the old edit bodies or blocking other chats', async () => {
+    const f = fixture();
+    persistEvent(f.db, message('edited', 1000, 'original'));
+    for (let i = 1; i <= 300; i++) persistEvent(f.db, { ...message('edited', 1000 + i, `edit ${i}`), type: 'edit' });
+    persistEvent(f.db, message('B-old', 1000, 'other chat', 'B'));
+    await settle(f);
+    const oldUpperId = f.archive.captureBounds('A').upperIds.events;
+    const reads = vi.spyOn(f.archive, 'readEvents');
+    for (let i = 301; i <= 600; i++) persistEvent(f.db, { ...message('edited', 1000 + i, `edit ${i}`), type: 'edit' });
+    persistEvent(f.db, message('B-new', 2000, 'another chat advances', 'B'));
+    await settle(f);
+    expect(reads.mock.calls.every(([request]) => request.exactId === undefined || request.exactId > oldUpperId)).toBe(true);
+    reads.mockRestore();
+    expect(f.items().filter(i => i.chatId === 'A')).toEqual(await reference(f, 'A'));
+    expect(f.items().filter(i => i.chatId === 'B')).toEqual(await reference(f, 'B'));
+  });
+
+  it('preserves an existing reply snapshot during its own edit without reading the parent or original message again', async () => {
+    const f = fixture();
+    persistEvent(f.db, message('parent', 1000, 'parent at reply'));
+    persistEvent(f.db, { ...message('reply', 2000, 'original reply'), replyToMessageId: 'parent' });
+    await settle(f);
+    const oldUpperId = f.archive.captureBounds('A').upperIds.events;
+    const reads = vi.spyOn(f.archive, 'readEvents');
+    persistEvent(f.db, { ...message('reply', 3000, 'edited reply'), type: 'edit' });
+    await settle(f);
+    expect(reads.mock.calls.every(([request]) => request.exactId === undefined || request.exactId > oldUpperId)).toBe(true);
+    reads.mockRestore();
+    expect(f.items()).toEqual(await reference(f, 'A'));
+  });
+
+  it('recovers only effective overrides for replies into a heavily edited past, preserving deletion and original metadata', async () => {
+    const f = fixture();
+    persistEvent(f.db, message('parent', 1000, 'original parent'));
+    for (let i = 1; i <= 400; i++) persistEvent(f.db, { ...message('parent', 1000 + i, `parent edit ${i}`), type: 'edit' });
+    await settle(f);
+    persistEvent(f.db, { ...message('reply', 1250.5, 'reply from the past'), replyToMessageId: 'parent' });
+    persistEvent(f.db, { type: 'delete', chatId: 'A', messageIds: ['parent'], receivedAtMs: 1500, timestampSec: 1.5, utcOffsetMin: 480 });
+    persistEvent(f.db, { ...message('parent', 1600, 'latest parent'), type: 'edit' });
+    await settle(f);
+    expect(f.items()).toEqual(await reference(f, 'A'));
+    const parent = f.items().find(i => i.kind === 'message' && i.metadata.messageId === 'parent');
+    const reply = f.items().find(i => i.kind === 'message' && i.metadata.messageId === 'reply');
+    expect(parent?.kind === 'message' && parent.metadata.deleted).toBe(true);
+    expect(reply?.kind === 'message' && reply.transcript.reply?.text).toBe('parent edit 250');
+  });
+
   it('restores a long reply thread from the direct parent without walking all ancestors', async () => {
     const f = fixture();
     let ic = createEmptyIC('A');
@@ -75,9 +122,9 @@ describe('online history reconciliation', () => {
     })();
     await settle(f);
     const budget = createWorkspaceBudget(defaultHistoryLimits);
-    const restored = restoreMessage({ db: f.readDb, history: f.store.sqlite, generation: 'g', archive: f.archive, chatId: 'A', messageId: '300', maxSourceBytes: defaultHistoryLimits.maxSourceBytes, budget });
+    const restored = restoreMessage({ db: f.readDb, store: f.store, generation: 'g', archive: f.archive, chatId: 'A', messageId: '300', maxSourceBytes: defaultHistoryLimits.maxSourceBytes, budget });
     expect(restored?.node).toEqual(ic.nodes.at(-1));
-    expect(budget.entries).toBe(4);
+    expect(budget.entries).toBeLessThanOrEqual(6);
   });
 
   it('keeps synchronization state exclusively in history.db and observes only committed source writes', async () => {

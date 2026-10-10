@@ -18,12 +18,15 @@ export const changedMessageIds = (row: ArchivedEvent): readonly string[] => {
   return event.type === 'message' || event.type === 'edit' ? [event.messageId] : event.type === 'delete' ? event.messageIds : [];
 };
 
+export const messageRevision = (previous: string | undefined, archiveRevision: string): string =>
+  createHash('sha256').update(JSON.stringify([previous, archiveRevision])).digest('hex');
+
 export const updateMessageSource = (previous: MessageSource | undefined, row: ArchivedEvent): MessageSource | undefined => {
   if (!previous && row.event.type !== 'message') return undefined;
   return {
     origin: previous?.origin ?? row.ref,
     changedBy: row.ref,
-    revision: createHash('sha256').update(JSON.stringify([previous?.revision, row.revision])).digest('hex'),
+    revision: messageRevision(previous?.revision, row.revision),
   };
 };
 

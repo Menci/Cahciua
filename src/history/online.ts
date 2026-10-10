@@ -106,13 +106,18 @@ export const createOnlineHistoryBuilder = (deps: {
         plan = { ...plan, tasks: [taskValue(task.chatId, 'message', target.message_id), taskValue(task.chatId, 'replies', JSON.stringify([target.message_id, -Number.MAX_SAFE_INTEGER, 0]))] };
       }
     } else if (task.kind === 'message') {
-      const state = restoreMessage({ ...deps, archive, history: store.sqlite, chatId: task.chatId, messageId: task.sourceKey, budget, maxSourceBytes: sourceBytes });
+      const change = changes.next(seq - 1, sourceBytes);
+      if (change?.seq !== seq) throw new Error('Missing historical source change');
+      // Only parent-source fanout needs to reconstruct a reply-at-creation
+      // snapshot. Own edits retain it; cache fills hydrate it directly.
+      const refreshReplySnapshot = change.sourceKind === 'events' && !change.targetIds.includes(task.sourceKey);
+      const state = restoreMessage({ ...deps, archive, refreshReplySnapshot, chatId: task.chatId, messageId: task.sourceKey, budget, maxSourceBytes: sourceBytes });
       if (state) {
         const ic = { ...createEmptyIC(task.chatId), nodes: [state.node] };
         const items = buildMessageItems(ic, new Map([[task.sourceKey, state.source]]), deps.renderParams);
         // The last source is used only as a revision locator, never reapplied.
         const event = archive.readEvents({ bounds, exactId: state.source.changedBy.id, limit: 1, maxBytes: sourceBytes }).rows[0]!;
-        plan = { ...plan, event, messages: [{ node: state.node, source: state.source }], revisions: state.revisions, dependencies: [{ messageId: task.sourceKey, cacheKeys: state.cacheKeys }], changes: items.map(item => ({ operation: 'upsert', item })) };
+        plan = { ...plan, event, messages: [{ node: state.node, source: state.source }], revisionRange: state.revisionRange, dependencies: [{ messageId: task.sourceKey, cacheKeys: state.cacheKeys }], changes: items.map(item => ({ operation: 'upsert', item })) };
       }
     } else if (task.kind === 'events') {
       const row = archive.readEvents({ bounds, exactId: Number(task.sourceKey), limit: 1, maxBytes: sourceBytes }).rows[0];
