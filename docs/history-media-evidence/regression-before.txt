@@ -1,0 +1,218 @@
+
+ RUN  v3.2.4 /app
+
+ ❯ src/history/online.test.ts (23 tests | 3 failed | 18 skipped) 383ms
+   × online history reconciliation > refreshes media descriptions and FTS from source with animation-first completion 114ms
+     → expected [ { kind: 'message', …(8) } ] to deeply equal [ { kind: 'message', …(8) } ]
+   ✓ online history reconciliation > refreshes media descriptions and FTS from source with thumbnail-first completion 59ms
+   × online history reconciliation > refreshes media descriptions and FTS from source with cache-replacement completion 53ms
+     → expected [ { kind: 'message', …(8) } ] to deeply equal [ { kind: 'message', …(8) } ]
+   × online history reconciliation > refreshes recursive emoji and reply-at-creation descriptions without replacing the snapshot with later parent content 100ms
+     → expected [ { kind: 'message', …(8) }, …(1) ] to deeply equal [ { kind: 'message', …(8) }, …(1) ]
+   ✓ online history reconciliation > preserves source descriptions and sticker metadata when a cache completes 55ms
+   ↓ online history reconciliation > applies appended edit overrides to persisted state without replaying the old edit bodies or blocking other chats
+   ↓ online history reconciliation > preserves an existing reply snapshot during its own edit without reading the parent or original message again
+   ↓ online history reconciliation > recovers only effective overrides for replies into a heavily edited past, preserving deletion and original metadata
+   ↓ online history reconciliation > restores a long reply thread from the direct parent without walking all ancestors
+   ↓ online history reconciliation > keeps synchronization state exclusively in history.db and observes only committed source writes
+   ↓ online history reconciliation > commits observation, queue and scan checkpoint atomically across restart
+   ↓ online history reconciliation > fixes reconciliation watermark, discovers archive-only and new chats, preserves replies and does not miss backdated rows or appended edits
+   ↓ online history reconciliation > reconciles shared descriptions from durable dependencies, echo/backfill and late explicit task starts
+   ↓ online history reconciliation > rolls back a consume batch and resumes its durable task without skipping the continuous prefix
+   ↓ retains a budget failure task/prefix and can resume the same generation with a larger budget
+   ↓ enforces one OS-locked writer while allowing read-only status connections
+   ↓ revalidates completion ambiguity for appended task starts and completion events
+   ↓ refreshes an old attachment backfill and shared cache across chats without a new media call
+   ↓ never rereads committed source rows on idle polls or unrelated appends
+   ↓ retains failed media scheduling atomically, retries its durable input, and never polls pending normally
+   ↓ covers completion between source read and pending registration even when its notice arrived first
+   ↓ persists finite pending recovery progress and resumes it after receiver restart without scanning complete rows
+   ↓ pauses source discovery at durable backlog pressure and resumes after construction recovers
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/history/online.test.ts > online history reconciliation > refreshes media descriptions and FTS from source with animation-first completion
+ FAIL  src/history/online.test.ts > online history reconciliation > refreshes media descriptions and FTS from source with cache-replacement completion
+AssertionError: expected [ { kind: 'message', …(8) } ] to deeply equal [ { kind: 'message', …(8) } ]
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[33m@@ -9,37 +9,25 @@[39m
+[2m      "key": "[\"A\",\"message\",\"animation\"]",[22m
+[2m      "kind": "message",[22m
+[2m      "metadata": {[22m
+[2m        "attachments": [[22m
+[2m          {[22m
+[32m-           "altText": "newneedle",[39m
+[31m+           "altText": "oldneedle",[39m
+[2m            "animationHash": "animation",[22m
+[32m-           "duration": undefined,[39m
+[32m-           "fileName": undefined,[39m
+[32m-           "format": undefined,[39m
+[32m-           "height": undefined,[39m
+[32m-           "mimeType": undefined,[39m
+[32m-           "stickerSetId": undefined,[39m
+[32m-           "stickerSetName": "source pack",[39m
+[31m+           "stickerSetName": "cached pack",[39m
+[2m            "type": "animation",[22m
+[32m-           "width": undefined,[39m
+[2m          },[22m
+[2m        ],[22m
+[2m        "chatId": "A",[22m
+[2m        "deleted": false,[22m
+[32m-       "editUtcOffsetMin": undefined,[39m
+[32m-       "editedAtSec": undefined,[39m
+[32m-       "forwardInfo": undefined,[39m
+[2m        "isSelfSent": false,[22m
+[2m        "messageId": "animation",[22m
+[2m        "receivedAtMs": 1000,[22m
+[32m-       "replyTo": undefined,[39m
+[2m        "sender": {[22m
+[2m          "displayName": "User",[22m
+[2m          "id": "user",[22m
+[2m          "isBot": false,[22m
+[32m-         "username": undefined,[39m
+[2m        },[22m
+[2m        "timestampSec": 1,[22m
+[2m        "utcOffsetMin": 480,[22m
+[2m      },[22m
+[2m      "order": {[22m
+[33m@@ -54,15 +42,14 @@[39m
+[2m        "id": 1,[22m
+[2m        "source": "events",[22m
+[2m      },[22m
+[2m      "sourceRevision": "72bd1dc0cbfcef0b33016aaf3110caeb9273643f0338237b4616380f2b450b72",[22m
+[2m      "transcript": {[22m
+[32m-       "reply": undefined,[39m
+[2m        "text": "animation[22m
+[32m- newneedle",[39m
+[31m+ oldneedle",[39m
+[2m        "xml": "<message id=\"animation\" sender=\"User\" t=\"1970-01-01T08:00:01+08:00\">[22m
+[2m  animation[22m
+[32m- <animation type=\"animation\" pack=\"source pack\" file-id=\"animation:0\">newneedle</animation>[39m
+[31m+ <animation type=\"animation\" pack=\"cached pack\" file-id=\"animation:0\">oldneedle</animation>[39m
+[2m  </message>",[22m
+[2m      },[22m
+[2m    },[22m
+[2m  ][22m
+
+ ❯ src/history/online.test.ts:79:23
+     77|     f.inbox.receive({ kind: 'media', sourceKind: 'image_alt_texts', so…
+     78|     await settle(f);
+     79|     expect(f.items()).toEqual(await reference(f, 'A'));
+       |                       ^
+     80|     const expectedText = order === 'thumbnail-first' ? 'oldneedle' : '…
+     81|     expect(f.store.sqlite.prepare('SELECT count(*) AS n FROM history_f…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/history/online.test.ts > online history reconciliation > refreshes recursive emoji and reply-at-creation descriptions without replacing the snapshot with later parent content
+AssertionError: expected [ { kind: 'message', …(8) }, …(1) ] to deeply equal [ { kind: 'message', …(8) }, …(1) ]
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[33m@@ -12,20 +12,17 @@[39m
+[2m        "attachments": [],[22m
+[2m        "chatId": "A",[22m
+[2m        "deleted": false,[22m
+[2m        "editUtcOffsetMin": 480,[22m
+[2m        "editedAtSec": 3,[22m
+[32m-       "forwardInfo": undefined,[39m
+[2m        "isSelfSent": false,[22m
+[2m        "messageId": "parent",[22m
+[2m        "receivedAtMs": 1000,[22m
+[32m-       "replyTo": undefined,[39m
+[2m        "sender": {[22m
+[2m          "displayName": "User",[22m
+[2m          "id": "user",[22m
+[2m          "isBot": false,[22m
+[32m-         "username": undefined,[39m
+[2m        },[22m
+[2m        "timestampSec": 1,[22m
+[2m        "utcOffsetMin": 480,[22m
+[2m      },[22m
+[2m      "order": {[22m
+[33m@@ -40,11 +37,10 @@[39m
+[2m        "id": 1,[22m
+[2m        "source": "events",[22m
+[2m      },[22m
+[2m      "sourceRevision": "f9da1f4ea75906dccb7ff1bbd2c9d239c5b026d02a65ab5589c4d6bb20acd562",[22m
+[2m      "transcript": {[22m
+[32m-       "reply": undefined,[39m
+[2m        "text": "later parent content",[22m
+[2m        "xml": "<message id=\"parent\" sender=\"User\" t=\"1970-01-01T08:00:01+08:00\" edited=\"1970-01-01T08:00:03+08:00\">[22m
+[2m  later parent content[22m
+[2m  </message>",[22m
+[2m      },[22m
+[33m@@ -60,13 +56,10 @@[39m
+[2m      "kind": "message",[22m
+[2m      "metadata": {[22m
+[2m        "attachments": [],[22m
+[2m        "chatId": "A",[22m
+[2m        "deleted": false,[22m
+[32m-       "editUtcOffsetMin": undefined,[39m
+[32m-       "editedAtSec": undefined,[39m
+[32m-       "forwardInfo": undefined,[39m
+[2m        "isSelfSent": false,[22m
+[2m        "messageId": "reply",[22m
+[2m        "receivedAtMs": 2000,[22m
+[2m        "replyTo": {[22m
+[2m          "messageId": "parent",[22m
+[33m@@ -74,18 +67,16 @@[39m
+[2m          "quoted": false,[22m
+[2m          "sender": {[22m
+[2m            "displayName": "User",[22m
+[2m            "id": "user",[22m
+[2m            "isBot": false,[22m
+[32m-           "username": undefined,[39m
+[2m          },[22m
+[2m        },[22m
+[2m        "sender": {[22m
+[2m          "displayName": "User",[22m
+[2m          "id": "user",[22m
+[2m          "isBot": false,[22m
+[32m-         "username": undefined,[39m
+[2m        },[22m
+[2m        "timestampSec": 2,[22m
+[2m        "utcOffsetMin": 480,[22m
+[2m      },[22m
+[2m      "order": {[22m
+[33m@@ -101,16 +92,16 @@[39m
+[2m        "source": "events",[22m
+[2m      },[22m
+[2m      "sourceRevision": "1abaa6e0bfb55f78321363110f729079db38c3a2e0b70e8b7d863dc10e0aa235",[22m
+[2m      "transcript": {[22m
+[2m        "reply": {[22m
+[32m-         "text": "emoji [newemoji]",[39m
+[32m-         "xml": "<b><custom-emoji pack=\"new pack\">newemoji</custom-emoji></b>",[39m
+[31m+         "text": "emoji [oldemoji]",[39m
+[31m+         "xml": "<b><custom-emoji pack=\"old pack\">oldemoji</custom-emoji></b>",[39m
+[2m        },[22m
+[2m        "text": "reply",[22m
+[2m        "xml": "<message id=\"reply\" sender=\"User\" t=\"1970-01-01T08:00:02+08:00\">[22m
+[32m- <in-reply-to id=\"parent\" sender=\"User\"><b><custom-emoji pack=\"new pack\">newemoji</custom-emoji></b></in-reply-to>[39m
+[31m+ <in-reply-to id=\"parent\" sender=\"User\"><b><custom-emoji pack=\"old pack\">oldemoji</custom-emoji></b></in-reply-to>[39m
+[2m  reply[22m
+[2m  </message>",[22m
+[2m      },[22m
+[2m    },[22m
+[2m  ][22m
+
+ ❯ src/history/online.test.ts:97:23
+     95|     f.inbox.receive({ kind: 'media', sourceKind: 'image_alt_texts', so…
+     96|     await settle(f);
+     97|     expect(f.items()).toEqual(await reference(f, 'A'));
+       |                       ^
+     98|     expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_f…
+     99|     expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_f…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 2 passed | 18 skipped (23)
+   Start at  02:07:54
+   Duration  1.06s (transform 221ms, setup 0ms, collect 542ms, tests 383ms, environment 0ms, prepare 47ms)
+

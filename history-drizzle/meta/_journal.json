@@ -36,6 +36,13 @@
       "when": 1791645483691,
       "tag": "0004_async_media_delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791655874100,
+      "tag": "0005_refresh_media_descriptions",
+      "breakpoints": true
     }
   ]
 }

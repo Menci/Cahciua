@@ -23,6 +23,7 @@ export const restoreMessage = (deps: {
   maxSourceBytes: number;
   budget: WorkspaceBudget;
   refreshReplySnapshot?: boolean;
+  refreshMedia?: boolean;
   hydrateAltText?: (event: PipelineEvent, reserve: (bytes: number) => void) => void;
 }): { node: ICMessage; source: MessageSource; cacheKeys: readonly string[]; revisionRange: MessageRevisionRange } | undefined => deps.db.$client.transaction(() => {
   const { store, generation, chatId, budget } = deps;
@@ -47,7 +48,10 @@ export const restoreMessage = (deps: {
       LEFT JOIN history_message_revisions r ON r.generation=t.generation AND r.chat_id=t.chat_id AND r.message_id=t.message_id AND r.event_id=t.event_id
       WHERE t.generation=? AND t.chat_id=? AND t.message_id=? AND (t.received_at,t.event_id)<=(?,?)
         AND (r.event_id IS NULL OR r.archive_revision<>o.revision) LIMIT 1`).get(generation, chatId, messageId, savedKey.timeMs, savedKey.id);
-    const cached = persisted && originKey && savedKey && earlier(savedKey, before) && !prefixChanged ? persisted : undefined;
+    // Saved nodes contain derived media fields. A cache change restores the
+    // effective raw sources, preserving authoritative fields while reselecting
+    // descriptions with the same precedence as a fresh build.
+    const cached = !deps.refreshMedia && persisted && originKey && savedKey && earlier(savedKey, before) && !prefixChanged ? persisted : undefined;
     let ic: IntermediateContext = { ...createEmptyIC(chatId), nodes: cached ? [cached.node] : [] };
     let source = cached?.source;
     let origin = cached ? originKey : undefined;

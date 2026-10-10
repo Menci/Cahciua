@@ -133,8 +133,8 @@ export const createSourceObserver = (deps: {
       if (!db.$client.prepare('SELECT 1 FROM image_alt_texts WHERE image_hash = ?').get(key)) register('image_alt_texts', key, null);
     }
   };
-  type Pending = { id: number; kind: 'events' | 'image_alt_texts'; key: string; chatId: string | null };
-  const inspectPending = (target: Pending) => {
+  type MediaTarget = { id?: number; kind: 'events' | 'image_alt_texts'; key: string; chatId: string | null };
+  const inspectMediaTarget = (target: MediaTarget) => {
     let complete = false;
     let observation: SourceObservation | undefined;
     let event: ArchivedEvent | undefined;
@@ -160,7 +160,7 @@ export const createSourceObserver = (deps: {
       if (event) registerPending(event);
       // Keep completion responsibility until its observation's materialization
       // commits. Queue failure rolls back this scheduled marker as well.
-      if (complete) sqlite.prepare('UPDATE history_pending_media SET scheduled_seq = ? WHERE id = ?').run(changes.watermark(), target.id);
+      if (complete && target.id !== undefined) sqlite.prepare('UPDATE history_pending_media SET scheduled_seq = ? WHERE id = ?').run(changes.watermark(), target.id);
     };
   };
   const consumeInput = (): boolean => {
@@ -170,10 +170,13 @@ export const createSourceObserver = (deps: {
     const upper = input.kind === 'pending' ? input.upperId ?? (sqlite.prepare('SELECT coalesce(max(id), 0) AS id FROM history_pending_media WHERE generation = ?').get(generation) as { id: number }).id : 0;
     const target = input.kind === 'pending'
       ? sqlite.prepare(`SELECT id, source_kind AS kind, source_key AS key, chat_id AS chatId FROM history_pending_media
-        WHERE generation = ? AND scheduled_seq IS NULL AND id > ? AND id <= ? ORDER BY id LIMIT 1`).get(generation, input.afterId, upper) as Pending | undefined
+        WHERE generation = ? AND scheduled_seq IS NULL AND id > ? AND id <= ? ORDER BY id LIMIT 1`).get(generation, input.afterId, upper) as MediaTarget | undefined
       : sqlite.prepare(`SELECT id, source_kind AS kind, source_key AS key, chat_id AS chatId FROM history_pending_media
-        WHERE generation = ? AND source_kind = ? AND source_key = ? AND scheduled_seq IS NULL`).get(generation, input.kind, input.key) as Pending | undefined;
-    const commit = target ? inspectPending(target) : undefined;
+        WHERE generation = ? AND source_kind = ? AND source_key = ? AND scheduled_seq IS NULL`).get(generation, input.kind, input.key) as MediaTarget | undefined;
+    // A direct cache notification also observes already-complete keys. Pending
+    // tracks missing dependencies, not whether a cache change is relevant.
+    const notification = target ?? (input.kind === 'image_alt_texts' ? { kind: input.kind, key: input.key, chatId: null } : undefined);
+    const commit = notification ? inspectMediaTarget(notification) : undefined;
     sqlite.transaction(() => {
       commit?.();
       if (input.kind === 'pending' && target) sqlite.prepare('UPDATE history_build_inputs SET after_id = ?, upper_id = ? WHERE id = ?').run(target.id, upper, input.id);

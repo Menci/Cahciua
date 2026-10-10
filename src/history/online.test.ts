@@ -1,4 +1,4 @@
-import { linkSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -19,7 +19,7 @@ import { openHistoryStore } from './store';
 import { createHistoryArchive } from '../db/history-archive';
 import { loadImageAltTextByHash, persistEvent, persistImageAltText, persistTurnResponse } from '../db/persistence';
 import * as schema from '../db/schema';
-import { createCachedAltTextHydrator } from '../media/alt-text-cache';
+import { computeThumbnailHash, createCachedAltTextHydrator } from '../media/alt-text-cache';
 import type { PipelineEvent } from '../projection';
 import { createEmptyIC, reduce } from '../projection';
 import type { ConversationEntry } from '../unified-api/types';
@@ -63,6 +63,89 @@ const reference = async (f: ReturnType<typeof fixture>, chatId: string) => {
 };
 
 describe('online history reconciliation', () => {
+  it.each(['animation-first', 'thumbnail-first', 'cache-replacement'] as const)('refreshes media descriptions and FTS from source with %s completion', async order => {
+    const f = fixture();
+    const sharp = (await import('sharp')).default;
+    const thumbnailWebp = (await sharp({ create: { width: 1, height: 1, channels: 3, background: 'red' } }).webp().toBuffer()).toString('base64');
+    const thumbnailKey = computeThumbnailHash(thumbnailWebp);
+    const firstKey = order === 'animation-first' ? 'animation' : thumbnailKey;
+    persistImageAltText(f.db, { imageHash: firstKey, altText: 'oldneedle', altTextTokens: 1, stickerSetName: 'cached pack' });
+    persistEvent(f.db, { ...message('animation'), attachments: [{ type: 'animation', animationHash: 'animation', thumbnailWebp, stickerSetName: 'source pack' }] });
+    await settle(f);
+    const completedKey = order === 'thumbnail-first' ? 'animation' : thumbnailKey;
+    persistImageAltText(f.db, { imageHash: completedKey, altText: 'newneedle', altTextTokens: 1, stickerSetName: 'new cached pack' });
+    f.inbox.receive({ kind: 'media', sourceKind: 'image_alt_texts', sourceKey: completedKey });
+    await settle(f);
+    expect(f.items()).toEqual(await reference(f, 'A'));
+    const expectedText = order === 'thumbnail-first' ? 'oldneedle' : 'newneedle';
+    expect(f.store.sqlite.prepare('SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH ?').get(expectedText)).toEqual({ n: 1 });
+    if (order !== 'thumbnail-first') expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'oldneedle'").get()).toEqual({ n: 0 });
+    if (order !== 'cache-replacement') expect(f.builder().status().pendingMedia).toBe(0);
+  });
+
+  it('refreshes recursive emoji and reply-at-creation descriptions without replacing the snapshot with later parent content', async () => {
+    const f = fixture();
+    persistImageAltText(f.db, { imageHash: 'emoji:42', altText: 'oldemoji', altTextTokens: 1, stickerSetName: 'old pack' });
+    persistEvent(f.db, { ...message('parent'), content: [{ type: 'bold', children: [{ type: 'custom_emoji', customEmojiId: '42', children: [{ type: 'text', text: 'emoji' }] }] }] });
+    persistEvent(f.db, { ...message('reply', 2000), replyToMessageId: 'parent' });
+    await settle(f);
+    persistEvent(f.db, { ...message('parent', 3000, 'later parent content'), type: 'edit' });
+    await settle(f);
+    persistImageAltText(f.db, { imageHash: 'emoji:42', altText: 'newemoji', altTextTokens: 1, stickerSetName: 'new pack' });
+    f.inbox.receive({ kind: 'media', sourceKind: 'image_alt_texts', sourceKey: 'emoji:42' });
+    await settle(f);
+    expect(f.items()).toEqual(await reference(f, 'A'));
+    expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'newemoji'").get()).toEqual({ n: 1 });
+    expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'oldemoji'").get()).toEqual({ n: 0 });
+  });
+
+  it('preserves source descriptions and sticker metadata when a cache completes', async () => {
+    const f = fixture();
+    persistEvent(f.db, { ...message('authoritative'), attachments: [{ type: 'sticker', animationHash: 'source-sticker', altText: 'source description', stickerSetName: 'source pack' }] });
+    await settle(f);
+    persistImageAltText(f.db, { imageHash: 'source-sticker', altText: 'cached description', altTextTokens: 1, stickerSetName: 'cached pack' });
+    f.inbox.receive({ kind: 'media', sourceKind: 'image_alt_texts', sourceKey: 'source-sticker' });
+    await settle(f);
+    expect(f.items()).toEqual(await reference(f, 'A'));
+    const item = f.items()[0];
+    expect(item?.kind === 'message' && item.metadata.attachments).toMatchObject([{ altText: 'source description', stickerSetName: 'source pack' }]);
+  });
+
+  it('migrates already-completed stale media output into durable targeted repair without resetting consumption', async () => {
+    const f = fixture();
+    const sharp = (await import('sharp')).default;
+    const thumbnailWebp = (await sharp({ create: { width: 1, height: 1, channels: 3, background: 'red' } }).webp().toBuffer()).toString('base64');
+    persistImageAltText(f.db, { imageHash: 'animation', altText: 'staleanimation', altTextTokens: 1 });
+    persistEvent(f.db, { ...message('animation'), attachments: [{ type: 'animation', animationHash: 'animation', thumbnailWebp }] });
+    await settle(f);
+    const oldState = f.store.sqlite.prepare('SELECT state_json FROM history_message_states').get() as { state_json: string };
+    const oldItem = f.store.sqlite.prepare('SELECT item_json,search_text FROM history_items').get() as { item_json: string; search_text: string };
+    const key = computeThumbnailHash(thumbnailWebp);
+    persistImageAltText(f.db, { imageHash: key, altText: 'currentthumbnail', altTextTokens: 1 });
+    f.inbox.receive({ kind: 'media', sourceKind: 'image_alt_texts', sourceKey: key });
+    await settle(f);
+    expect(f.builder().status().pendingMedia).toBe(0);
+    // Simulate the old release's completed task with stale persisted output.
+    f.store.sqlite.prepare('UPDATE history_message_states SET state_json=?').run(oldState.state_json);
+    f.store.sqlite.prepare('UPDATE history_items SET item_json=?,search_text=?').run(oldItem.item_json, oldItem.search_text);
+    const cursor = f.builder().status().consumeSeq;
+    const journal = JSON.parse(readFileSync(resolve('history-drizzle/meta/_journal.json'), 'utf8')) as { entries: { when: number }[] };
+    f.store.sqlite.prepare('DELETE FROM __drizzle_migrations WHERE created_at=?').run(journal.entries.at(-1)!.when);
+    migrate(f.store.db, { migrationsFolder: './history-drizzle' });
+    const changes = createHistoryChanges(f.store.sqlite, 'g');
+    const repairUpper = changes.watermark();
+    expect(repairUpper).toBeGreaterThan(cursor);
+    expect(f.builder().status().consumeSeq).toBe(cursor);
+    migrate(f.store.db, { migrationsFolder: './history-drizzle' });
+    expect(changes.watermark()).toBe(repairUpper);
+    // Reconstruct the builder to consume persisted migration work after restart.
+    await settle(f);
+    expect(f.items()).toEqual(await reference(f, 'A'));
+    expect(f.builder().status().consumeSeq).toBe(repairUpper);
+    expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'currentthumbnail'").get()).toEqual({ n: 1 });
+    expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'staleanimation'").get()).toEqual({ n: 0 });
+  });
+
   it('applies appended edit overrides to persisted state without replaying the old edit bodies or blocking other chats', async () => {
     const f = fixture();
     persistEvent(f.db, message('edited', 1000, 'original'));

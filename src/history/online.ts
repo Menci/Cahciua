@@ -109,9 +109,11 @@ export const createOnlineHistoryBuilder = (deps: {
       const change = changes.next(seq - 1, sourceBytes);
       if (change?.seq !== seq) throw new Error('Missing historical source change');
       // Only parent-source fanout needs to reconstruct a reply-at-creation
-      // snapshot. Own edits retain it; cache fills hydrate it directly.
+      // snapshot. Own edits retain it; media changes restore effective raw
+      // sources so prior hydration cannot suppress the current cache choice.
       const refreshReplySnapshot = change.sourceKind === 'events' && !change.targetIds.includes(task.sourceKey);
-      const state = restoreMessage({ ...deps, archive, refreshReplySnapshot, chatId: task.chatId, messageId: task.sourceKey, budget, maxSourceBytes: sourceBytes });
+      const refreshMedia = change.sourceKind === 'image_alt_texts';
+      const state = restoreMessage({ ...deps, archive, refreshReplySnapshot, refreshMedia, chatId: task.chatId, messageId: task.sourceKey, budget, maxSourceBytes: sourceBytes });
       if (state) {
         const ic = { ...createEmptyIC(task.chatId), nodes: [state.node] };
         const items = buildMessageItems(ic, new Map([[task.sourceKey, state.source]]), deps.renderParams);

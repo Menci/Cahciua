@@ -151,3 +151,7 @@ Status reads history.db read-only with no query SDK: per-source fences/keysets/s
 Shutdown first cancels new post-startup work and ingress retry/commit publication, stops Driver/background producers/Telegram, disables late media persistence, then stops asynchronous delivery and asks the child to finish its current small transaction. After 2 seconds the supervisor kills a stuck child and waits for its exit. It never drains backlog. Saved task/consume/bootstrap progress and history-owned source locators remain recoverable; DB connections close after producers and worker. Tests exercise late transforms/backfills and prevent callbacks writing after shutdown.
 
 The history-owned observation queue is deliberately **not pruned** in this release. Long outages and sustained production grow disk usage. Old generations also remain on disk; promotion/cleanup are future maintenance work. Query authorization, raw SQL guard, query process/SDK, memory, ranking and vectors are not implemented and internal unmasked content is never exposed to model/Telegram by this pipeline.
+
+媒体缓存通知与普通编辑的恢复策略不同：普通编辑复用已物化节点；媒体缓存通知定向重建有效原始内容与回复时快照后重新 hydration，避免已保存的派生描述压过当前缓存选择。原始描述/贴纸字段保持来源语义，无需修改来源库或 History schema。
+
+升级迁移 `0005_refresh_media_descriptions` 不改变表结构。它仅从 History 已有依赖索引为在线 generations 追加每个缓存 key 一条持久 source-change，由既有有界消费链路定向重建历史消息/FTS；覆盖 pending 已清除的旧派生输出，保留 generation、来源游标与已提交消费进度。不扫描原库正文，迁移只执行一次。直接缓存通知即使无 pending 也核对来源变化；pending 是缺失职责，不是通知相关性的判定依据。

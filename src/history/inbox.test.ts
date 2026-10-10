@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -16,10 +16,10 @@ it('migrates existing pending obligations without losing their targets and durab
   try {
     // A pre-0004 database with outstanding responsibilities. The migration is
     // exercised as SQL against its actual old table shape, not a mock store.
-    sqlite.exec('CREATE TABLE history_pending_media(generation TEXT NOT NULL, source_kind TEXT NOT NULL, source_key TEXT NOT NULL, chat_id TEXT, retry_at_ms INTEGER NOT NULL, PRIMARY KEY(generation, source_kind, source_key))');
+    for (const tag of ['0000_plain_hemingway', '0001_online_consumption', '0002_readonly_sources', '0003_incremental_media']) sqlite.exec(readFileSync(resolve('history-drizzle', `${tag}.sql`), 'utf8'));
     sqlite.prepare('INSERT INTO history_pending_media VALUES (?, ?, ?, ?, ?)').run('g', 'events', '9', 'A', 10000);
     sqlite.prepare('INSERT INTO history_pending_media VALUES (?, ?, ?, ?, ?)').run('g', 'image_alt_texts', 'emoji:7', null, 10000);
-    // Mark old migrations applied so Drizzle runs only 0004 on this old shape.
+    // Mark old migrations applied so Drizzle runs 0004 and later migrations on this old shape.
     sqlite.exec('CREATE TABLE __drizzle_migrations(id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at NUMERIC)');
     sqlite.prepare('INSERT INTO __drizzle_migrations(hash, created_at) VALUES (?, ?)').run('fixture', 1791635654608);
     migrate(drizzle(sqlite), { migrationsFolder: './history-drizzle' });

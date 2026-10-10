@@ -151,6 +151,8 @@ Fingerprints, locator changes, observation queue entries, pending targets and ID
 
 The main process never waits for history readiness/bootstrap/catch-up/ACK. Worker option resolution/spawn are deferred out of the core startup stack; their failures log and retry independently. Nonresident/archive-only/new chats are independently observed without changing Pipeline residency. The delivery adapter bounds registered keys/bytes and outstanding transport writes; it retries durable receipt in the background. After bootstrap, append discovery pauses at 256 outstanding observed entries, retaining unread sources in the archive; accepted media/recovery tasks remain durable. Shutdown stops producers/backfills and late callbacks before stopping delivery and the child; it does not drain backlog. History-only migration 0004 preserves existing pending targets and generation identities. Query worker/SDK, SQL guard and memory remain deferred.
 
+Media cache notifications rebuild only the affected messages from effective raw canonical sources before hydration. Persisted node descriptions are derived output, never authority for cache refresh; fresh cache precedence applies to attachments and reply-at-creation emoji content while source-provided fields survive. Ordinary edits continue to reuse the materialized prefix. Direct cache notifications are inspected even without a pending row; pending tracks missing-source obligations. History-only data migrations can enqueue indexed media targets for bounded repair without resetting generations or touching the source archive.
+
 ### Mandatory Probe Gate
 
 Every wake-up runs an outside-judge probe before primary except continuation of an interrupted tool loop. Mentions, direct replies, and runtime events still run probe.
