@@ -131,11 +131,21 @@ export const buildHistorySlice = async (deps: BootstrapDeps): Promise<BootstrapS
             deps.hydrateAltText?.(row.event, bytes => budget.reserve(bytes));
             budget.reserve(Buffer.byteLength(JSON.stringify(row)));
           }
-          const projected = row ? projectEvent({ ...deps, row, budget }) : { changes: [], notices: [] };
+          // Applied target revisions are durable sub-event progress. A crash
+          // resumes the same delete without loading its entire target set.
+          const target = row?.event.type === 'delete' ? store.sqlite.prepare(`SELECT state.message_id AS id
+            FROM json_each(?) AS target JOIN history_message_states AS state
+              ON state.generation = ? AND state.chat_id = ? AND state.message_id = target.value
+            LEFT JOIN history_message_revisions AS revision ON revision.generation = state.generation
+              AND revision.chat_id = state.chat_id AND revision.message_id = state.message_id AND revision.event_id = ?
+            WHERE revision.event_id IS NULL LIMIT 1`).get(JSON.stringify(row.event.messageIds), generation, chatId, row.ref.id) as { id: string } | undefined : undefined;
+          const partial = target !== undefined;
+          const effective = row?.event.type === 'delete' ? { ...row, event: { ...row.event, messageIds: target ? [target.id] : [] } } : row;
+          const projected = effective ? projectEvent({ ...deps, row: effective, budget }) : { changes: [], notices: [] };
           plan = {
-            generation, expected, ...projected, observation: row ? describeSource(row) : undefined, batch: {
+            generation, expected, ...projected, event: row, partial, observation: row ? describeSource(row) : undefined, batch: {
               changes: projected.changes, notices: projected.notices,
-              progress: { bounds: expected.bounds, source, after: page.next ?? expected.after, done: page.done },
+              progress: { bounds: expected.bounds, source, after: partial ? expected.after : page.next ?? expected.after, done: !partial && page.done },
             },
           };
         } else if (source === 'turn_responses_v2') {
@@ -173,7 +183,7 @@ export const buildHistorySlice = async (deps: BootstrapDeps): Promise<BootstrapS
       }
       peakStateEntries = Math.max(peakStateEntries, budget.entries);
       peakEncodedWorkspaceBytes = Math.max(peakEncodedWorkspaceBytes, budget.encodedBytes);
-      if (plan.batch.progress.after?.id !== expected.after?.id) processedRows++;
+      if (plan.partial || plan.batch.progress.after?.id !== expected.after?.id) processedRows++;
       // Only this row's plan survives through the wait; no cross-row cache exists.
       // Await even when processing is slow to yield the event loop to shutdown.
       await delay(Math.max(1, Math.ceil(1000 / limits.rowsPerSecond - (performance.now() - started))));

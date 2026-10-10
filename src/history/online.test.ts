@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createWorkspaceBudget, defaultHistoryLimits } from './budget';
 import { buildHistoryInput } from './build-input';
+import { createHistoryDelivery } from './delivery';
 import { createHistoryInbox } from './inbox';
 import { createOnlineHistoryBuilder } from './online';
 import { restoreMessage } from './restore-message';
@@ -129,8 +130,9 @@ describe('online history reconciliation', () => {
     f.store.sqlite.prepare('UPDATE history_message_states SET state_json=?').run(oldState.state_json);
     f.store.sqlite.prepare('UPDATE history_items SET item_json=?,search_text=?').run(oldItem.item_json, oldItem.search_text);
     const cursor = f.builder().status().consumeSeq;
-    const journal = JSON.parse(readFileSync(resolve('history-drizzle/meta/_journal.json'), 'utf8')) as { entries: { when: number }[] };
-    f.store.sqlite.prepare('DELETE FROM __drizzle_migrations WHERE created_at=?').run(journal.entries.at(-1)!.when);
+    const journal = JSON.parse(readFileSync(resolve('history-drizzle/meta/_journal.json'), 'utf8')) as { entries: { when: number; tag: string }[] };
+    f.store.sqlite.exec('ALTER TABLE history_build_inputs DROP COLUMN after_key; ALTER TABLE history_build_inputs DROP COLUMN upper_key');
+    f.store.sqlite.prepare('DELETE FROM __drizzle_migrations WHERE created_at>=?').run(journal.entries.find(entry => entry.tag === '0005_refresh_media_descriptions')!.when);
     migrate(f.store.db, { migrationsFolder: './history-drizzle' });
     const changes = createHistoryChanges(f.store.sqlite, 'g');
     const repairUpper = changes.watermark();
@@ -141,7 +143,8 @@ describe('online history reconciliation', () => {
     // Reconstruct the builder to consume persisted migration work after restart.
     await settle(f);
     expect(f.items()).toEqual(await reference(f, 'A'));
-    expect(f.builder().status().consumeSeq).toBe(repairUpper);
+    expect(f.builder().status().consumeSeq).toBeGreaterThanOrEqual(repairUpper);
+    expect(f.builder().status().logLag).toBe(0);
     expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'currentthumbnail'").get()).toEqual({ n: 1 });
     expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'staleanimation'").get()).toEqual({ n: 0 });
   });
@@ -478,4 +481,136 @@ it('pauses source discovery at durable backlog pressure and resumes after constr
   f.store.sqlite.exec('DROP TRIGGER fail_render'); await settle(f);
   expect(f.items()).toHaveLength(351);
   expect(b.status().sourceHighwaterIds!.events).toBe(351);
+}, 30000);
+
+it('continues source discovery and other chats after a 257-target delete', async () => {
+  const f = fixture();
+  const ids = Array.from({ length: 257 }, (_, i) => String(i));
+  for (const id of ids) persistEvent(f.db, message(id));
+  persistEvent(f.db, message('other-before', 1000, 'before', 'B'));
+  await settle(f);
+  persistEvent(f.db, { type: 'delete', chatId: 'A', messageIds: ids, receivedAtMs: 2000, timestampSec: 2, utcOffsetMin: 480 });
+  persistEvent(f.db, message('other-after', 3000, 'after', 'B'));
+  const errors: string[] = [];
+  for (let restart = 0; restart < 3; restart++) {
+    const b = f.builder();
+    for (let i = 0; i < 30; i++) {
+      try { await b.step(); } catch (error) { errors.push(String(error)); break; }
+    }
+  }
+  expect(errors).toEqual([]);
+  await settle(f);
+  expect(f.items().filter(item => item.chatId === 'A')).toEqual(await reference(f, 'A'));
+  expect(f.items().some(item => item.kind === 'message' && item.metadata.messageId === 'other-after')).toBe(true);
+});
+
+it('recovers an overwritten completed media key after delivery overflow loses its notice', async () => {
+  const f = fixture();
+  persistEvent(f.db, { ...message('animation'), attachments: [{ type: 'animation', animationHash: 'shared' }] });
+  await settle(f);
+  persistImageAltText(f.db, { imageHash: 'shared', altText: 'oldneedle', altTextTokens: 1 });
+  f.inbox.receive({ kind: 'media', sourceKind: 'image_alt_texts', sourceKey: 'shared' });
+  await settle(f);
+  expect(f.builder().status().pendingMedia).toBe(0);
+  persistImageAltText(f.db, { imageHash: 'shared', altText: 'newneedle', altTextTokens: 1 });
+  const delivery: ReturnType<typeof createHistoryDelivery> = createHistoryDelivery({
+    maxItems: 1, onError: error => { throw error; }, send: (frame, callback) => {
+      f.inbox.receive(frame.input);
+      callback(null);
+      queueMicrotask(() => delivery.acknowledge(frame.id));
+    },
+  });
+  try {
+    delivery.offer({ kind: 'media', sourceKind: 'image_alt_texts', sourceKey: 'shared' });
+    delivery.offer({ kind: 'media', sourceKind: 'image_alt_texts', sourceKey: 'overflow' });
+    expect(delivery.metrics()).toMatchObject({ notificationItems: 0, recoveryRequested: true });
+    delivery.connect();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await settle(f);
+    const expected = await reference(f, 'A');
+    expect(f.items()).toEqual(expected);
+  } finally { delivery.stop(); }
+});
+
+it('bootstraps a large delete without loading all target states into one workspace', async () => {
+  const f = fixture();
+  const ids = Array.from({ length: 300 }, (_, i) => String(i));
+  for (const id of ids) persistEvent(f.db, message(id));
+  persistEvent(f.db, { type: 'delete', chatId: 'A', messageIds: [...ids, 'unknown'], receivedAtMs: 2000, timestampSec: 2, utcOffsetMin: 480 });
+  const status = await settle(f);
+  expect(f.items()).toEqual(await reference(f, 'A'));
+  expect(status.peakStateEntries).toBeLessThanOrEqual(256);
+});
+
+it('resumes partially committed bootstrap deletion after failure and store restart', async () => {
+  const f = fixture();
+  const ids = Array.from({ length: 260 }, (_, i) => String(i));
+  for (const id of ids) persistEvent(f.db, message(id));
+  persistEvent(f.db, { type: 'delete', chatId: 'A', messageIds: ids, receivedAtMs: 2000, timestampSec: 2, utcOffsetMin: 480 });
+  const deleted = f.sqlite.prepare('SELECT max(id) AS id FROM events').get() as { id: number };
+  const b = f.builder();
+  const applied = () => (f.store.sqlite.prepare('SELECT count(*) AS n FROM history_message_revisions WHERE event_id = ?').get(deleted.id) as { n: number }).n;
+  for (let i = 0; i < 2000 && applied() < 7; i++) await b.step();
+  expect(applied()).toBe(7);
+  const checkpoint = f.store.checkpoint('g', 'A', 'events');
+  expect(checkpoint.after?.id).toBeLessThan(deleted.id);
+  f.store.sqlite.exec("CREATE TRIGGER fail_delete BEFORE INSERT ON history_items BEGIN SELECT RAISE(ABORT, 'output failure'); END");
+  await expect(b.step()).rejects.toThrow('History bootstrap failed');
+  expect(applied()).toBe(7);
+  expect(f.store.checkpoint('g', 'A', 'events')).toEqual(checkpoint);
+  f.store.sqlite.exec('DROP TRIGGER fail_delete');
+  const path = f.store.sqlite.name; f.store.close();
+  const store = openHistoryStore(path); clients.push(store.sqlite, store.writerLock);
+  const restarted = {
+    ...f, store,
+    builder: () => createOnlineHistoryBuilder({ db: f.readDb, archive: f.archive, store, generation: 'g', archiveIdentity: 'fixture', renderIdentity: 'fixture', hydrateAltText: f.hydrateAltText, limits: { rowsPerSecond: 100000 } }),
+    items: () => store.db.select().from(savedItems).orderBy(savedItems.key).all().map(row => row.item),
+  };
+  await settle(restarted);
+  expect(restarted.items()).toEqual(await reference(restarted, 'A'));
+  expect((store.sqlite.prepare('SELECT count(*) AS n FROM history_message_revisions WHERE event_id = ?').get(deleted.id) as { n: number }).n).toBe(260);
+}, 30000);
+
+it('persists a finite completed-cache recovery cursor and resumes after receiver restart', async () => {
+  const f = fixture();
+  for (let i = 0; i < 12; i++) {
+    persistImageAltText(f.db, { imageHash: `complete-${i}`, altText: `oldcache ${i}`, altTextTokens: 1 });
+    persistEvent(f.db, { ...message(`media-${i}`), attachments: [{ type: 'animation', animationHash: `complete-${i}` }] });
+  }
+  await settle(f);
+  expect(f.builder().status().pendingMedia).toBe(0);
+  for (let i = 0; i < 12; i++) persistImageAltText(f.db, { imageHash: `complete-${i}`, altText: `freshcache ${i}`, altTextTokens: 1 });
+  f.inbox.receive({ kind: 'recover' });
+  const b = f.builder();
+  const progress = () => f.store.sqlite.prepare("SELECT after_key, upper_key FROM history_build_inputs WHERE source_kind = 'dependencies'").get() as { after_key: string | null; upper_key: string | null };
+  for (let i = 0; i < 40 && !progress()?.after_key; i++) await b.step();
+  expect(progress()).toMatchObject({ after_key: 'complete-0', upper_key: 'complete-9' });
+  expect(f.builder().status().mediaRecoveryActive).toBe(true);
+  await settle(f);
+  expect(f.items()).toEqual(await reference(f, 'A'));
+  expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'oldcache'").get()).toEqual({ n: 0 });
+  expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_fts WHERE history_fts MATCH 'freshcache'").get()).toEqual({ n: 12 });
+  const watermark = createHistoryChanges(f.store.sqlite, 'g').watermark();
+  f.inbox.receive({ kind: 'recover' }); await settle(f);
+  expect(createHistoryChanges(f.store.sqlite, 'g').watermark()).toBe(watermark);
+});
+
+it('rolls back target expansion and resumes a large delete from its saved ordinal', async () => {
+  const f = fixture();
+  const ids = Array.from({ length: 257 }, (_, i) => String(i));
+  for (const id of ids) persistEvent(f.db, message(id));
+  await settle(f);
+  persistEvent(f.db, { type: 'delete', chatId: 'A', messageIds: ids, receivedAtMs: 2000, timestampSec: 2, utcOffsetMin: 480 });
+  f.store.sqlite.exec("CREATE TRIGGER fail_fanout BEFORE INSERT ON history_consume_tasks WHEN NEW.kind = 'replies' BEGIN SELECT RAISE(ABORT, 'fanout failure'); END");
+  const b = f.builder();
+  let failed = false;
+  for (let i = 0; i < 30 && !failed; i++) { try { await b.step(); } catch (error) { expect(String(error)).toContain('kind=targets'); failed = true; } }
+  expect(failed).toBe(true);
+  expect(f.store.sqlite.prepare("SELECT source_key,done FROM history_consume_tasks WHERE kind='targets'").get()).toEqual({ source_key: '0', done: 0 });
+  expect(f.store.sqlite.prepare("SELECT count(*) AS n FROM history_consume_tasks WHERE kind IN ('message','replies')").get()).toEqual({ n: 0 });
+  const cursor = b.status().consumeSeq;
+  f.store.sqlite.exec('DROP TRIGGER fail_fanout');
+  await settle(f);
+  expect(f.builder().status().consumeSeq).toBeGreaterThan(cursor);
+  expect(f.items()).toEqual(await reference(f, 'A'));
 }, 30000);

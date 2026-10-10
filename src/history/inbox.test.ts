@@ -34,7 +34,7 @@ it('migrates existing pending obligations without losing their targets and durab
     expect(() => inbox.receive({ kind: 'recover' })).toThrow('receipt failure');
     expect(inbox.count()).toBe(1);
     sqlite.exec('DROP TRIGGER fail_receipt'); inbox.receive({ kind: 'recover' });
-    expect(inbox.count()).toBe(2);
+    expect(inbox.count()).toBe(3);
     expect(sqlite.pragma('integrity_check', { simple: true })).toBe('ok');
   } finally { sqlite.close(); rmSync(dir, { recursive: true, force: true }); }
 });
@@ -43,4 +43,23 @@ it('narrows bounded media locators and rejects malformed notification frames', (
   const input = { kind: 'media', sourceKind: 'events', sourceKey: '1' };
   expect(parseHistoryDelivery({ kind: 'history-input', id: 1, input })).toEqual({ kind: 'history-input', id: 1, input });
   for (const value of [null, {}, { kind: 'history-input', id: -1, input }, { kind: 'history-input', id: 1, input: { ...input, sourceKey: '-1' } }, { kind: 'history-input', id: 1, input: { ...input, sourceKey: 'x'.repeat(2000) } }]) expect(parseHistoryDelivery(value)).toBeUndefined();
+});
+
+it('rolls back both recovery responsibilities when dependency receipt fails', () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'history-receipt-'));
+  const sqlite = new Database(resolve(dir, 'history.db'));
+  try {
+    migrate(drizzle(sqlite), { migrationsFolder: './history-drizzle' });
+    const inbox = createHistoryInbox(sqlite, 'g');
+    sqlite.exec("CREATE TRIGGER fail_dependencies BEFORE INSERT ON history_build_inputs WHEN NEW.source_kind = 'dependencies' BEGIN SELECT RAISE(ABORT, 'dependency receipt failure'); END");
+    expect(() => inbox.receive({ kind: 'recover' })).toThrow('dependency receipt failure');
+    expect(inbox.count()).toBe(0);
+    sqlite.exec('DROP TRIGGER fail_dependencies');
+    inbox.receive({ kind: 'recover' });
+    sqlite.exec("UPDATE history_build_inputs SET after_id = 4, upper_id = 9, after_key = 'a', upper_key = 'z'");
+    inbox.receive({ kind: 'recover' });
+    expect(sqlite.prepare("SELECT after_id, upper_id FROM history_build_inputs WHERE source_kind = 'pending'").get()).toEqual({ after_id: 0, upper_id: null });
+    expect(sqlite.prepare("SELECT after_key, upper_key FROM history_build_inputs WHERE source_kind = 'dependencies'").get()).toEqual({ after_key: null, upper_key: null });
+    expect(inbox.count()).toBe(2);
+  } finally { sqlite.close(); rmSync(dir, { recursive: true, force: true }); }
 });

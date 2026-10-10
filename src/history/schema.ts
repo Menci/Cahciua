@@ -97,7 +97,7 @@ export const consumeTasks = sqliteTable('history_consume_tasks', {
   generation: text('generation').notNull(),
   taskKey: text('task_key').notNull(),
   chatId: text('chat_id').notNull(),
-  kind: text('kind').notNull().$type<'message' | 'events' | 'turn_responses_v2' | 'compactions' | 'cache' | 'replies' | 'completion'>(),
+  kind: text('kind').notNull().$type<'message' | 'events' | 'turn_responses_v2' | 'compactions' | 'cache' | 'replies' | 'completion' | 'targets'>(),
   done: integer('done', { mode: 'boolean' }).notNull().default(false),
   sourceKey: text('source_key').notNull(),
 }, t => [primaryKey({ columns: [t.generation, t.taskKey] }), index('history_tasks_pending_idx').on(t.generation, t.done, t.taskKey)]);
@@ -166,10 +166,12 @@ export const pendingMedia = sqliteTable('history_pending_media', {
 export const buildInputs = sqliteTable('history_build_inputs', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   generation: text('generation').notNull(),
-  sourceKind: text('source_kind').notNull().$type<'events' | 'image_alt_texts' | 'pending'>(),
+  sourceKind: text('source_kind').notNull().$type<'events' | 'image_alt_texts' | 'pending' | 'dependencies'>(),
   sourceKey: text('source_key').notNull(),
   afterId: integer('after_id').notNull().default(0),
   upperId: integer('upper_id'),
+  afterKey: text('after_key'),
+  upperKey: text('upper_key'),
 }, t => [
   uniqueIndex('history_build_inputs_key').on(t.generation, t.sourceKind, t.sourceKey),
   index('history_build_inputs_order').on(t.generation, t.id),

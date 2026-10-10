@@ -68,12 +68,8 @@ export const createOnlineHistoryBuilder = (deps: {
     if (change.chatId !== null) initializeChat(change.chatId);
     if (change.sourceKind === 'image_alt_texts') tasks.push(taskValue('', 'cache', JSON.stringify([change.sourceKey, '', ''])));
     else if (change.sourceKind === 'events') {
-      if ((change.targetIds?.length ?? 0) > limits.maxStateEntries) throw new Error(`History log seq=${change.seq} target count exceeds dependency budget; cursor unchanged`);
       for (const taskId of change.taskIds ?? []) tasks.push(taskValue(change.chatId!, 'completion', JSON.stringify([taskId, ''])));
-      for (const id of change.targetIds ?? []) {
-        tasks.push(taskValue(change.chatId!, 'message', id));
-        tasks.push(taskValue(change.chatId!, 'replies', JSON.stringify([id, -Number.MAX_SAFE_INTEGER, 0])));
-      }
+      if (change.targetIds.length) tasks.push(taskValue(change.chatId!, 'targets', '0'));
       tasks.push(taskValue(change.chatId!, 'events', change.sourceKey));
     } else tasks.push(taskValue(change.chatId!, change.sourceKind, change.sourceKey));
     store.db.transaction(tx => {
@@ -88,7 +84,21 @@ export const createOnlineHistoryBuilder = (deps: {
     const bounds = archive.captureBounds(task.chatId);
     let plan: HistoryConsumeCommit = { generation, chatId: task.chatId, seq, taskKey: task.taskKey, changes: [], notices: [] };
     let nextKey: string | undefined;
-    if (task.kind === 'cache') {
+    if (task.kind === 'targets') {
+      // The event's target list is source data, not resident Projection state.
+      // Cursor advancement and spawned work share one History transaction.
+      const targets = store.sqlite.prepare(`SELECT key AS ordinal, value AS id FROM history_source_changes,
+        json_each(history_source_changes.change_json, '$.targetIds')
+        WHERE generation = ? AND seq = ? AND CAST(key AS INTEGER) >= ? ORDER BY CAST(key AS INTEGER) LIMIT ?`)
+        .all(generation, seq, Number(task.sourceKey), Math.min(limits.maxRowsPerSlice, limits.maxStateEntries)) as { ordinal: number; id: string }[];
+      if (targets.length) {
+        nextKey = String(targets.at(-1)!.ordinal + 1);
+        plan = { ...plan, tasks: targets.flatMap(target => {
+          budget.entry();
+          return [taskValue(task.chatId, 'message', target.id), taskValue(task.chatId, 'replies', JSON.stringify([target.id, -Number.MAX_SAFE_INTEGER, 0]))];
+        }) };
+      }
+    } else if (task.kind === 'cache') {
       const [cacheKey, afterChat, afterMessage] = JSON.parse(task.sourceKey) as [string, string, string];
       const target = store.db.select().from(schema.mediaDependencies).where(and(
         eq(schema.mediaDependencies.generation, generation), eq(schema.mediaDependencies.cacheKey, cacheKey),

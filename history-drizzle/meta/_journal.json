@@ -43,6 +43,13 @@
       "when": 1791655874100,
       "tag": "0005_refresh_media_descriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791662730264,
+      "tag": "0006_bounded_recovery",
+      "breakpoints": true
     }
   ]
 }

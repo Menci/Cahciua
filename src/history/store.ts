@@ -44,6 +44,7 @@ export interface HistoryMaterialization {
 
 export interface HistoryCommit extends HistoryMaterialization {
   readonly expected: HistoryCheckpoint;
+  readonly partial?: boolean;
   readonly batch: HistoryBatch;
 }
 export interface HistoryConsumeCommit extends HistoryMaterialization {
@@ -274,8 +275,9 @@ export const openHistoryStore = (path: string, migrationsFolder = resolve('histo
           const { generation, expected, batch } = plan;
           const { bounds, source } = expected;
           const current = checkpoint(generation, bounds.chatId, source);
-          if (JSON.stringify(current) === JSON.stringify(batch.progress)) return 'duplicate';
+          if (!plan.partial && JSON.stringify(current) === JSON.stringify(batch.progress)) return 'duplicate';
           if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('Stale historical checkpoint');
+          if (plan.partial && JSON.stringify(batch.progress) !== JSON.stringify(expected)) throw new Error('Partial historical commit must retain its checkpoint');
           if (batch.progress.source !== source || JSON.stringify(batch.progress.bounds) !== JSON.stringify(bounds)) throw new Error('Historical commit scope mismatch');
           writeMaterialization(tx, plan, bounds.chatId, batch.changes, batch.notices);
           if (plan.observation) writeSourceObservation(sqlite, generation, plan.observation, false);

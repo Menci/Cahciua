@@ -334,7 +334,7 @@ await buildHistorySlice({archive, store, generation:'g', chatId:'chat', archiveI
     } finally { store.close(); }
   });
 
-  it('preflights recovered state bytes and multi-target deletes before reducing; larger budgets resume intact', async () => {
+  it('preflights recovered state bytes and pages multi-target deletes within the same small budget', async () => {
     const f = fixture();
     persistEvent(f.db, message('1', 1000, 'full '.repeat(3000)));
     persistEvent(f.db, { ...message('1', 2000, 'edited'), type: 'edit' });
@@ -353,10 +353,12 @@ await buildHistorySlice({archive, store, generation:'g', chatId:'chat', archiveI
     const many = openHistoryStore(resolve(f.dir, 'delete.db'));
     try {
       await buildHistorySlice({ ...deps(f, path, 6, 'many', 'other'), store: many });
-      await expect(buildHistorySlice({ ...deps(f, path, 1, 'many', 'other'), store: many, limits: { maxStateEntries: 5 } })).rejects.toMatchObject({ cause: { message: expect.stringContaining('entry budget') } });
+      const small = { ...deps(f, path, 1, 'many', 'other'), store: many, limits: { maxStateEntries: 5, maxRowsPerSlice: 1, rowsPerSecond: 100000 } };
+      const first = await buildHistorySlice(small);
+      expect(first.peakStateEntries).toBeLessThanOrEqual(5);
       expect(many.checkpoint('many', 'other', 'events').after!.timeMs).toBe(1000);
-      expect(many.db.select().from(historySchema.savedItems).all().some(row => row.item.kind === 'message' && row.item.metadata.deleted)).toBe(false);
-      await buildHistorySlice({ ...deps(f, path, 1, 'many', 'other'), store: many });
+      expect(many.db.select().from(historySchema.savedItems).all().filter(row => row.item.kind === 'message' && row.item.metadata.deleted)).toHaveLength(1);
+      while (!(await buildHistorySlice(small)).scanComplete) { /* Resume bounded deletion work. */ }
       expect(many.db.select().from(historySchema.savedItems).all().every(row => row.item.kind === 'message' && row.item.metadata.deleted)).toBe(true);
     } finally { many.close(); }
   });

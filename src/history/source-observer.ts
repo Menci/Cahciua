@@ -71,7 +71,7 @@ export const writeSourceObservation = (sqlite: SqliteDatabase, generation: strin
   if (observation.sourceKind === 'events') {
     sqlite.prepare('DELETE FROM history_event_targets WHERE generation = ? AND event_id = ?').run(generation, Number(observation.sourceKey));
     const insert = sqlite.prepare('INSERT INTO history_event_targets(generation, chat_id, message_id, event_id, received_at) VALUES (?, ?, ?, ?, ?)');
-    for (const id of observation.targetIds) insert.run(generation, observation.chatId, id, Number(observation.sourceKey), observation.timeMs);
+    for (const id of new Set(observation.targetIds)) insert.run(generation, observation.chatId, id, Number(observation.sourceKey), observation.timeMs);
   }
 };
 
@@ -164,10 +164,14 @@ export const createSourceObserver = (deps: {
     };
   };
   const consumeInput = (): boolean => {
-    const input = sqlite.prepare(`SELECT id, source_kind AS kind, source_key AS key, after_id AS afterId, upper_id AS upperId
-      FROM history_build_inputs WHERE generation = ? ORDER BY id LIMIT 1`).get(generation) as { id: number; kind: 'events' | 'image_alt_texts' | 'pending'; key: string; afterId: number; upperId: number | null } | undefined;
+    const input = sqlite.prepare(`SELECT id, source_kind AS kind, source_key AS key, after_id AS afterId, upper_id AS upperId, after_key AS afterKey, upper_key AS upperKey
+      FROM history_build_inputs WHERE generation = ? ORDER BY id LIMIT 1`).get(generation) as { id: number; kind: 'events' | 'image_alt_texts' | 'pending' | 'dependencies'; key: string; afterId: number; upperId: number | null; afterKey: string | null; upperKey: string | null } | undefined;
     if (!input) return false;
     const upper = input.kind === 'pending' ? input.upperId ?? (sqlite.prepare('SELECT coalesce(max(id), 0) AS id FROM history_pending_media WHERE generation = ?').get(generation) as { id: number }).id : 0;
+    const upperKey = input.kind === 'dependencies' ? input.upperKey ?? (sqlite.prepare('SELECT max(cache_key) AS key FROM history_media_dependencies WHERE generation = ?').get(generation) as { key: string | null }).key : null;
+    const dependency = input.kind === 'dependencies' && upperKey !== null
+      ? sqlite.prepare('SELECT cache_key AS key FROM history_media_dependencies WHERE generation = ? AND cache_key > ? AND cache_key <= ? ORDER BY cache_key LIMIT 1').get(generation, input.afterKey ?? '', upperKey) as { key: string } | undefined
+      : undefined;
     const target = input.kind === 'pending'
       ? sqlite.prepare(`SELECT id, source_kind AS kind, source_key AS key, chat_id AS chatId FROM history_pending_media
         WHERE generation = ? AND scheduled_seq IS NULL AND id > ? AND id <= ? ORDER BY id LIMIT 1`).get(generation, input.afterId, upper) as MediaTarget | undefined
@@ -175,11 +179,13 @@ export const createSourceObserver = (deps: {
         WHERE generation = ? AND source_kind = ? AND source_key = ? AND scheduled_seq IS NULL`).get(generation, input.kind, input.key) as MediaTarget | undefined;
     // A direct cache notification also observes already-complete keys. Pending
     // tracks missing dependencies, not whether a cache change is relevant.
-    const notification = target ?? (input.kind === 'image_alt_texts' ? { kind: input.kind, key: input.key, chatId: null } : undefined);
+    const notification: MediaTarget | undefined = dependency ? { kind: 'image_alt_texts', key: dependency.key, chatId: null }
+      : target ?? (input.kind === 'image_alt_texts' ? { kind: input.kind, key: input.key, chatId: null } : undefined);
     const commit = notification ? inspectMediaTarget(notification) : undefined;
     sqlite.transaction(() => {
       commit?.();
-      if (input.kind === 'pending' && target) sqlite.prepare('UPDATE history_build_inputs SET after_id = ?, upper_id = ? WHERE id = ?').run(target.id, upper, input.id);
+      if (dependency) sqlite.prepare('UPDATE history_build_inputs SET after_key = ?, upper_key = ? WHERE id = ?').run(dependency.key, upperKey, input.id);
+      else if (input.kind === 'pending' && target) sqlite.prepare('UPDATE history_build_inputs SET after_id = ?, upper_id = ? WHERE id = ?').run(target.id, upper, input.id);
       else sqlite.prepare('DELETE FROM history_build_inputs WHERE id = ?').run(input.id);
     })();
     return true;
@@ -191,7 +197,7 @@ export const createSourceObserver = (deps: {
       const pending = sqlite.prepare('SELECT count(*) AS count FROM history_pending_media WHERE generation = ?').get(generation) as { count: number };
       return {
         completedSourcePolls: state?.completedPolls ?? 0, lastSourcePollAtMs: state?.completedAtMs ?? null, sourceHighwaterIds: state?.afterIds ?? null, pollingSource: state && state.sourceIndex < sourceKinds.length ? sourceKinds[state.sourceIndex] : null, pendingMedia: pending.count,
-        buildInputBacklog: inbox.count(), mediaRecoveryActive: !!sqlite.prepare("SELECT 1 FROM history_build_inputs WHERE generation = ? AND source_kind = 'pending'").get(generation),
+        buildInputBacklog: inbox.count(), mediaRecoveryActive: !!sqlite.prepare("SELECT 1 FROM history_build_inputs WHERE generation = ? AND source_kind IN ('pending', 'dependencies')").get(generation),
       };
     },
     async step(discover = true): Promise<{ processedRows: number }> {
@@ -213,7 +219,6 @@ export const createSourceObserver = (deps: {
       }
       const row = await read(sourceKind, locator.id, locator.chatId);
       const observation = describeSource(row);
-      if (observation.targetIds.length + observation.taskIds.length > deps.maxStateEntries) throw new Error('History observation exceeds dependency budget; cursor unchanged');
       const next = { ...state, afterIds: { ...state.afterIds, [sourceKind]: locator.id } };
       const checkpoint = sqlite.prepare('SELECT upper_id AS value FROM history_checkpoints WHERE generation = ? AND chat_id = ? AND source_kind = ?').get(generation, observation.chatId, sourceKind) as { value: number } | undefined;
       const coveredByBootstrap = state.completedPolls === 0 && checkpoint && locator.id <= checkpoint.value;
