@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
-
 import type { Logger } from '@guiiai/logg';
 import sharp from 'sharp';
 
+import { hashBuffer } from './alt-text-cache';
 import { renderImageToTextSystemPrompt } from './image-to-text-prompt';
 import { callDescriptionLlm, createSemaphore } from './llm-description';
 import type { CanonicalAttachment } from '../adaptation/types';
@@ -23,12 +22,6 @@ export interface ImageToTextResolver {
   /** Hydrate altText on canonical attachments from cache/LLM (for cold-start replay). */
   hydrateCanonicalAttachments(attachments: CanonicalAttachment[], caption: string): Promise<void>;
 }
-
-const hashBuffer = (buffer: Buffer): string =>
-  createHash('sha256').update(buffer).digest('hex');
-
-export const computeThumbnailHash = (thumbnailWebp: string): string =>
-  hashBuffer(Buffer.from(thumbnailWebp, 'base64'));
 
 const prepareImageToTextBuffer = async (buffer: Buffer): Promise<Buffer> =>
   await sharp(buffer)

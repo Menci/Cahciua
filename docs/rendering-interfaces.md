@@ -46,7 +46,7 @@ The range defines output, not which events are sufficient to restore state. Repl
 
 The metadata is an explicit output contract. It carries identity, timestamp and message-state information without exporting an `ICNode`, its content tree or its cache revision. Sender/reply/forward and attachment metadata are copied into independent read-only snapshots. Attachment metadata contains descriptions and logical attributes, not thumbnail bytes. Runtime metadata carries task identity; system records need only the shared timeline metadata.
 
-`presentation.body` contains the complete existing message XML and runtime image handles. Rendering also prepares the header-only blocked form from the same attributes. These are display forms; Rendering does not read a block list or decide a consumer's window; it applies the explicit output range supplied by that consumer. Activation facts depend only on source content and the bot identity used by formatting.
+`transcript` contains full message body text/XML and untruncated reply snapshots for host-internal historical consumers, including deleted bodies. It has no image handles or bytes. Runtime `presentation.body` continues to use reply previews and deleted-message tombstones, with image handles where applicable. Rendering also prepares the header-only blocked form from the same attributes. These are display forms; Rendering does not read a block list or decide a consumer's window; it applies the explicit output range supplied by that consumer. Activation facts depend only on source content and the bot identity used by formatting.
 
 The IC node identity, revision comparison and cache entries are private to `createRenderer()`. Source and display-parameter changes invalidate records; view, summary, model and budget changes do not. Records and body arrays are read-only. Sharp handles are shared runtime resources; request codecs clone them before resize/encoding.
 
@@ -75,4 +75,4 @@ Driver holds its own input snapshot. Its metadata signal advances the model view
 
 ## Scope
 
-These interfaces provide independent state/window reuse, exercised by a simulated second consumer. They do not implement a history database, indexing queue, archival IDs, timeline extraction or a new storage schema. A consumer that needs additional archive metadata should receive an explicit contract extension at that seam rather than access Projection or renderer cache internals.
+The historical input consumer now uses these interfaces against real paginated archives; see [Historical archive input](history-input.md). Persistence supplies archival IDs/fingerprints, while history owns dependency state and JSON-safe upserts. A history database, indexing queue, worker and retrieval API remain deferred. Consumers do not access renderer cache internals or infer identity from XML.

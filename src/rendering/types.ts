@@ -57,6 +57,13 @@ export interface RenderedMessageMetadata extends RenderedMetadata {
 export interface RenderedMessageRecord {
   readonly kind: 'message';
   readonly metadata: RenderedMessageMetadata;
+  // Host-internal full transcript, including deleted bodies and full reply snapshots.
+  // Runtime presentation retains its existing preview/tombstone behavior.
+  readonly transcript: {
+    readonly text: string;
+    readonly xml: string;
+    readonly reply?: { readonly text: string; readonly xml: string };
+  };
   // Rendering owns both XML forms; consumers own the visibility decision.
   readonly presentation: {
     readonly body: readonly RenderedContentPiece[];

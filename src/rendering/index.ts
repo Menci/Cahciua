@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 
 import type { RenderParams, RenderedContentPiece, RenderedRecord, RenderedMessageRecord, RenderedMessageMetadata, RenderedAttachmentMetadata, BaseRenderedContext, RenderWindow } from './types';
+import { contentToPlainText } from '../adaptation';
 import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICNode, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
 
@@ -112,7 +113,7 @@ const hasMention = (nodes: ContentNode[], userId: string): boolean =>
 
 // --- ICNode → content pieces ---
 
-const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessageRecord, 'presentation' | 'activation'> => {
+const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessageRecord, 'presentation' | 'activation' | 'transcript'> => {
   const isMyself = !!(params.botUserId && msg.sender?.id === params.botUserId);
 
   const mentionsMe = !!(params.botUserId && hasMention(msg.content, params.botUserId));
@@ -139,12 +140,11 @@ const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessa
 
   const blocked: readonly RenderedContentPiece[] = Object.freeze([{ type: 'text', text: `<message ${attrs.join(' ')} blocked="true"/>` }]);
 
-  if (msg.deleted) {
-    attrs.push('deleted="true"');
-    return { presentation: Object.freeze({ blocked, body: Object.freeze([{ type: 'text' as const, text: `<message ${attrs.join(' ')}/>` }]) }), activation };
-  }
+  if (msg.deleted) attrs.push('deleted="true"');
 
   const parts: string[] = [];
+  const fullParts: string[] = [];
+  let reply: RenderedMessageRecord['transcript']['reply'];
 
   if (msg.replyToMessageId) {
     const replyAttrs = [`id="${escapeXml(msg.replyToMessageId)}"`];
@@ -159,13 +159,36 @@ const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessa
       inner = msg.replyToPreview ? escapeXml(msg.replyToPreview) : '';
     }
     parts.push(`<in-reply-to ${replyAttrs.join(' ')}>${inner}</in-reply-to>`);
+    const replyContent = msg.replyQuoteContent ?? msg.replyToContent;
+    reply = Object.freeze({
+      text: replyContent ? contentToPlainText(replyContent) : (msg.replyToPreview ?? ''),
+      xml: replyContent ? renderContent(replyContent) : escapeXml(msg.replyToPreview ?? ''),
+    });
+    fullParts.push(`<in-reply-to ${replyAttrs.join(' ')}>${reply.xml}</in-reply-to>`);
   }
 
   const body = renderContent(msg.content);
-  if (body) parts.push(body);
+  if (body) {
+    parts.push(body);
+    fullParts.push(body);
+  }
 
-  for (let i = 0; i < msg.attachments.length; i++)
-    parts.push(renderAttachment(msg.attachments[i]!, msg.messageId, i));
+  for (let i = 0; i < msg.attachments.length; i++) {
+    const attachment = renderAttachment(msg.attachments[i]!, msg.messageId, i);
+    parts.push(attachment);
+    fullParts.push(attachment);
+  }
+  const transcript = Object.freeze({
+    text: contentToPlainText(msg.content),
+    xml: `<message ${attrs.join(' ')}>\n${fullParts.join('\n')}\n</message>`,
+    reply,
+  });
+  if (msg.deleted) {
+    return {
+      transcript, activation,
+      presentation: Object.freeze({ blocked, body: Object.freeze([{ type: 'text' as const, text: `<message ${attrs.join(' ')}/>` }]) }),
+    };
+  }
 
   const pieces: RenderedContentPiece[] = [
     { type: 'text', text: `<message ${attrs.join(' ')}>\n${parts.join('\n')}\n</message>` },
@@ -177,7 +200,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessa
       pieces.push({ type: 'image', image: sharp(Buffer.from(att.thumbnailWebp, 'base64')) });
   }
 
-  return { presentation: Object.freeze({ body: Object.freeze(pieces), blocked }), activation };
+  return { presentation: Object.freeze({ body: Object.freeze(pieces), blocked }), activation, transcript };
 };
 
 const renderSystemEvent = (event: ICSystemEvent, contactNames?: Map<string, string>): string => {

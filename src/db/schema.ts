@@ -78,6 +78,7 @@ export const events = sqliteTable('events', {
 
   // message only (canonical string ID)
   replyToMessageId: text('reply_to_message_id'),
+  replyQuoteContent: text('reply_quote_content', { mode: 'json' }).$type<ContentNode[]>(),
   forwardInfo: text('forward_info', { mode: 'json' }).$type<CanonicalForwardInfo>(),
 
   // Bot's own sent messages — marked at creation time, not derived from sender ID
@@ -90,6 +91,7 @@ export const events = sqliteTable('events', {
   runtimeData: text('runtime_data', { mode: 'json' }).$type<RuntimeEventData>(),
 }, table => [
   index('events_chat_id_idx').on(table.chatId),
+  index('events_chat_received_idx').on(table.chatId, table.receivedAtMs, table.id),
 ]);
 
 export const turnResponses = sqliteTable('turn_responses', {
@@ -153,6 +155,7 @@ export const compactions = sqliteTable('compactions', {
   createdAt: integer('created_at').notNull(),
 }, table => [
   index('compactions_chat_id_idx').on(table.chatId),
+  index('compactions_chat_created_idx').on(table.chatId, table.createdAt, table.id),
 ]);
 
 export const probeResponses = sqliteTable('probe_responses', {

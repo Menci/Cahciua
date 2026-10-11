@@ -73,6 +73,12 @@ Driver owns the model segment contract in `context-types.ts`. Its pure `selectCo
 
 See [Rendering interfaces](rendering-interfaces.md) for contract examples, ownership and lifetime rules.
 
+## Historical Input
+
+`src/history/build-input.ts` is an independent archival consumer of Projection and Rendering, with its own IC, cache and output range. `src/db/history-archive.ts` captures per-chat/per-source ID fences and keyset-pages events, TR and compactions. History emits keyed saved-item upserts with stable archive references and original timeline positions. Rendering provides a full, image-free host-internal transcript separately from runtime previews/tombstones; explicit reply quotes now persist in events.
+
+The builder keeps all messages/users needed by future edits, deletes and reply snapshots, strips standalone service/runtime nodes after each page, and renders only changed projected messages. Total dependency memory remains proportional to one chat's history. Recovery replays from the origin; source cursors alone are insufficient. All summaries and readable IR tools/results survive independently of online compaction/masking/token transforms. No worker, query service or history database is registered. See [Historical archive input](history-input.md) for contracts, exact task association and limitations.
+
 ## Driver Context
 
 Turn responses persist provider-independent `ConversationEntry[]` plus:
