@@ -20,17 +20,18 @@ import { registerDriver } from './driver';
 import { loadEventsByMessageIds } from '../../db';
 import { createDriver } from '../../driver';
 import { renderOldMessagesXml } from '../../driver/read-old-messages';
+import { createHistoryAccess } from '../../history/access';
 import { createPipeline } from '../../pipeline';
 import type { Token } from '../tokens';
 import { TOKENS } from '../tokens';
 
 initLogger(LogLevel.Error, Format.Pretty);
 
-const fixture = () => {
+const fixture = (enabled = false) => {
   const pipeline = createPipeline({});
   const values = new Map<symbol, unknown>([
     [TOKENS.PIPELINE.symbol, pipeline],
-    [TOKENS.CONFIG.symbol, { history: { enabled: false } }],
+    [TOKENS.CONFIG.symbol, { history: { enabled } }],
     [TOKENS.RUNTIME_CONFIG.symbol, {}],
     [TOKENS.CHAT_IDS.symbol, []],
     [TOKENS.DB.symbol, {}],
@@ -40,6 +41,11 @@ const fixture = () => {
     [TOKENS.TELEGRAM_EVENT_SINK.symbol, {}],
     [TOKENS.TELEGRAM_CLIENTS.symbol, { bot: { raw: () => ({}), botUserId: () => 'bot' } }],
   ]);
+  const executeQuery = vi.fn();
+  if (enabled) {
+    values.set(TOKENS.HISTORY_ACCESS.symbol, createHistoryAccess({ enabled }));
+    values.set(TOKENS.HISTORY_RUNTIME.symbol, { executeQuery });
+  }
   const factories = new Map<symbol, () => unknown>();
   registerDriver({
     get: <T>(token: Token<T>): T => {
@@ -50,17 +56,25 @@ const fixture = () => {
   });
   factories.get(TOKENS.DRIVER.symbol)!();
   const deps = vi.mocked(createDriver).mock.calls.at(-1)![1];
-  return { pipeline, deps };
+  return { pipeline, deps, executeQuery };
 };
 
 it('keeps the existing read_old_messages backend available when the new history layer is disabled', () => {
   // HISTORY_ACCESS is deliberately absent: Driver must not depend on the new layer.
   const { pipeline, deps } = fixture();
+  expect(deps.historyQuery).toBeUndefined();
   expect(deps.readOldMessages('chat', ['42'])).toBe('<chatlog>old message</chatlog>');
   expect(loadEventsByMessageIds).toHaveBeenCalledWith({}, 'chat', ['42']);
   expect(renderOldMessagesXml).toHaveBeenCalledWith('chat', [], pipeline.getRenderParams(), {
     blockedUserIds: new Set(['blocked-user']),
   });
+});
+
+it('binds the enabled query runtime without changing the legacy archive backend', async () => {
+  const { deps, executeQuery } = fixture(true);
+  await deps.historyQuery!('chat', 'return 1');
+  expect(executeQuery).toHaveBeenCalledWith('chat', 'return 1');
+  expect(deps.readOldMessages('chat', ['42'])).toBe('<chatlog>old message</chatlog>');
 });
 
 it('maps Driver compaction to an online window only for a resident chat even while retrieval is disabled', () => {

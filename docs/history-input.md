@@ -1,12 +1,12 @@
 # Historical archive input, durable bootstrap and online synchronization
 
-Implemented scope: archive input construction and a resumable, bounded offline/bootstrap materialization into an independent, rebuildable `history.db`. The online writer, history-owned observation queue, reconciliation, bounded IPC and startup/shutdown lifecycle are implemented. Query worker/SDK, SQL guard and long-term memory remain deferred; see [the retrieval design](history-retrieval-design.md).
+Implemented scope: archive input construction and a resumable, bounded offline/bootstrap materialization into an independent, rebuildable `history.db`. The online writer, history-owned observation queue, reconciliation, bounded IPC and startup/shutdown lifecycle are implemented. The four-method query SDK, scoped SQL guard, QuickJS subprocess and Driver integration are implemented; long-term memory remains deferred. See [the query contract](history-query-sdk.md).
 
 `src/db/history-archive.ts` owns archive IDs, row fingerprints, per-chat fences and indexed keyset reads. `src/projection/dependencies.ts` declares the targets read by the pure reducer. `src/history/` owns sparse dependency restoration, shared rendering/IR expansion, saved items, history schema/migrations, atomic writer and bootstrap scheduling. These consumers do not read online Pipeline, Driver compaction residency, visibility transforms, Telegram clients or LLM transports.
 
 ## Asynchronous synchronization contract
 
-The [asynchronous synchronization design](history-sync-design.md) is now implemented for archive discovery, reliable rendering work and media completion delivery. The entire core path never waits for History, including durable-receipt ACKs. All durable tasks, dependencies, delivery recovery and backpressure belong to History. Shared rendering is scheduled by the History consumer; Pipeline no longer publishes rendering hints. Query workers/SDK, SQL guard and memory remain deferred.
+The [asynchronous synchronization design](history-sync-design.md) is now implemented for archive discovery, reliable rendering work and media completion delivery. The entire core path never waits for History, including durable-receipt ACKs. All durable tasks, dependencies, delivery recovery and backpressure belong to History. Shared rendering is scheduled by the History consumer; Pipeline no longer publishes rendering hints. Query workers/SDK and SQL guard are implemented; memory remains deferred.
 
 ## Standalone bootstrap
 
@@ -78,7 +78,7 @@ History TR decoding uses the shared codec with `omitCustomTypes: ['sharp']`. It 
 
 `history_items` stores the unchanged JSON-safe `HistoryItem` contract and indexed stable timeline columns. Full message text, reply snapshot, output text, tool name/arguments/completion summary, result payload text and every compaction summary form `search_text`. `history_fts` is an FTS5 external-content table with transactional insert/update/delete triggers in the initial migration. FTS indexes complete content, independent of token budgets and online compaction. The trigger DDL is intentional custom SQL alongside the generated Drizzle schema; future changes need a new history migration.
 
-These are private, unmasked data. Deleted bodies remain internal dependencies/search content; no public search/visibility policy is implemented here. A future query layer must apply current chat and visibility policy. The raw FTS index is shared across generations/chats; future queries must join/filter history_items to the requested scope. This change supplies no unrestricted model SQL interface.
+These remain private, unmasked data. Deleted bodies remain internal dependencies/search content. The query layer applies current chat/generation and conservative visibility policy before helpers, public SQL, JSON, FTS, counts and relations. Public FTS views join the shared index to allowed records; rank retains shared corpus statistics. Private schemas never enter the model SQL interface. See [history-query-sdk.md](history-query-sdk.md).
 
 Outgoing reply/output/tool/result edges are replaced on each stable-key upsert. A reply target can be absent from the observed archive; the explicit locator is retained without fabricating a target record. Ambiguous tool pairing emits no invented call/result edges. Task completion stores the full event locator, fingerprint, task metadata and summary in its uniquely identified tool item. Notices persist separately. Relationships do not infer wakeup causality, previous summaries or summary source rows.
 
@@ -94,7 +94,7 @@ The deployed source schema does not persist explicit reply quotes. History retai
 
 A repeatable scale fixture grows from 300 to 3,000 unique messages/users. A standalone run measured 2 peak dependency lookups for both sizes and 3,252 / 3,305 encoded workspace bytes, with approximately 0.64 / 6.41 seconds of build time. Sampled process RSS was 217,415,680 / 154,173,440 bytes and includes fixture setup, loaded dependencies and allocator/GC effects; it is not the workspace byte limit. These measurements separate dependency residency from SQL page size and total RSS. They are fixture evidence, not production archive benchmarking.
 
-Deferred: generation promotion/cleanup, query authorization/SQL guard, search/thread/context/sql SDK, long-term memory and vector/complex retrieval. Offline bootstrap and online synchronization have separate generations/progress; completing the writer does not complete the deferred retrieval design.
+Deferred: generation promotion/cleanup, new compaction provenance, long-term memory and vector/complex retrieval. Query authorization/SQL guard, search/thread/context/sql SDK and resource-bounded CodeAct are implemented. Offline bootstrap and online synchronization have separate generations/progress; completing the writer does not complete the deferred retrieval design.
 
 ## Online ownership and progress
 
@@ -127,7 +127,7 @@ history:
   enabled: false
 ```
 
-Omitting the section or `enabled` means false; only actual booleans are accepted. This is global, not a per-chat override, and changing it takes effect after restart. `HISTORY_ACCESS` captures this startup setting in a shared `HistoryAccess` capability. Runtime startup/notifications check it. Future history query workers, SDK/API adapters, tools and their prompt instructions must use that same capability when exposing/constructing services and execute reads through `HistoryAccess.run()`, which rejects disabled calls before any lookup. The existing `read_old_messages` tool is outside this independent layer; its registration and original archive backend are unaffected. They cannot accept an enable flag from the model or environment.
+Omitting the section or `enabled` means false; only actual booleans are accepted. This is global, not a per-chat override, and changing it takes effect after restart. `HISTORY_ACCESS` captures this startup setting in a shared `HistoryAccess` capability. Runtime startup/notifications check it. History query workers, SDK/API adapters, tools and their prompt instructions use that same capability when exposing/constructing services and execute reads through `HistoryAccess.run()`, which rejects disabled calls before any lookup. The existing `read_old_messages` tool is outside this independent layer; its registration and original archive backend are unaffected. They cannot accept an enable flag from the model or environment.
 
 When disabled, worker options/environment overrides are not resolved, no child/restart timer or notification payload is created, and history.db is not opened/created. The core archive continues its existing writes; history leaves no source instrumentation. Existing history progress is retained, and ID discovery and finite pending recovery resume when enabled again. Driver context construction/compaction are separate core functions. Standalone CLI/acceptance commands are explicitly invoked operator workflows, independent of the running bot's feature exposure. This is a feature gate for host-provided history services, not an OS file-access sandbox for general bash tools.
 
@@ -150,7 +150,7 @@ Status reads history.db read-only with no query SDK: per-source fences/keysets/s
 
 Shutdown first cancels new post-startup work and ingress retry/commit publication, stops Driver/background producers/Telegram, disables late media persistence, then stops asynchronous delivery and asks the child to finish its current small transaction. After 2 seconds the supervisor kills a stuck child and waits for its exit. It never drains backlog. Saved task/consume/bootstrap progress and history-owned source locators remain recoverable; DB connections close after producers and worker. Tests exercise late transforms/backfills and prevent callbacks writing after shutdown.
 
-The history-owned observation queue is deliberately **not pruned** in this release. Long outages and sustained production grow disk usage. Old generations also remain on disk; promotion/cleanup are future maintenance work. Query authorization, raw SQL guard, query process/SDK, memory, ranking and vectors are not implemented and internal unmasked content is never exposed to model/Telegram by this pipeline.
+The history-owned observation queue is deliberately **not pruned** in this release. Long outages and sustained production grow disk usage. Old generations also remain on disk; promotion/cleanup are future maintenance work. Query authorization, raw SQL guard, native FTS ranking and disposable query processes/SDK are implemented. Memory and vectors remain deferred; internal unmasked rows are never exposed directly. Migration 0007 adds execution metadata, rebuilds FTS as trigram and enqueues bounded online metadata refresh. It changes only history.db, not the source schema.
 
 媒体缓存通知与普通编辑的恢复策略不同：普通编辑复用已物化节点；媒体缓存通知定向重建有效原始内容与回复时快照后重新 hydration，避免已保存的派生描述压过当前缓存选择。原始描述/贴纸字段保持来源语义，无需修改来源库或 History schema。
 

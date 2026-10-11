@@ -53,12 +53,14 @@ export type ArchivedConversationEntry = OutputMessage
 export interface ArchivedTurn extends ArchiveValue {
   readonly entries: readonly ArchivedConversationEntry[];
   readonly modelName: string;
+  readonly usage?: { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens: number; readonly cacheWriteTokens: number };
 }
 export interface ArchivedCompaction extends ArchiveValue {
   readonly summary: string;
   readonly oldCursorMs: number;
   readonly newCursorMs: number;
   readonly createdAtMs: number;
+  readonly usage?: { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens: number; readonly cacheWriteTokens: number };
 }
 export interface ArchivePage<T> {
   readonly rows: readonly T[];
@@ -83,13 +85,20 @@ const indexedColumns = <T extends SQLiteTable>(table: T) => Object.fromEntries(
 
 // SQLite measures encoded rows before JSON/IR/Sharp decoding. The size query and
 // fetch share a short snapshot, released before asynchronous TR decoding.
+export class HistorySourceBudgetError extends Error {
+  constructor(maxBytes: number) {
+    super(`History source exceeds encoded byte budget (${maxBytes}); cursor unchanged`);
+    this.name = 'HistorySourceBudgetError';
+  }
+}
+
 const checkBytes = (db: Pick<DB, 'select'>, table: SQLiteTable, condition: SQL | undefined, order: SQL[], indexName: string | undefined, limit: number, maxBytes?: number): number[] | undefined => {
   if (maxBytes === undefined) return undefined;
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('History maxBytes must be a positive safe integer');
   const columns = Object.values(getTableColumns(table));
   const size = sql<number>`${sql.join(columns.map(column => sql`coalesce(octet_length(${column}), 0)`), sql` + `)} + 1024`;
   const sizes = db.select({ bytes: size }).from(indexName ? sql`${table} indexed by ${sql.identifier(indexName)}` : table).where(condition).orderBy(...order).limit(limit).all();
-  if (sizes.reduce((total, row) => total + row.bytes, 0) > maxBytes) throw new Error(`History source exceeds encoded byte budget (${maxBytes}); cursor unchanged`);
+  if (sizes.reduce((total, row) => total + row.bytes, 0) > maxBytes) throw new HistorySourceBudgetError(maxBytes);
   return sizes.map(row => row.bytes);
 };
 
@@ -143,6 +152,7 @@ export const createHistoryArchive = (db: DB) => ({
         encodedBytes: byteSizes?.[index],
         entries: await codec.parse(row.entries, { omitCustomTypes: ['sharp'] }) as ArchivedConversationEntry[],
         modelName: row.modelName,
+        usage: { inputTokens: row.inputTokens, outputTokens: row.outputTokens, cacheReadTokens: row.cacheReadTokens, cacheWriteTokens: row.cacheWriteTokens },
       });
     }
     return page(decoded, limit);
@@ -167,6 +177,7 @@ export const createHistoryArchive = (db: DB) => ({
       oldCursorMs: row.oldCursorMs,
       newCursorMs: row.newCursorMs,
       createdAtMs: row.createdAt,
+      usage: { inputTokens: row.inputTokens, outputTokens: row.outputTokens, cacheReadTokens: row.cacheReadTokens, cacheWriteTokens: row.cacheWriteTokens },
     })), limit);
   },
 });

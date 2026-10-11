@@ -1,0 +1,59 @@
+{
+  "runtime": "v22.23.3",
+  "builtBuilder": true,
+  "builtQueryWorker": true,
+  "defaultBuilderLimits": true,
+  "counts": {
+    "events": 1408,
+    "turn_responses_v2": 310,
+    "compactions": 1
+  },
+  "chats": 4,
+  "expectedItems": 2189,
+  "mismatches": 0,
+  "publicCounts": [
+    {
+      "kind": "assistant_text",
+      "n": 292
+    },
+    {
+      "kind": "message",
+      "n": 764
+    },
+    {
+      "kind": "summary",
+      "n": 2
+    },
+    {
+      "kind": "tool_call",
+      "n": 381
+    },
+    {
+      "kind": "tool_result",
+      "n": 381
+    }
+  ],
+  "hostSqlAndFtsAgreement": true,
+  "helperMethods": 4,
+  "summaryNavigation": true,
+  "policyRebinding": true,
+  "deniedAttacks": 8,
+  "queryMs": 650.626685999996,
+  "snapshotConsistency": true,
+  "writerProgressDuringQuery": true,
+  "writerProgressDuringNativeSql": true,
+  "timeoutMs": 1504.941549999996,
+  "processDeadlineMs": 1500,
+  "processReleased": true,
+  "walCheckpoint": [
+    {
+      "busy": 0,
+      "log": 0,
+      "checkpointed": 0
+    }
+  ],
+  "integrity": "ok",
+  "schemaBefore": "5e84afb719b4e285680de226a72682ce3fc4fc3dd4148da8211c7580ecabbfa7",
+  "schemaAfter": "5e84afb719b4e285680de226a72682ce3fc4fc3dd4148da8211c7580ecabbfa7",
+  "productionModified": false
+}

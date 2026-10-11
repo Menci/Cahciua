@@ -1,6 +1,6 @@
 # Cahciua 历史回查层实现草案
 
-状态：2026-10-10 异步同步架构及对应代码已改造。第 3、6 节描述同步职责，完整规则见 [history-sync-design.md](history-sync-design.md)，实现契约见 [history-input.md](history-input.md)。可靠媒体接收/恢复已替换 rendering hint 与正常 pending 轮询。查询进程、SQL guard/SDK、CodeAct 和 memory 仍未实现。
+状态：2026-10-10 异步同步架构及对应代码已改造。第 3、6 节描述同步职责，完整规则见 [history-sync-design.md](history-sync-design.md)，实现契约见 [history-input.md](history-input.md)。可靠媒体接收/恢复已替换 rendering hint 与正常 pending 轮询。2026-10-11 已实现第 4 阶段四方法 SDK、公开作用域视图、完整 SQLite AST guard，以及 QuickJS 独立查询进程、Driver CodeAct、预算与关闭生命周期。准确实现契约见 [history-query-sdk.md](history-query-sdk.md)。精确 compaction refs/父摘要、memory 和全量共享组装模块仍未实现，不能把已完成查询层视为整个设计完成。
 
 历史回查的三个主要归档来源是 events、TR 和 compactions。聊天消息、模型输出及工具执行组成连续对话，compaction 摘要则作为压缩后的历史关键节点，帮助模型定位较长时间范围内的话题、决定和执行结果，再展开原始证据。摘要是提高历史回查召回率的核心入口，不能只作为 replay 的辅助数据处理。
 
@@ -471,17 +471,17 @@ FTS 公开视图/宿主受控解析须支持上述 SQL 用法，保留 MATCH 所
 
 ## 10 工具后续记录与 Driver 接入
 
-本设计中的独立回查层由顶层 `config.yaml` 的 `history.enabled` 控制，默认 false，重启后生效，不提供群级覆盖。DI 提供唯一 `HISTORY_ACCESS`；builder/query worker、tools、agent API/SDK 和相关 prompt 说明的注册/构造受它控制，后端执行通过 `HistoryAccess.run()` 再检查，不能只隐藏工具 schema，也不能由 agent 参数或环境变量打开。已有 `read_old_messages` 不属于本设计的回查层，其注册和原有归档读取不受此开关影响。关闭时不解析 builder options、不启动/重启历史 child、不创建 history.db 或启动通知链路；基础归档、Driver compaction 和 history 已保存进度保留，使重新开启能补齐停用期间的变更。独立 operator CLI/验收仍为明确手动调用，不是 bot 暴露给 agent 的入口。未来 query 服务接入时必须遵守这个 capability 边界；当前查询 SDK/API 尚未实现。
+本设计中的独立回查层由顶层 `config.yaml` 的 `history.enabled` 控制，默认 false，重启后生效，不提供群级覆盖。DI 提供唯一 `HISTORY_ACCESS`；builder/query worker、tools、agent API/SDK 和相关 prompt 说明的注册/构造受它控制，后端执行通过 `HistoryAccess.run()` 再检查，不能只隐藏工具 schema，也不能由 agent 参数或环境变量打开。已有 `read_old_messages` 不属于本设计的回查层，其注册和原有归档读取不受此开关影响。关闭时不解析 builder options、不启动/重启历史 child、不创建 history.db 或启动通知链路；基础归档、Driver compaction 和 history 已保存进度保留，使重新开启能补齐停用期间的变更。独立 operator CLI/验收仍为明确手动调用，不是 bot 暴露给 agent 的入口。查询服务现已按此 capability 边界接入，关闭时 Driver 不解析历史服务依赖。
 
 `send_message` 成功结果里的最终 message_id 建立调用 → 消息关系。后台 bash 返回的 background_task_id 建立调用 → 后台执行关系，完成后附加 completion 摘要与状态；同步 result 保留当时返回的内容，不能被后来完成记录替换。
 
 关联必须来自明确 ID 并校验群。不按相同正文或时间邻近猜测，不对所有工具 JSON 做通用递归关联。后台完整输出沿用 read_task_output，不公开服务器文件路径；同步工具当时没有保存的输出不能由索引恢复。
 
-第一版入口为 `history_query({ code })`，Driver 提供当前 chatId，内部执行接口为 `executeQuery({ chatId, code, limits })`。入口只是 CodeAct 的传输适配器，能力来自 SDK；不增加一组参数受限的搜索/读取工具。若以后需要 bash CLI，复用同一服务并通过宿主授予的会话绑定群，不能由脚本自选 --chat-id 获得权限。
+第一版入口为 `history_query({ code })`，Driver 提供当前 chatId，内部执行接口为宿主服务 `executeQuery(chatId, code)`，limits 由服务构造时绑定。入口只是 CodeAct 的传输适配器，能力来自 SDK；不增加一组参数受限的搜索/读取工具。若以后需要 bash CLI，复用同一服务并通过宿主授予的会话绑定群，不能由脚本自选 --chat-id 获得权限。
 
 Primary prompt 提供短 SDK 说明、公开 schema 和少量示例。查询代码与返回结果沿现有 tool call/result 持久化，requiresFollowUp=true，mandatory send 与 step 边界中断语义保持不变。Probe 仍只有 decide，不增加自动 pre-probe 检索。
 
-Compaction 专用输入通过共同 provenance 给消息、输出、工具结构和既有摘要附引用，不修改原 IR 的 toolCall 参数，不把来源标记写入 IC。生成请求记录实际使用的 previous summary ID；新摘要保留关键证据引用和继承引用。核心 compaction 保持原有持久化和 metadata signal 更新，builder 独立只读观察并物化。模型输入中的 summary user message 仍只是一种 transform 展示，不新增 events/TR 归档。后续 memory 可保存这些 source 引用；本次不实现 memory 写入。
+后续尚未实现的 compaction provenance 设计：Compaction 专用输入通过共同 provenance 给消息、输出、工具结构和既有摘要附引用，不修改原 IR 的 toolCall 参数，不把来源标记写入 IC。生成请求记录实际使用的 previous summary ID；新摘要保留关键证据引用和继承引用。核心 compaction 保持原有持久化和 metadata signal 更新，builder 独立只读观察并物化。模型输入中的 summary user message 仍只是一种 transform 展示，不新增 events/TR 归档。后续 memory 可保存这些 source 引用；本次不实现 memory 写入。
 
 `read_old_messages` 的历史消息恢复和 rendering 与新模块共享，但工具本身不属于新回查层，不受 `history.enabled` 控制。本次保留其现有注册和调用行为，不维护第二套状态重建规则。
 
@@ -494,8 +494,8 @@ Startup 沿用核心流程，启用 history 时启动独立分支；主进程不
 | 1 解耦 effect 与共用表示 | Rendering/transform 分离、消息级结果、稳定身份、时间线及工具配对 | Cursor 更新不重新 rendering，实时模型语义保持，缓存有界 |
 | 2 独立检索库 | Transcript、工具/摘要关系、FTS 与迁移 | 消息更新不移位、FTS 去掉旧正文、完整工具结构 |
 | 3 独立 consumer | History 可靠任务、媒体完成通知、恢复核对、bootstrap/consume cursor | 首次历史无遗漏、主进程不等待、积压恢复无 peak、故障与定向媒体补齐 |
-| 4 查询 SDK | Helpers、公开 schema、作用域视图、SQL guard | 常见任务无需 SQL，特殊查询表达力完整，跨群不可读 |
-| 5 CodeAct 与来源闭环 | 脚本运行、Driver 接入、compaction refs | 资源限制、mandatory send、来源回查和生命周期 |
+| 4 查询 SDK（已完成） | Helpers、公开 schema、作用域视图、SQL guard | 常见任务无需 SQL，特殊查询表达力完整，跨群不可读 |
+| 5 CodeAct 与来源闭环（部分完成） | 脚本运行、Driver 接入已完成；精确 compaction refs 尚未记录 | 资源限制、mandatory send、来源回查和生命周期 |
 
 应先为高风险的 Projection/Rendering/Driver/persistence 边界补 characterization tests，再提取共享模块。测试使用实际归档形状，不用与实现同构的 mock 代替。
 

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { renderMarkdownString } from '@velin-dev/core-vue';
 
+import { historyQueryInstructions } from '../history/query/instructions';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const basePath = resolve(__dirname, '../../package.json');
 
@@ -31,14 +33,17 @@ export type PromptMode = 'primary' | 'probe';
 
 export const renderSystemPrompt = async (params: {
   mode: PromptMode;
+  historyQueryEnabled?: boolean;
   modelName: string;
   currentChannel?: string;
   chatId: string;
   chatTitle?: string;
   systemFiles?: { filename: string; content: string }[];
 }) => {
-  const { rendered } = await renderMarkdownString(systemPromptTemplate, params, basePath);
-  return cleanVelinOutput(rendered);
+  const { historyQueryEnabled, ...templateParams } = params;
+  const { rendered } = await renderMarkdownString(systemPromptTemplate, templateParams, basePath);
+  const prompt = cleanVelinOutput(rendered);
+  return params.mode === 'primary' && historyQueryEnabled ? `${prompt}\n\n${historyQueryInstructions}` : prompt;
 };
 
 export const renderLateBindingPrompt = async (params: {

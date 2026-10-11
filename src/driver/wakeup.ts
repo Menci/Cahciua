@@ -140,8 +140,10 @@ export const executeWakeup = async (params: {
   }
 
   try {
+    const tools = params.createTools();
     const system = await renderSystemPrompt({
       mode: 'primary',
+      historyQueryEnabled: tools.some(tool => tool.name === 'history_query'),
       currentChannel: 'telegram',
       modelName: params.chatConfig.primary.model.model,
       chatId: params.chatId,
@@ -155,7 +157,6 @@ export const executeWakeup = async (params: {
       activeBackgroundTasks: backgroundTasks,
       ...(probeReason ? { probeReason } : {}),
     }));
-    const tools = params.createTools();
 
     const persistStep = async (
       entries: TurnResponseV2['entries'],

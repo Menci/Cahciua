@@ -19,7 +19,7 @@ export const summaryItem = (row: ArchivedCompaction): HistoryItem => ({
   kind: 'summary', key: historyKey(row.ref.chatId, 'summary', row.ref.id), chatId: row.ref.chatId,
   source: row.ref, sourceRevision: row.revision,
   order: { timeMs: row.createdAtMs, sourceOrder: 2, sourceId: row.ref.id, entryIndex: -1, partIndex: -1 },
-  summary: row.summary, compactionId: row.ref.id, createdAtMs: row.createdAtMs,
+  summary: row.summary, compactionId: row.ref.id, createdAtMs: row.createdAtMs, usage: row.usage,
   coverage: { fromReceivedAtMs: row.oldCursorMs, untilReceivedAtMs: row.newCursorMs },
 });
 
@@ -159,7 +159,7 @@ export const buildHistorySlice = async (deps: BootstrapDeps): Promise<BootstrapS
           // Source preflight includes encoded images. Historical decoding omits
           // their custom values; saved items retain positions without media handles.
           plan = {
-            generation, expected, observation: row ? describeSource(row) : undefined, batch: {
+            generation, expected, execution: row, observation: row ? describeSource(row) : undefined, batch: {
               changes: items.map(item => ({ operation: 'upsert', item })), notices: [],
               progress: { bounds: expected.bounds, source, after: page.next ?? expected.after, done: page.done },
             },

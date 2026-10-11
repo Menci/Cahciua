@@ -7,7 +7,7 @@ export class HistoryDisabledError extends Error {
   }
 }
 
-// One process-wide capability for the independent history layer. Future query
+// One process-wide capability for the independent history layer. Query
 // tools/APIs and their backends share it; worker overrides cannot enable it.
 export const createHistoryAccess = ({ enabled }: HistoryConfig) => Object.freeze({
   enabled,

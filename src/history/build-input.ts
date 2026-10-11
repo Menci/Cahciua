@@ -103,7 +103,7 @@ export const buildHistoryInput = async function* (deps: {
         kind: 'summary', key: historyKey(chatId, 'summary', row.ref.id), chatId,
         source: row.ref, sourceRevision: row.revision,
         order: { timeMs: row.createdAtMs, sourceOrder: 2, sourceId: row.ref.id, entryIndex: -1, partIndex: -1 },
-        summary: row.summary, compactionId: row.ref.id, createdAtMs: row.createdAtMs,
+        summary: row.summary, compactionId: row.ref.id, createdAtMs: row.createdAtMs, usage: row.usage,
         coverage: { fromReceivedAtMs: row.oldCursorMs, untilReceivedAtMs: row.newCursorMs },
       },
     }));

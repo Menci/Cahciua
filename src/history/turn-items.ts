@@ -64,6 +64,7 @@ export const buildTurnItems = (turn: ArchivedTurn, maxItems = Infinity): History
     const output: HistoryOutput = {
       ...base(entryIndex), key: key(entryIndex), kind: 'model-output', entryIndex,
       modelName: turn.modelName, parts, toolKeys,
+      omitted: { images: false, reasoning: entry.reasoning !== undefined || entry.parts.some(part => part.kind === 'reasoning') },
     };
     if (parts.length > 0 || toolKeys.length > 0) addItem(output);
   }

@@ -17,3 +17,5 @@ export { createSleepTool } from './sleep';
 export type { CahciuaTool } from './types';
 export { createWebFetchTool } from './web-fetch';
 export { createWebSearchTool } from './web-search';
+
+export { createHistoryQueryTool } from './history-query';

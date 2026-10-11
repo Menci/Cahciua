@@ -42,6 +42,7 @@ export interface HistoryOutput extends HistoryBase {
   readonly modelName: string;
   readonly parts: readonly HistoryText[];
   readonly toolKeys: readonly string[];
+  readonly omitted?: { readonly images: boolean; readonly reasoning: boolean };
 }
 export interface HistoryTool extends HistoryBase {
   readonly kind: 'tool-execution';
@@ -77,6 +78,7 @@ export interface HistorySummary extends HistoryBase {
   readonly compactionId: number;
   readonly createdAtMs: number;
   readonly coverage: { readonly fromReceivedAtMs: number; readonly untilReceivedAtMs: number };
+  readonly usage?: import('../db/history-archive').ArchivedCompaction['usage'];
 }
 export type HistoryItem = HistoryMessage | HistoryOutput | HistoryTool | HistoryResult | HistorySummary;
 export interface HistoryChange {

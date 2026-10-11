@@ -176,3 +176,12 @@ export const buildInputs = sqliteTable('history_build_inputs', {
   uniqueIndex('history_build_inputs_key').on(t.generation, t.sourceKind, t.sourceKey),
   index('history_build_inputs_order').on(t.generation, t.id),
 ]);
+
+export const executions = sqliteTable('history_executions', {
+  generation: text('generation').notNull(),
+  chatId: text('chat_id').notNull(),
+  sourceId: integer('source_id').notNull(),
+  timeMs: integer('time_ms').notNull(),
+  modelName: text('model_name').notNull(),
+  usage: text('usage_json', { mode: 'json' }).$type<import('../db/history-archive').ArchivedTurn['usage']>(),
+}, t => [primaryKey({ columns: [t.generation, t.chatId, t.sourceId] })]);

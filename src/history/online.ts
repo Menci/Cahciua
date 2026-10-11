@@ -93,10 +93,12 @@ export const createOnlineHistoryBuilder = (deps: {
         .all(generation, seq, Number(task.sourceKey), Math.min(limits.maxRowsPerSlice, limits.maxStateEntries)) as { ordinal: number; id: string }[];
       if (targets.length) {
         nextKey = String(targets.at(-1)!.ordinal + 1);
-        plan = { ...plan, tasks: targets.flatMap(target => {
-          budget.entry();
-          return [taskValue(task.chatId, 'message', target.id), taskValue(task.chatId, 'replies', JSON.stringify([target.id, -Number.MAX_SAFE_INTEGER, 0]))];
-        }) };
+        plan = {
+          ...plan, tasks: targets.flatMap(target => {
+            budget.entry();
+            return [taskValue(task.chatId, 'message', target.id), taskValue(task.chatId, 'replies', JSON.stringify([target.id, -Number.MAX_SAFE_INTEGER, 0]))];
+          }),
+        };
       }
     } else if (task.kind === 'cache') {
       const [cacheKey, afterChat, afterMessage] = JSON.parse(task.sourceKey) as [string, string, string];
@@ -175,7 +177,7 @@ export const createOnlineHistoryBuilder = (deps: {
           if (id !== undefined) taskIds.add(id);
         }
         const runtimeTasks = [...taskIds].map(id => taskValue(task.chatId, 'completion', JSON.stringify([id, ''])));
-        plan = { ...plan, replaceTurnId: Number(task.sourceKey), tasks: runtimeTasks, changes: items.map(item => ({ operation: 'upsert', item })) };
+        plan = { ...plan, execution: row, replaceTurnId: Number(task.sourceKey), tasks: runtimeTasks, changes: items.map(item => ({ operation: 'upsert', item })) };
       }
     } else {
       const row = archive.readCompactions({ bounds, exactId: Number(task.sourceKey), limit: 1, maxBytes: sourceBytes }).rows[0];

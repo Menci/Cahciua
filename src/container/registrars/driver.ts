@@ -135,6 +135,7 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       loadMessageAttachments: (chatId, messageId) => loadMessageAttachments(db, chatId, messageId),
       messageExists: (chatId, messageId) => messageExists(db, chatId, messageId),
       downloadMessageMedia: telegram.downloadMessageMedia,
+      historyQuery: config.history.enabled && get(TOKENS.HISTORY_ACCESS).enabled ? get(TOKENS.HISTORY_RUNTIME).executeQuery : undefined,
       readOldMessages: (chatId, messageIds) =>
         renderOldMessagesXml(chatId, loadEventsByMessageIds(db, chatId, messageIds), pipeline.getRenderParams(), { blockedUserIds: new Set(resolveChatConfig(config, chatId).blockedUserIds) }),
       resolveModel: name => resolveModel(config, name),

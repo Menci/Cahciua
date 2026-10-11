@@ -8,7 +8,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
-import type { ArchivedEvent, HistoryArchiveBounds, HistorySource } from '../db/history-archive';
+import type { ArchivedTurn, ArchivedEvent, HistoryArchiveBounds, HistorySource } from '../db/history-archive';
 import type { ICMessage, ICUserState } from '../projection';
 import type { WorkspaceBudget } from './budget';
 import { messageRevision } from './message-items';
@@ -18,7 +18,7 @@ import type { MessageRevisionRange } from './message-revisions';
 import * as schema from './schema';
 import { writeSourceObservation } from './source-observer';
 import type { SourceObservation } from './source-observer';
-import { startedTaskId } from './task-items';
+import { sentMessageId, startedTaskId } from './task-items';
 import { historyKey } from './turn-items';
 import type { HistoryBatch, HistoryItem, HistoryTool } from './types';
 
@@ -38,6 +38,7 @@ export interface HistoryMaterialization {
   readonly event?: ArchivedEvent;
   readonly revisionRange?: MessageRevisionRange;
   readonly replaceTurnId?: number;
+  readonly execution?: ArchivedTurn;
   readonly tasks?: readonly { taskKey: string; chatId: string; kind: typeof schema.consumeTasks.$inferSelect['kind']; sourceKey: string }[];
   readonly dependencies?: readonly { messageId: string; cacheKeys: readonly string[] }[];
 }
@@ -129,6 +130,12 @@ export const openHistoryStore = (path: string, migrationsFolder = resolve('histo
     };
     const writeMaterialization = (tx: Parameters<Parameters<typeof db.transaction>[0]>[0], plan: HistoryMaterialization, chatId: string, changes: HistoryBatch['changes'], notices: HistoryBatch['notices'], isConsume = false): void => {
       const { generation } = plan;
+      if (plan.execution) {
+        const row = plan.execution;
+        if (row.ref.chatId !== chatId) throw new Error('Historical execution scope mismatch');
+        tx.insert(schema.executions).values({ generation, chatId, sourceId: row.ref.id, timeMs: row.key.timeMs, modelName: row.modelName, usage: row.usage })
+          .onConflictDoUpdate({ target: [schema.executions.generation, schema.executions.chatId, schema.executions.sourceId], set: { timeMs: row.key.timeMs, modelName: row.modelName, usage: row.usage } }).run();
+      }
       if (plan.replaceTurnId !== undefined) {
         const keys = tx.select({ key: schema.savedItems.key }).from(schema.savedItems).where(and(scope(generation, chatId), eq(schema.savedItems.sourceOrder, 1), eq(schema.savedItems.sourceId, plan.replaceTurnId)));
         tx.delete(schema.taskStarts).where(and(eq(schema.taskStarts.generation, generation), eq(schema.taskStarts.chatId, chatId), sql`${schema.taskStarts.toolKey} IN (${keys})`)).run();
@@ -153,6 +160,8 @@ export const openHistoryStore = (path: string, migrationsFolder = resolve('histo
         if (item.kind !== 'tool-result' || !item.toolKey) continue;
         const tool = tools.get(item.toolKey);
         if (!tool) throw new Error('Missing historical tool start');
+        const sentId = sentMessageId(tool, item);
+        if (sentId !== undefined) tx.insert(schema.relations).values({ generation, chatId, fromKey: tool.key, toKey: historyKey(chatId, 'message', sentId), kind: 'sent-message' }).onConflictDoNothing().run();
         const taskId = startedTaskId(tool, item);
         if (taskId !== undefined) tx.insert(schema.taskStarts).values({ generation, chatId, taskId, toolKey: tool.key }).onConflictDoNothing().run();
       }

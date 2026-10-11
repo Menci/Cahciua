@@ -50,6 +50,13 @@
       "when": 1791662730264,
       "tag": "0006_bounded_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791729129394,
+      "tag": "0007_same_electro",
+      "breakpoints": true
     }
   ]
 }
