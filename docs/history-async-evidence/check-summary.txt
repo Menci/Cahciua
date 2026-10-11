@@ -1,0 +1,10 @@
+Node 22; isolated existing dependency image; networking disabled; CPU 1; memory 1536 MiB.
+pnpm typecheck: PASS
+pnpm lint:fix: PASS
+pnpm test:run --maxWorkers=1 --no-file-parallelism --testTimeout=60000: PASS (54 files, 531 tests)
+pnpm build: PASS (bot and independent history-worker)
+Core Drizzle schema generation: no changes
+History Drizzle schema generation: no changes after migration 0004
+Four measured million-token scenarios: PASS, no body/reply/search mismatches
+Production container running, restart count 0, original image/start time retained; configuration SHA-256 unchanged.
+Real archive snapshot + SIGKILL/resume + controlled append: PASS (1057 seed events, 196 seed TRs, 1529 expected items, 4 chats, 0 mismatches, integrity ok, full source rows/schema unchanged).

@@ -18,12 +18,15 @@ export const changedMessageIds = (row: ArchivedEvent): readonly string[] => {
   return event.type === 'message' || event.type === 'edit' ? [event.messageId] : event.type === 'delete' ? event.messageIds : [];
 };
 
+export const messageRevision = (previous: string | undefined, archiveRevision: string): string =>
+  createHash('sha256').update(JSON.stringify([previous, archiveRevision])).digest('hex');
+
 export const updateMessageSource = (previous: MessageSource | undefined, row: ArchivedEvent): MessageSource | undefined => {
   if (!previous && row.event.type !== 'message') return undefined;
   return {
     origin: previous?.origin ?? row.ref,
     changedBy: row.ref,
-    revision: createHash('sha256').update(JSON.stringify([previous?.revision, row.revision])).digest('hex'),
+    revision: messageRevision(previous?.revision, row.revision),
   };
 };
 
@@ -35,7 +38,8 @@ export const buildMessageItems = (ic: IntermediateContext, sources: ReadonlyMap<
       fromReceivedAtMs: times.reduce((min, time) => Math.min(min, time)),
       untilReceivedAtMs: times.reduce((max, time) => Math.max(max, time)) + 1,
     };
-    return renderer.render(ic, params, window).flatMap(record => {
+    const records = renderer.render(ic, params, window);
+    return records.flatMap(record => {
       if (record.kind !== 'message') return [];
       const source = sources.get(record.metadata.messageId);
       if (!source) throw new Error('Missing historical message provenance');

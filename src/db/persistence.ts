@@ -171,7 +171,6 @@ export const persistEvent = (db: DB, event: PipelineEvent) => {
       content: event.content.length > 0 ? event.content : null,
       attachments: event.attachments.length > 0 ? event.attachments : null,
       replyToMessageId: event.type === 'message' ? (event.replyToMessageId ?? null) : null,
-      replyQuoteContent: event.type === 'message' ? (event.replyQuoteContent ?? null) : null,
       forwardInfo: event.type === 'message' ? (event.forwardInfo ?? null) : null,
       isSelfSent: event.type === 'message' ? (event.isSelfSent ?? null) : null,
     }).run();
@@ -205,7 +204,6 @@ const reconstructMessageEvent = (row: EventRow): CanonicalMessageEvent => {
   };
   if (row.sender) event.sender = row.sender;
   if (row.replyToMessageId != null) event.replyToMessageId = row.replyToMessageId;
-  if (row.replyQuoteContent) event.replyQuoteContent = row.replyQuoteContent;
   if (row.forwardInfo) event.forwardInfo = row.forwardInfo;
   if (row.isSelfSent) event.isSelfSent = true;
   return event;

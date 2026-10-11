@@ -1,7 +1,6 @@
 import sharp from 'sharp';
 
 import type { RenderParams, RenderedContentPiece, RenderedRecord, RenderedMessageRecord, RenderedMessageMetadata, RenderedAttachmentMetadata, BaseRenderedContext, RenderWindow } from './types';
-import { contentToPlainText } from '../adaptation';
 import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICNode, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
 
@@ -70,6 +69,13 @@ const renderContentNode = (node: ContentNode): string => {
 
 const renderContent = (nodes: ContentNode[]): string =>
   nodes.map(renderContentNode).join('');
+
+// Historical plaintext includes descriptions while runtime XML keeps its
+// existing custom-emoji substitution and attachment presentation.
+const transcriptText = (nodes: ContentNode[]): string => nodes.map(node => {
+  const text = 'children' in node ? transcriptText(node.children) : node.text;
+  return node.type === 'custom_emoji' && node.altText ? `${text} [${node.altText}]` : text;
+}).join('');
 
 const REPLY_PREVIEW_MAX_CHARS = 100;
 
@@ -161,7 +167,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessa
     parts.push(`<in-reply-to ${replyAttrs.join(' ')}>${inner}</in-reply-to>`);
     const replyContent = msg.replyQuoteContent ?? msg.replyToContent;
     reply = Object.freeze({
-      text: replyContent ? contentToPlainText(replyContent) : (msg.replyToPreview ?? ''),
+      text: replyContent ? transcriptText(replyContent) : (msg.replyToPreview ?? ''),
       xml: replyContent ? renderContent(replyContent) : escapeXml(msg.replyToPreview ?? ''),
     });
     fullParts.push(`<in-reply-to ${replyAttrs.join(' ')}>${reply.xml}</in-reply-to>`);
@@ -179,7 +185,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): Pick<RenderedMessa
     fullParts.push(attachment);
   }
   const transcript = Object.freeze({
-    text: contentToPlainText(msg.content),
+    text: [transcriptText(msg.content), ...msg.attachments.map(attachment => attachment.altText)].filter(Boolean).join('\n'),
     xml: `<message ${attrs.join(' ')}>\n${fullParts.join('\n')}\n</message>`,
     reply,
   });

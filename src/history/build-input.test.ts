@@ -105,7 +105,7 @@ describe('historical archive input', () => {
     events.forEach(event => persistEvent(db, event));
     const bounds = archive.captureBounds('chat');
     const result = await consume(archive, bounds);
-    const expected = createRenderer().render(events.reduce(reduce, createEmptyIC('chat')), {});
+    const expected = createRenderer().render(events.map(event => event.type === 'message' ? { ...event, replyQuoteContent: undefined } : event).reduce(reduce, createEmptyIC('chat')), {});
     expect(createRenderer().render(loadEvents(db, 'chat').reduce(reduce, createEmptyIC('chat')), {})).toEqual(expected);
     for (const record of expected) {
       if (record.kind !== 'message') continue;
@@ -120,9 +120,9 @@ describe('historical archive input', () => {
     const reply = result.items.find((item): item is HistoryMessage => item.kind === 'message' && item.metadata.messageId === '2')!;
     expect(reply.transcript.reply!.text).toBe(full);
     const quoted = result.items.find((item): item is HistoryMessage => item.kind === 'message' && item.metadata.messageId === '5')!;
-    expect(quoted.metadata.replyTo!.quoted).toBe(true);
-    expect(quoted.transcript.reply!.text).toBe(full);
-    expect(quoted.transcript.reply!.xml).toContain('<b>');
+    expect(quoted.metadata.replyTo!.quoted).toBe(false);
+    expect(quoted.transcript.reply!.text).toBe('edited');
+    expect(loadEvents(db, 'chat').find(event => event.type === 'message' && event.messageId === '5')).not.toHaveProperty('replyQuoteContent');
     const echo = result.items.find((item): item is HistoryMessage => item.kind === 'message' && item.metadata.messageId === '3')!;
     expect(echo.metadata).toMatchObject({ receivedAtMs: 4000, isSelfSent: true });
     expect(echo.transcript.text).toBe('authoritative');

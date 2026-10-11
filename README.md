@@ -71,6 +71,8 @@ pnpm build
 
 Configuration is YAML-first. `CONFIG_PATH` may select a different file; `CONTACTS_PATH` may select a contact-name mapping.
 
+Historical retrieval is opt-in through the global `history.enabled: true` setting in `config.yaml`; restart the bot after changing it. The default is false. The switch controls the independent index worker and is the shared capability for its future query tools/APIs. The existing `read_old_messages` tool remains available independently of this setting. When disabled, the bot creates no history database or worker. Core message archives and normal context compaction continue unchanged; history catches up through read-only ID increments and targeted pending-media recovery when re-enabled. All synchronization fingerprints, indexes and progress belong to history.db; no source schema migration is added. Query SDK/API implementation is still pending; see [history-input.md](docs/history-input.md). Reliable rendering tasks and asynchronous media completion delivery are implemented; see the [sync architecture](docs/history-sync-design.md). Core producers never wait for History receipt or construction.
+
 ## Development
 
 The composition root uses statically imported, factory-only tsyringe registrars. Core services remain closure factories and do not receive the container. Startup explicitly owns replay, activation, and shutdown order.

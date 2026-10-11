@@ -232,13 +232,6 @@
 			"when": 1784006862434,
 			"tag": "0032_rename_await_response_to_still_working",
 			"breakpoints": true
-		},
-		{
-			"idx": 33,
-			"version": "6",
-			"when": 1791486096789,
-			"tag": "0033_history_archive_inputs",
-			"breakpoints": true
 		}
 	]
 }

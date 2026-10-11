@@ -1,0 +1,9 @@
+Isolated verification: existing Node 22/native dependency runtime, network none, CPUs 0.5, memory 1536m.
+pnpm typecheck: passed
+pnpm lint:fix: passed
+pnpm test:run --maxWorkers=1 --no-file-parallelism --testTimeout=60000: passed
+52 test files, 522 tests.
+pnpm build: passed; independent compiled history-worker.mjs verified.
+Source drizzle-kit generation: no schema changes.
+History drizzle-kit generation after private 0003_incremental_media: no schema changes.
+No production restart, config write, source database write, commit or push.

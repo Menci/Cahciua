@@ -89,6 +89,22 @@ beforeEach(() => {
 });
 
 describe('createPrimaryTools', () => {
+  it('always exposes the existing read_old_messages tool and its schema', () => {
+    const { deps } = createFixture();
+    const tools = createPrimaryTools(deps);
+    const tool = findTool(tools, 'read_old_messages');
+    expect(tool.parameters).toMatchObject({ required: ['message_ids'] });
+    expect(deps.readOldMessages).not.toHaveBeenCalled();
+  });
+
+  it('binds the existing read_old_messages tool to the current chat', async () => {
+    const { deps } = createFixture();
+    vi.mocked(deps.readOldMessages).mockReturnValue('<chatlog>full history</chatlog>');
+    const result = await findTool(createPrimaryTools(deps), 'read_old_messages').execute({ message_ids: ['42'] });
+    expect(result.content).toBe('<chatlog>full history</chatlog>');
+    expect(deps.readOldMessages).toHaveBeenCalledExactlyOnceWith('chat-1', ['42']);
+  });
+
   it('omits moderation tools and descriptions when the chat disables moderation', () => {
     const { deps } = createFixture();
     const tools = createPrimaryTools(deps);

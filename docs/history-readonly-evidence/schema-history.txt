@@ -1,0 +1,21 @@
+Reading config file '/verify/code/history-drizzle.config.ts'
+17 tables
+history_chat_states 3 columns 0 indexes 0 fks
+history_checkpoints 6 columns 0 indexes 0 fks
+history_consume_tasks 6 columns 1 indexes 0 fks
+history_consumers 7 columns 0 indexes 0 fks
+history_event_targets 5 columns 1 indexes 0 fks
+history_generations 4 columns 0 indexes 0 fks
+history_media_dependencies 4 columns 1 indexes 0 fks
+history_message_revisions 8 columns 0 indexes 0 fks
+history_message_states 4 columns 0 indexes 0 fks
+history_notices 4 columns 0 indexes 0 fks
+history_relations 5 columns 0 indexes 0 fks
+history_items 12 columns 2 indexes 0 fks
+history_source_changes 3 columns 1 indexes 0 fks
+history_source_observations 12 columns 4 indexes 0 fks
+history_source_scans 2 columns 0 indexes 0 fks
+history_task_starts 4 columns 0 indexes 0 fks
+history_user_states 4 columns 0 indexes 0 fks
+
+No schema changes, nothing to migrate 😴

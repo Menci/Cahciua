@@ -36,7 +36,6 @@ const fixture = () => {
     content TEXT,
     attachments TEXT,
     reply_to_message_id TEXT,
-    reply_quote_content TEXT,
     forward_info TEXT,
     is_self_sent INTEGER,
     service_action TEXT,

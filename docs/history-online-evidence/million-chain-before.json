@@ -1,0 +1,76 @@
+{
+  "defaultHistoryLimits": {
+    "maxSourceBytes": 67108864,
+    "maxStateEntries": 256,
+    "maxWorkspaceBytes": 134217728,
+    "maxOutputItems": 4096,
+    "maxRowsPerSlice": 64,
+    "rowsPerSecond": 100
+  },
+  "builtWorker": true,
+  "usedDefaultLimits": true,
+  "sampleIntervalMs": 10,
+  "reports": [
+    {
+      "name": "reply-chain-1M",
+      "kind": "messages",
+      "rows": 1000,
+      "chain": true,
+      "restart": true,
+      "tokenizer": {
+        "package": "tiktoken",
+        "version": "0.14.0",
+        "encoding": "o200k_base",
+        "scope": "text bodies only; excludes wire metadata and role overhead"
+      },
+      "textTokens": 1000000,
+      "bodyBytes": 4345250,
+      "largestSourceBytes": 4702,
+      "durationMs": 16473.249782,
+      "peakRssBytes": 113176576,
+      "phases": {
+        "bootstrap": 105402368,
+        "resumed": 113176576
+      },
+      "killedCheckpoint": {
+        "timeMs": 103000,
+        "id": 103
+      },
+      "items": 1000,
+      "checkedBodies": 0,
+      "checkedReplies": 0,
+      "mismatches": [],
+      "fullContentVerified": false,
+      "status": {
+        "generation": "million",
+        "baselineSeq": 1000,
+        "reconcileSeq": 1001,
+        "consumeSeq": 1000,
+        "pendingSeq": 1001,
+        "baselineComplete": false,
+        "phase": "reconciling",
+        "peakStateEntries": 3,
+        "peakEncodedWorkspaceBytes": 80343,
+        "observedSeq": 1001,
+        "logLag": 1,
+        "rssBytes": 110014464,
+        "heapUsedBytes": 12387856,
+        "externalBytes": 2293733,
+        "arrayBufferBytes": 24991,
+        "error": "Error: History consume failed: generation=million seq=1001 chat=fixture kind=message key=500\n    at Object.step (file:///verify/code/dist/history-worker.mjs:1606:11)\n    at async runHistoryWorker (file:///verify/code/dist/history-worker.mjs:1694:22)\n    at async file:///verify/code/dist/history-worker.mjs:1737:45 {\n  [cause]: Error: History dependencies exceed entry budget (256); cursor unchanged\n      at Object.entry (file:///verify/code/dist/history-worker.mjs:158:50)\n      at restore (file:///verify/code/dist/history-worker.mjs:674:15)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n}",
+        "totalRows": 898,
+        "rowsPerSecond": 64.57061400768865,
+        "batchMs": 110.11073200000101,
+        "updatedAt": 1791575889601,
+        "hintItems": 0,
+        "hintBytes": 0,
+        "hintsDropped": 0,
+        "hintsReused": 0,
+        "archiveWalBytes": 5104712,
+        "historyWalBytes": 4239512,
+        "historyBytes": 44961792
+      },
+      "errorTail": "Error: History consume failed: generation=million seq=1001 chat=fixture kind=message key=500\n    at Object.step (file:///verify/code/dist/history-worker.mjs:1606:11)\n    at async runHistoryWorker (file:///verify/code/dist/history-worker.mjs:1694:22)\n    at async file:///verify/code/dist/history-worker.mjs:1737:45 {\n  [cause]: Error: History dependencies exceed entry budget (256); cursor unchanged\n      at Object.entry (file:///verify/code/dist/history-worker.mjs:158:50)\n      at restore (file:///verify/code/dist/history-worker.mjs:674:15)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n      at restore (file:///verify/code/dist/history-worker.mjs:706:20)\n}\n"
+    }
+  ]
+}

@@ -31,6 +31,12 @@ telegram:
 database:
   path: "./data/cahciua.db"
 
+# Independent history layer; takes effect after restart.
+# Controls its worker and future history tools/APIs.
+# Existing read_old_messages remains available independently.
+history:
+  enabled: false
+
 runtime:
   shell: ["/bin/bash", "-c"]
   writeFile: ["/bin/bash", "-c", "/usr/bin/cat > \"$0\""]

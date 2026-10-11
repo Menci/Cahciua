@@ -3,10 +3,6 @@ import type { Logger } from '@guiiai/logg';
 const RETRY_BASE_DELAY_MS = 1000;
 const RETRY_MAX_DELAY_MS = 30000;
 
-const sleep = async (ms: number) => {
-  await new Promise(resolve => setTimeout(resolve, ms));
-};
-
 interface SessionEvent {
   chatId: string;
 }
@@ -30,6 +26,7 @@ interface SessionState<T> {
 
 export interface SessionIngressQueue<T extends SessionEvent> {
   enqueue(event: T): void;
+  stop(): Promise<void>;
 }
 
 export const createSessionIngressQueue = <T extends SessionEvent>(params: {
@@ -40,6 +37,17 @@ export const createSessionIngressQueue = <T extends SessionEvent>(params: {
 }): SessionIngressQueue<T> => {
   const log = params.logger.withContext('telegram:ingress-queue');
   const transformConcurrency = params.transformConcurrency ?? 3;
+  let stopped = false;
+  const abort = new AbortController();
+  const activeCommits = new Set<Promise<void>>();
+  const sleep = async (ms: number) => {
+    await new Promise<void>(resolve => {
+      if (stopped) return resolve();
+      const done = () => { clearTimeout(timer); abort.signal.removeEventListener('abort', done); resolve(); };
+      const timer = setTimeout(done, ms);
+      abort.signal.addEventListener('abort', done, { once: true });
+    });
+  };
   const sessions = new Map<string, SessionState<T>>();
 
   const getSession = (chatId: string): SessionState<T> => {
@@ -66,15 +74,18 @@ export const createSessionIngressQueue = <T extends SessionEvent>(params: {
     if (state.flushing) return;
     state.flushing = true;
     try {
-      while (true) {
+      while (!stopped) {
         const entry = state.entries.get(state.nextCommitSeq);
         if (entry?.status !== 'ready' || !entry.result) break;
         try {
           entry.commitAttempts++;
-          await params.commit(entry.result);
+          const pending = Promise.resolve(params.commit(entry.result));
+          activeCommits.add(pending);
+          try { await pending; } finally { activeCommits.delete(pending); }
           state.entries.delete(state.nextCommitSeq);
           state.nextCommitSeq++;
         } catch (error) {
+          if (stopped) break;
           const delayMs = Math.min(RETRY_BASE_DELAY_MS * 2 ** (entry.commitAttempts - 1), RETRY_MAX_DELAY_MS);
           log.withError(error).withFields({
             chatId,
@@ -92,7 +103,7 @@ export const createSessionIngressQueue = <T extends SessionEvent>(params: {
   };
 
   const pump = (chatId: string, state: SessionState<T>) => {
-    while (state.activeTransforms < transformConcurrency) {
+    while (!stopped && state.activeTransforms < transformConcurrency) {
       const nextEntry = [...state.entries.values()]
         .filter(entry => entry.status === 'queued')
         .sort((a, b) => a.seq - b.seq)[0];
@@ -102,13 +113,16 @@ export const createSessionIngressQueue = <T extends SessionEvent>(params: {
       state.activeTransforms++;
 
       void (async () => {
-        while (true) {
+        while (!stopped) {
           nextEntry.attempts++;
           try {
-            nextEntry.result = await params.transform(nextEntry.event);
+            const result = await params.transform(nextEntry.event);
+            if (stopped) break;
+            nextEntry.result = result;
             nextEntry.status = 'ready';
             break;
           } catch (err) {
+            if (stopped) break;
             const delayMs = Math.min(RETRY_BASE_DELAY_MS * 2 ** (nextEntry.attempts - 1), RETRY_MAX_DELAY_MS);
             log.withError(err).withFields({
               chatId,
@@ -128,7 +142,14 @@ export const createSessionIngressQueue = <T extends SessionEvent>(params: {
   };
 
   return {
+    async stop() {
+      stopped = true;
+      abort.abort();
+      sessions.clear();
+      await Promise.allSettled(activeCommits);
+    },
     enqueue(event) {
+      if (stopped) return;
       const state = getSession(event.chatId);
       const seq = state.nextSeq++;
       state.entries.set(seq, {

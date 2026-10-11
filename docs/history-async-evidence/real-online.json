@@ -1,0 +1,283 @@
+{
+  "backupMs": 96.647422,
+  "counts": {
+    "events": 1057,
+    "turn_responses_v2": 196,
+    "compactions": 0
+  },
+  "sourceSizes": {
+    "largestEncodedTurnBytes": 2224857,
+    "largestEventBodyBytes": 34163
+  },
+  "defaultHistoryLimits": {
+    "maxSourceBytes": 67108864,
+    "maxStateEntries": 256,
+    "maxWorkspaceBytes": 134217728,
+    "maxOutputItems": 4096,
+    "maxRowsPerSlice": 64,
+    "rowsPerSecond": 100
+  },
+  "usedDefaultLimits": true,
+  "chats": 4,
+  "interrupted": [
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "events",
+      "upper_id": 979,
+      "after_json": "{\"timeMs\":1791395102304,\"id\":3}",
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 176,
+      "after_json": "{\"timeMs\":1791553566748,\"id\":176}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "events",
+      "upper_id": 1057,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 196,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "events",
+      "upper_id": 707,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "events",
+      "upper_id": 5,
+      "after_json": null,
+      "scan_complete": 0
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 0
+    }
+  ],
+  "consumer": {
+    "generation": "real-online",
+    "baseline_seq": 0,
+    "reconcile_seq": 2,
+    "consume_seq": 2,
+    "pending_seq": null,
+    "baseline_complete": 1,
+    "status_json": "{\"generation\":\"real-online\",\"baselineSeq\":0,\"reconcileSeq\":2,\"consumeSeq\":2,\"pendingSeq\":null,\"baselineComplete\":true,\"phase\":\"live\",\"peakStateEntries\":4,\"peakEncodedWorkspaceBytes\":107238,\"observedSeq\":2,\"logLag\":0,\"completedSourcePolls\":4,\"lastSourcePollAtMs\":1791646442518,\"sourceHighwaterIds\":{\"events\":1058,\"turn_responses_v2\":196,\"compactions\":1},\"pollingSource\":null,\"pendingMedia\":123,\"buildInputBacklog\":1,\"mediaRecoveryActive\":true,\"rssBytes\":120844288,\"heapUsedBytes\":17117208,\"externalBytes\":2378187,\"arrayBufferBytes\":65951,\"error\":null,\"totalRows\":1239,\"rowsPerSecond\":57.895550429158924,\"batchMs\":1.5187060000025667,\"updatedAt\":1791646442518,\"archiveWalBytes\":24752,\"historyWalBytes\":4227152,\"historyBytes\":7053312}"
+  },
+  "coverage": [
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "events",
+      "upper_id": 979,
+      "after_json": "{\"timeMs\":1791553847139,\"id\":979}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-1",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 176,
+      "after_json": "{\"timeMs\":1791553566748,\"id\":176}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "events",
+      "upper_id": 1057,
+      "after_json": "{\"timeMs\":1791571024698,\"id\":1057}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-2",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 196,
+      "after_json": "{\"timeMs\":1791566753260,\"id\":196}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "events",
+      "upper_id": 707,
+      "after_json": "{\"timeMs\":1791525296377,\"id\":707}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-3",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "compactions",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "events",
+      "upper_id": 5,
+      "after_json": "{\"timeMs\":1791395195218,\"id\":5}",
+      "scan_complete": 1
+    },
+    {
+      "generation": "real-online",
+      "chat_id": "chat-4",
+      "source_kind": "turn_responses_v2",
+      "upper_id": 0,
+      "after_json": null,
+      "scan_complete": 1
+    }
+  ],
+  "kinds": [
+    {
+      "kind": "message",
+      "n": 850
+    },
+    {
+      "kind": "model-output",
+      "n": 196
+    },
+    {
+      "kind": "summary",
+      "n": 1
+    },
+    {
+      "kind": "tool-execution",
+      "n": 241
+    },
+    {
+      "kind": "tool-result",
+      "n": 241
+    }
+  ],
+  "relations": [
+    {
+      "kind": "call",
+      "n": 241
+    },
+    {
+      "kind": "output",
+      "n": 241
+    },
+    {
+      "kind": "reply",
+      "n": 367
+    },
+    {
+      "kind": "result",
+      "n": 241
+    },
+    {
+      "kind": "tool-member",
+      "n": 241
+    }
+  ],
+  "expectedItems": 1529,
+  "mismatches": 0,
+  "integrity": "ok",
+  "ftsIntegrity": "passed",
+  "summaryFts": 1,
+  "originalSchemaHashBefore": "251ee5e4c08653b6250f5897cccf6c92b52d8b30f4a5315cd8e03dbce138cbdb",
+  "originalSchemaHashAfter": "251ee5e4c08653b6250f5897cccf6c92b52d8b30f4a5315cd8e03dbce138cbdb",
+  "workerSourceSchemaHash": "251ee5e4c08653b6250f5897cccf6c92b52d8b30f4a5315cd8e03dbce138cbdb",
+  "workerSourceRowsHashBefore": "5ad8947e1ef567f0e3552e85861c01b3d6548619b0b07bd115f258e506d16f1d",
+  "workerSourceRowsHashAfter": "5ad8947e1ef567f0e3552e85861c01b3d6548619b0b07bd115f258e506d16f1d",
+  "builtWorkerVerified": true,
+  "errorTail": ""
+}
