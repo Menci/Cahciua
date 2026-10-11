@@ -200,13 +200,20 @@ Code handles only the current data shape. Existing data changes require a new Dr
 
 Conventional Commits. Keep changes focused and update architectural docs in the same commit. **Never commit or push without explicit human instruction.**
 
+### Commit Identity
+
+- For original work, use the human contributor's configured Git `user.name` and `user.email`, unless the user explicitly specifies another identity.
+- Before committing, verify the effective author and committer identity. Do not silently override them.
+- Never infer identity from the repository owner, remote URL, PR target, historical commits, or names mentioned in this guide.
+- For ports, preserve source authorship as described below; the committer remains the current human contributor.
+- Preserve accurate human attribution and omit AI co-author trailers.
+
 ## Downstream Backports
 
 The downstream remote is `chiyuki0325/Edelweiss` (`edelweiss`).
 
-- Faithful port: original human author, Menci as human co-author, preserve upstream author date, include the full source SHA.
-- Reimplementation: Menci author, original human author as co-author, explain that the concept came from Edelweiss.
-- Original local fix: Menci author, no downstream co-author.
-- Strip every AI co-author trailer; keep human attribution.
+- Faithful port: preserve the original human author and author date, include the full source SHA, and credit the integrating human contributor as co-author.
+- Reimplementation: use the current human contributor as author, credit the original human author as co-author, and reference the source commit and concept.
+- Original work follows the Commit Identity rules above.
 
 Do not port downstream persona content, infrastructure-specific debugging, streaming transports, OneBot code, probe removal, preemptive abort scheduling, or features already present here. Resolve conflicts in a worktree, verify all checks, and never sweep unrelated changes into a commit.
