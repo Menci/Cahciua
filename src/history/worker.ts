@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -20,6 +19,7 @@ import { parseHistoryDelivery } from './notifications';
 import { createOnlineHistoryBuilder } from './online';
 import { consumers } from './schema';
 import { openHistoryStore } from './store';
+import { historyGeneration, historyRenderIdentity } from './worker-options';
 
 export interface HistoryWorkerOptions {
   readonly archivePath: string;
@@ -37,8 +37,8 @@ export const runHistoryWorker = async (options: HistoryWorkerOptions): Promise<v
   const limits = { ...defaultHistoryLimits, ...options.limits };
   checkHistoryLimits(limits);
   const renderParams: RenderParams = { botUserId: options.renderParams?.botUserId, contactNames: new Map(options.renderParams?.contactNames) };
-  const renderIdentity = createHash('sha256').update(JSON.stringify(options.renderParams ?? {})).digest('hex');
-  const generation = options.generation ?? `incremental-v3-${renderIdentity.slice(0, 16)}`;
+  const renderIdentity = historyRenderIdentity(options);
+  const generation = historyGeneration(options);
   const sqlite = new Database(archivePath, { readonly: true, fileMustExist: true });
   sqlite.pragma('cache_size = -2048');
   sqlite.pragma('temp_store = FILE');

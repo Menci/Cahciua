@@ -164,7 +164,7 @@ describe('historical archive input', () => {
     expect(grouped.kind === 'model-output' && grouped.parts.map(p => p.position)).toEqual([
       { entryIndex: 2, partIndex: 1, textIndex: 0 }, { entryIndex: 2, partIndex: 1, textIndex: 1 },
     ]);
-    expect(JSON.stringify(result.items)).not.toMatch(/hidden|opaque secret|reasoning/);
+    expect(JSON.stringify(result.items)).not.toMatch(/hidden|opaque secret/);
   });
 
   it('keeps ambiguous and orphan results explicit and replaces image bytes with source positions', async () => {

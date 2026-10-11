@@ -1,3 +1,4 @@
+import { resolveChatConfig } from '../../config/config';
 import { createHistoryAccess } from '../../history/access';
 import { createHistoryRuntime, defaultHistoryOptions } from '../../history/runtime';
 import type { Registrar } from '../registrar';
@@ -9,5 +10,6 @@ export const registerHistory = ({ get, register }: Registrar): void => {
     access: get(TOKENS.HISTORY_ACCESS),
     options: () => defaultHistoryOptions(get(TOKENS.CONFIG).database.path),
     logger: get(TOKENS.LOGGER),
+    queryPolicy: chatId => get(TOKENS.CONFIGURED_CHAT_IDS).has(chatId) ? { blockedUserIds: resolveChatConfig(get(TOKENS.CONFIG), chatId).blockedUserIds } : undefined,
   }));
 };

@@ -9,6 +9,7 @@ import {
   createDownloadFileTool,
   createEndTurnTool,
   createKillTaskTool,
+  createHistoryQueryTool,
   createReactTool,
   createReadImageTool,
   createReadOldMessagesTool,
@@ -50,6 +51,7 @@ export interface PrimaryToolsDependencies {
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
   messageExists: (chatId: string, messageId: number) => boolean;
   downloadMessageMedia: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
+  historyQuery?: (chatId: string, code: string) => Promise<unknown>;
   readOldMessages: (chatId: string, messageIds: string[]) => Promise<string> | string;
   resolveModel: (name: string) => LlmEndpoint;
   backgroundTask: {
@@ -147,6 +149,8 @@ export const createPrimaryTools = (deps: PrimaryToolsDependencies): CahciuaTool[
       backgroundThresholdSec: deps.chatConfig.tools.bash.backgroundThresholdSec,
     }),
   ];
+
+  if (deps.historyQuery) tools.push(createHistoryQueryTool(code => deps.historyQuery!(deps.chatId, code)));
 
   if (deps.chatConfig.tools.webSearch)
     tools.push(createWebSearchTool(createWebSearcher(deps.chatConfig.tools.webSearch)));

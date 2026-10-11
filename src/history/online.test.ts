@@ -131,7 +131,7 @@ describe('online history reconciliation', () => {
     f.store.sqlite.prepare('UPDATE history_items SET item_json=?,search_text=?').run(oldItem.item_json, oldItem.search_text);
     const cursor = f.builder().status().consumeSeq;
     const journal = JSON.parse(readFileSync(resolve('history-drizzle/meta/_journal.json'), 'utf8')) as { entries: { when: number; tag: string }[] };
-    f.store.sqlite.exec('ALTER TABLE history_build_inputs DROP COLUMN after_key; ALTER TABLE history_build_inputs DROP COLUMN upper_key');
+    f.store.sqlite.exec('ALTER TABLE history_build_inputs DROP COLUMN after_key; ALTER TABLE history_build_inputs DROP COLUMN upper_key; DROP TABLE history_executions');
     f.store.sqlite.prepare('DELETE FROM __drizzle_migrations WHERE created_at>=?').run(journal.entries.find(entry => entry.tag === '0005_refresh_media_descriptions')!.when);
     migrate(f.store.db, { migrationsFolder: './history-drizzle' });
     const changes = createHistoryChanges(f.store.sqlite, 'g');

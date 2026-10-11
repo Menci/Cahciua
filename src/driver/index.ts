@@ -43,6 +43,7 @@ export const createDriver = (config: DriverConfig, deps: {
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
   messageExists: (chatId: string, messageId: number) => boolean;
   downloadMessageMedia: (chatId: string, messageId: number) => Promise<Buffer | undefined>;
+  historyQuery?: (chatId: string, code: string) => Promise<unknown>;
   readOldMessages: (chatId: string, messageIds: string[]) => Promise<string> | string;
   resolveModel: (name: string) => LlmEndpoint;
   backgroundTask: {
@@ -125,6 +126,7 @@ export const createDriver = (config: DriverConfig, deps: {
       messageExists: deps.messageExists,
       downloadMessageMedia: deps.downloadMessageMedia,
       readOldMessages: deps.readOldMessages,
+      historyQuery: deps.historyQuery,
       resolveModel: deps.resolveModel,
       backgroundTask: deps.backgroundTask,
       log,

@@ -9,12 +9,15 @@ import type { RenderParams } from '../rendering';
 import type { HistoryAccess } from './access';
 import { createHistoryDelivery } from './delivery';
 import type { HistoryMediaSource } from './notifications';
+import { createHistoryQueryService } from './query/service';
 import type { HistoryWorkerOptions } from './worker';
+import { historyGeneration } from './worker-options';
 
 export const createHistoryRuntime = (deps: {
   access: HistoryAccess;
   options: () => HistoryWorkerOptions;
   logger: Logger;
+  queryPolicy?: (chatId: string) => { blockedUserIds: readonly string[] } | undefined;
   restartMs?: number;
   shutdownMs?: number;
   spawn?: (entry: string, args: readonly string[]) => ChildProcess;
@@ -26,6 +29,12 @@ export const createHistoryRuntime = (deps: {
   let started = false;
   let options: HistoryWorkerOptions | undefined;
   let stopPromise: Promise<void> | undefined;
+  const queries = createHistoryQueryService({
+    access: deps.access, scope: chatId => {
+      const policy = deps.queryPolicy?.(chatId);
+      return options && policy && !stopped ? { historyPath: options.historyPath, archivePath: options.archivePath, generation: historyGeneration(options), renderParams: options.renderParams, chatId, ...policy } : undefined;
+    },
+  });
   const delivery = createHistoryDelivery({
     send: (message, callback) => {
       if (!child?.connected) { callback(new Error('History IPC disconnected')); return; }
@@ -83,19 +92,22 @@ export const createHistoryRuntime = (deps: {
       if (!deps.access.enabled || stopped) return;
       delivery.offer({ kind: 'media', sourceKind, sourceKey });
     },
+    executeQuery: queries.executeQuery,
     metrics: () => ({ enabled: deps.access.enabled, ...delivery.metrics(), running: !!child }),
     stop(): Promise<void> {
       stopPromise ??= (async () => {
         stopped = true;
         clearTimeout(timer);
         delivery.stop();
+        const queryStop = queries.stop();
         const current = child;
-        if (!current) return;
+        if (!current) { await queryStop; return; }
         await new Promise<void>(resolveStop => {
           const killTimer = setTimeout(() => { current.kill('SIGKILL'); }, deps.shutdownMs ?? 2000);
           current.once('exit', () => { clearTimeout(killTimer); resolveStop(); });
           current.kill('SIGTERM');
         });
+        await queryStop;
       })();
       return stopPromise;
     },

@@ -89,6 +89,17 @@ beforeEach(() => {
 });
 
 describe('createPrimaryTools', () => {
+  it('exposes one host-bound history tool only when the history capability is provided', async () => {
+    const { deps } = createFixture();
+    expect(createPrimaryTools(deps).some(tool => tool.name === 'history_query')).toBe(false);
+    const historyQuery = vi.fn(async () => ({ status: 'ok', result: 1 }));
+    const tools = createPrimaryTools({ ...deps, historyQuery });
+    expect(tools.filter(tool => tool.name === 'history_query')).toHaveLength(1);
+    const tool = findTool(tools, 'history_query');
+    expect(tool.parameters).toMatchObject({ required: ['code'], additionalProperties: false });
+    expect(await tool.execute({ code: 'return 1' })).toMatchObject({ content: '{"status":"ok","result":1}', requiresFollowUp: true });
+    expect(historyQuery).toHaveBeenCalledWith('chat-1', 'return 1');
+  });
   it('always exposes the existing read_old_messages tool and its schema', () => {
     const { deps } = createFixture();
     const tools = createPrimaryTools(deps);
