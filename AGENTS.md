@@ -10,8 +10,8 @@ Cahciua is a Telegram group-chat bot built around the **Deterministic Context Pi
 
 1. **Telegram adaptation** (`src/telegram/adaptation.ts`) converts Telegram events to `CanonicalIMEvent`.
 2. **Projection** (`src/projection/`) applies the pure reducer `IC' = reduce(IC, event)`.
-3. **Rendering** (`src/rendering/`) serializes IC to provider-independent XML segments (`RC`).
-4. **Driver** (`src/driver/`) merges RC with stored turn responses, runs the probe gate and primary tool loop, schedules wake-ups, and compacts context.
+3. **Rendering** (`src/rendering/`) selects a caller-supplied chat window before serializing IC nodes to reusable, unmasked records with structured source identity and provider-independent XML.
+4. **Driver** (`src/driver/`) derives the model RC view (window and blocked-user policy), merges it with stored turn responses, runs the probe gate and primary tool loop, schedules wake-ups, and compacts context.
 
 LLM calls support `openai-chat`, `anthropic-messages`, and `responses` through direct, non-streaming `fetch`. Provider transports live in `src/llm/`; `src/unified-api/` owns the provider-independent `ConversationEntry[]` representation and wire codecs. Turn responses persist that IR, not provider wire objects.
 
@@ -31,7 +31,7 @@ Node >=22, TypeScript, pnpm, tdl/libtdjson, better-sqlite3 + Drizzle, Immer, ali
 src/
 ├── adaptation/   Canonical event/content types and platform-neutral content helpers
 ├── projection/   Pure IC reducer
-├── rendering/    IC -> XML RenderedContext
+├── rendering/    Consumer-owned IC + output range -> reusable unmasked records and XML
 ├── unified-api/  Provider-independent LLM conversation IR and codecs
 ├── llm/          Non-streaming provider transports, request prep, request dumps
 ├── media/        Thumbnails, frame extraction, alt-text resolvers, media runtime
@@ -41,7 +41,7 @@ src/
 ├── startup/      Replay and application lifecycle orchestration
 ├── db/           Drizzle schema and persistence
 ├── config/       YAML parsing and resolution
-├── pipeline.ts   Per-chat IC/RC residency
+├── pipeline.ts   Per-chat IC/base-rendering residency and cache release
 └── index.ts      Thin process entry point
 ```
 
@@ -58,9 +58,9 @@ Construction order breaks cycles explicitly:
 - Telegram clients are created before the media runtime; custom-emoji resolution depends directly on the bot client.
 - TelegramManager is created after media resolvers.
 - Event producers publish through `DriverInputBus`, not a mutable Driver reference.
-- Driver is attached before Telegram start, but the bus buffers the latest RC per chat until activation.
+- Driver is attached before Telegram start, but the bus buffers the latest base rendering per chat until activation.
 
-Startup order: build container and migrate DB -> cold replay -> attach Driver and register live handlers -> start Telegram clients -> activate Driver -> recover background tasks -> seed current RC -> run post-startup media backfills.
+Startup order: build container and migrate DB -> cold replay -> attach Driver and register live handlers -> start Telegram clients -> activate Driver -> recover background tasks -> seed current base rendering -> run post-startup media backfills.
 
 Shutdown is idempotent: deactivate Driver input -> stop Driver -> checkpoint background tasks -> stop Telegram clients -> close SQLite -> dispose the DI container.
 
@@ -118,6 +118,14 @@ Message edits/deletes mutate the target node in place. Entity metadata changes a
 
 ### RC And Turn Responses
 
+Rendering owns a read-only record contract, distinct from Driver's model context. Records expose explicit metadata (message identity, sender/reply/forward snapshots, edit/delete/self-send state and attachment descriptions), presentation bodies and activation facts. They never expose IC nodes, source trees, thumbnail bytes in metadata, or cache revisions. IC identity and complete-source revision matching are private cache details. Rendering prepares full and blocked XML forms but never chooses policy; only source revisions and display parameters invalidate rendering.
+
+Rendering accepts consumer-owned IC and an explicit inclusive-start/exclusive-end output range on `receivedAtMs`. Window selection precedes XML, metadata, revision and image construction; it does not recover state or discard reply/edit/delete dependencies. Online Pipeline and future historical consumers own separate IC, renderer caches and ranges. A rendering range is not a durable build-progress cursor.
+
+Pipeline passes its per-chat rendering window to that common entry and evicts obsolete cache entries on window changes without rendering or publication. Startup maps the saved compaction cursor to an online window before replay; the Driver adapter requires a resident chat before mapping a completed compaction to that window. Pipeline also filters its stored base-record array to keep the next diff baseline inside residency. Driver retains its own input snapshot until the next event. Cold replay still loads only the active event window; this is not an all-history cache.
+
+Driver owns `RenderedContext` / `RenderedContextSegment` in `context-types.ts`. `selectContextView()` explicitly converts base records before scheduling, probe, primary or compaction, selects the cursor window, and masks blocked senders' bodies/images and mention/reply flags. Base records and model segments have incompatible shapes; neither can be substituted for the other. `read_old_messages` uses the same conversion with current policy and no live cursor. Model segments carry no record metadata. Read-only body arrays and Sharp handles are reused; codecs clone Sharp before request-specific processing. See `docs/rendering-interfaces.md` for the contracts and ownership rationale.
+
 RC uses `receivedAtMs`; turn responses use `requestedAtMs`. Equal timestamps order RC before TR for Anthropic role alternation. Stored TRs contain `ConversationEntry[]`, token totals, cache components, and model identity.
 
 The runner performs model-call retries for ignored forced tool choices, aggregates retry usage, and executes/persists only the selected/final response. A completed step is persisted before `checkInterrupt`; interruption is cooperative at step boundaries, never preemptive during model/tool/persistence work.
@@ -138,7 +146,7 @@ Each chat owns an alien-signals scheduler. The trigger sender's later messages e
 
 ### Compaction
 
-Compaction is an independent per-chat controller, not a turn feature or TR. Raw RC + TR content after the cursor, excluding the existing summary, triggers at `maxContextEstTokens`. The retained window targets `workingWindowEstTokens`. Summaries are append-only rows in `compactions`; updating the signal applies the new Pipeline cursor.
+Compaction is an independent per-chat controller, not a turn feature or TR. Raw RC + TR content after the cursor, excluding the existing summary, triggers at `maxContextEstTokens`. The retained window targets `workingWindowEstTokens`. Summaries are append-only rows in `compactions`; after persistence, updating metadata advances the pure Driver view and releases expired Pipeline rendering cache entries. The cursor effect never writes the base input signal or republishes message bodies.
 
 ### Provider Boundaries
 

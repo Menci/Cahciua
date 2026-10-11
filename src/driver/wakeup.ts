@@ -1,6 +1,7 @@
 import type { Logger } from '@guiiai/logg';
 
 import { composeContext, composeProbeContext, injectLateBindingPrompt, latestExternalEventMs, loopEndedWithoutSendMessage, wasToolLoopInterrupted } from './context';
+import type { RenderedContext } from './context-types';
 import { renderLateBindingPrompt, renderSystemPrompt } from './prompt';
 import type { createRunner } from './runner';
 import { createDecideTool, extractDecideResult, toToolSchema } from './tools';
@@ -8,7 +9,6 @@ import type { CahciuaTool } from './tools';
 import type { ProbeResponseV2, ResolvedChatConfig, TurnResponseV2 } from './types';
 import type { ActiveTaskInfo } from '../background-task/types';
 import { callLlm } from '../llm/call';
-import type { RenderedContext } from '../rendering/types';
 
 const localTimeNow = (): string => {
   const now = new Date();

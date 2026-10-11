@@ -1,8 +1,8 @@
 import { computed, effect, signal } from 'alien-signals';
 
 import { latestExternalEventMs, triggerSenderLatestMs } from './context';
+import type { RenderedContext } from './context-types';
 import type { DebounceConfig } from './types';
-import type { RenderedContext } from '../rendering/types';
 
 type Signal<T> = {
   (): T;
@@ -12,7 +12,7 @@ type Signal<T> = {
 export const createReplyScheduler = (deps: {
   chatId: string;
   debounce: DebounceConfig;
-  context: Signal<RenderedContext>;
+  context: () => RenderedContext;
   lastProcessedMs: Signal<number>;
   lastTurnInterrupted: Signal<boolean>;
   failedContext: Signal<RenderedContext | null>;

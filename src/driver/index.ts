@@ -1,8 +1,10 @@
 import type { Logger } from '@guiiai/logg';
-import { signal } from 'alien-signals';
+import { computed, signal } from 'alien-signals';
 
 import { createCompactionController } from './compaction-controller';
 import { wasToolLoopInterrupted } from './context';
+import type { RenderedContext } from './context-types';
+import { selectContextView } from './context-view';
 import { createPrimaryTools } from './primary-tools';
 import { createRunner } from './runner';
 import { createReplyScheduler } from './scheduler';
@@ -12,7 +14,7 @@ import { executeWakeup } from './wakeup';
 import type { ActiveTaskInfo } from '../background-task/types';
 import type { RuntimeConfig } from '../config/config';
 import type { LlmEndpoint } from '../llm/types';
-import type { RenderedContext } from '../rendering/types';
+import type { BaseRenderedContext } from '../rendering/types';
 import type { Attachment } from '../telegram/message/types';
 import type { BanSpammerResult } from '../telegram/moderation-types';
 
@@ -35,7 +37,7 @@ export const createDriver = (config: DriverConfig, deps: {
   loadCompaction: (chatId: string) => CompactionSessionMeta | null;
   loadLastProbeTime: (chatId: string) => number;
   persistCompaction: (chatId: string, meta: CompactionSessionMeta) => void;
-  setCompactCursor: (chatId: string, cursorMs: number) => RenderedContext;
+  setCompactCursor: (chatId: string, cursorMs: number) => void;
   getChatTitle: (chatId: string) => string | undefined;
   runtimeConfig: RuntimeConfig;
   loadMessageAttachments: (chatId: string, messageId: number) => Attachment[] | undefined;
@@ -63,7 +65,7 @@ export const createDriver = (config: DriverConfig, deps: {
   };
 
   const chatScopes = new Map<string, {
-    rc: ReturnType<typeof signal<RenderedContext>>;
+    base: ReturnType<typeof signal<BaseRenderedContext>>;
     notifyTyping: () => void;
     cleanup: () => void;
   }>();
@@ -74,7 +76,7 @@ export const createDriver = (config: DriverConfig, deps: {
 
     const chatConfig = config.resolveChatConfig(chatId);
 
-    const rc = signal<RenderedContext>([]);
+    const base = signal<BaseRenderedContext>([]);
     const lastProcessedMs = signal(0);
     // A persisted requiresFollowUp result keeps the wake-up eligible after restart.
     const lastTRInterrupted = signal(false);
@@ -85,6 +87,12 @@ export const createDriver = (config: DriverConfig, deps: {
     const compactionMeta = signal<CompactionSessionMeta | null>(
       deps.loadCompaction(chatId),
     );
+
+    const blockedUserIds = new Set(chatConfig.blockedUserIds);
+    const rc = computed(() => selectContextView(base(), {
+      cursorMs: compactionMeta()?.newCursorMs,
+      blockedUserIds,
+    }));
 
     const compaction = createCompactionController({
       chatId,
@@ -170,14 +178,14 @@ export const createDriver = (config: DriverConfig, deps: {
       compaction.dispose();
     };
 
-    const entry = { rc, notifyTyping: scheduler.notifyTyping, cleanup };
+    const entry = { base, notifyTyping: scheduler.notifyTyping, cleanup };
     chatScopes.set(chatId, entry);
     return entry;
   };
 
-  const handleEvent = (chatId: string, newRC: RenderedContext) => {
+  const handleEvent = (chatId: string, newRC: BaseRenderedContext) => {
     if (!chatIds.has(chatId)) return;
-    getOrCreateScope(chatId).rc(newRC);
+    getOrCreateScope(chatId).base(newRC);
   };
 
   const handleTyping = (chatId: string) => {

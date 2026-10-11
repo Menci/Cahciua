@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createDriverInputBus } from './input-bus';
-import type { RenderedContext } from '../rendering/types';
+import { render } from '../rendering';
+import type { BaseRenderedContext } from '../rendering/types';
 
-const context = (receivedAtMs: number): RenderedContext => [{
-  receivedAtMs,
-  content: [{ type: 'text', text: String(receivedAtMs) }],
-}];
+const context = (receivedAtMs: number): BaseRenderedContext => render({
+  sessionId: 'chat', users: new Map(), nodes: [{
+    type: 'message', messageId: '1', receivedAtMs, timestampSec: 1, utcOffsetMin: 0,
+    content: [{ type: 'text', text: String(receivedAtMs) }], attachments: [],
+  }],
+});
 
 describe('createDriverInputBus', () => {
   it('holds the latest context per chat until activation', () => {
