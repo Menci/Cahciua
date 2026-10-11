@@ -35,7 +35,7 @@ src/
 ├── unified-api/  Provider-independent LLM conversation IR and codecs
 ├── llm/          Non-streaming provider transports, request prep, request dumps
 ├── media/        Thumbnails, frame extraction, alt-text resolvers, media runtime
-├── history/      Independent archive input construction, IR expansion and saved-item upserts
+├── history/      Archive input, bounded resumable bootstrap, history.db state/items/FTS
 ├── driver/       Scheduling, probe/primary wake-up, runner, tools, compaction
 ├── telegram/     TDLib clients, manager, adaptation, ingress/egress adapters
 ├── container/    Typed tsyringe tokens and statically imported registrars
@@ -137,7 +137,11 @@ The runner performs model-call retries for ignored forced tool choices, aggregat
 
 `src/db/history-archive.ts` owns per-chat/per-source ID upper fences, `(time, id)` keyset pages and archive evidence fingerprints. `src/history/` owns a separate IC, renderer and output ranges, and emits JSON-safe keyed upserts for messages, readable TR outputs/tools/results and every compaction. Rendering supplies a full host-internal transcript alongside unchanged runtime previews/tombstones; saved history never carries Sharp, image bytes or reasoning. Message events persist explicit reply quotes for replay.
 
-Historical builds retain all message/user dependencies within one chat across pages, revisit old edit/delete targets, and release each rendering batch. Page size does not bound total IC memory. Recovery currently replays from the origin into an idempotent writer; a saved source cursor alone cannot restore Projection state. ID fences freeze membership, not mutable attachment/cache values; those need rebuild reconciliation. History has no worker/startup wiring or live mutation log yet. Task completion association requires explicit bash result task identity. See `docs/history-input.md` for source/output contracts and deferred integration.
+`buildHistorySlice` owns bounded offline/bootstrap construction into a separate rebuildable history.db. It captures fences once per `(generation, chat_id)`, resumes per-source keysets directly, restores only reducer-declared message/user/chat dependencies, and releases decoded state and renderer cache after each row. Structured per-target IC state and archive revision chains remain on disk; explicit task identities restore unique starts with bounded lookup. Projection owns its pure dependency contract alongside the shared reducer. Changes to reducer lookups must update that contract; incompatible persisted Projection/rendering semantics require a version bump and new generation, while history schema changes require a new history Drizzle migration. The older `buildHistoryInput` is an origin-replaying in-memory reference consumer, not the durable entry.
+
+Each source row is a history transaction containing saved items, relationships, full-content FTS trigger updates, Projection state, task starts/notices and checkpoint. Stale checkpoint plans fail; repeated committed plans are idempotent. Generation identities include source/display identity and Projection version. Source byte preflight precedes decoding; state entries/bytes, output items, row slices, concurrency and rate have explicit budgets. Oversized work fails with its checkpoint unchanged, never truncates or skips. SQLite source reads are short indexed tuple seeks, not a build-long WAL-pinning snapshot. Serialized workspace accounting is separate from exact native/V8 RSS.
+
+`src/history/cli.ts` runs independently with a read-only source archive and migrates history.db through `history-drizzle/`; the bot does not await or start it. Every summary is saved and fully indexed. Scan completion describes captured row membership only: mutable source rows/media caches need a new generation rebuild without a durable mutation log. There is no baselineComplete/S0/S1 reconciliation, automatic startup synchronization, live IPC or query SDK yet. Task completion association requires explicit bash result task identity. See `docs/history-input.md` for contracts, operational budgets and deferred integration.
 
 ### Mandatory Probe Gate
 

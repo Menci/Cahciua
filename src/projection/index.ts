@@ -1,3 +1,4 @@
+export { projectionDependencies } from './dependencies';
 export { reduce } from './reduce';
 export type { PipelineEvent } from './reduce';
 export { createEmptyIC } from './types';

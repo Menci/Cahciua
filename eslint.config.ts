@@ -140,6 +140,7 @@ const config: Linter.Config[] = [
       'vitest.config.ts',
       'tsdown.config.ts',
       'drizzle.config.ts',
+      'history-drizzle.config.ts',
     ],
   },
 ];

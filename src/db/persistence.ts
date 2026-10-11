@@ -403,8 +403,14 @@ export const loadLastProbeTime = (db: DB, chatId: string): number => {
   return row?.requestedAt ?? 0;
 };
 
-export const loadImageAltTextByHash = (db: DB, imageHash: string): ImageAltTextRecord | null => {
-  const row = db.select().from(imageAltTexts)
+export const loadImageAltTextByHash = (db: DB, imageHash: string, maxBytes?: number): ImageAltTextRecord | null => db.transaction(tx => {
+  if (maxBytes !== undefined) {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error('Alt-text byte budget must be a positive safe integer');
+    const size = tx.select({ bytes: sql<number>`octet_length(${imageAltTexts.altText}) + coalesce(octet_length(${imageAltTexts.stickerSetName}), 0)` })
+      .from(imageAltTexts).where(eq(imageAltTexts.imageHash, imageHash)).get();
+    if (size && size.bytes > maxBytes) throw new Error('Alt-text exceeds history source byte budget; cursor unchanged');
+  }
+  const row = tx.select().from(imageAltTexts)
     .where(eq(imageAltTexts.imageHash, imageHash))
     .limit(1)
     .get();
@@ -416,7 +422,7 @@ export const loadImageAltTextByHash = (db: DB, imageHash: string): ImageAltTextR
         ...row.stickerSetName && { stickerSetName: row.stickerSetName },
       }
     : null;
-};
+});
 
 export const persistImageAltText = (db: DB, record: ImageAltTextRecord) => {
   db.insert(imageAltTexts)
