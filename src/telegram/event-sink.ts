@@ -1,27 +1,27 @@
 import type { CanonicalIMEvent } from '../adaptation/types';
-import type { RenderedContext } from '../rendering/types';
+import type { BaseRenderedContext } from '../rendering/types';
 
 export interface TelegramEventSink {
   persist(event: CanonicalIMEvent): void;
   publish(event: CanonicalIMEvent, options?: {
     hydrateAltText?: boolean;
     notifyDriver?: boolean;
-  }): RenderedContext | undefined;
+  }): BaseRenderedContext | undefined;
   accept(event: CanonicalIMEvent, options?: {
     hydrateAltText?: boolean;
     notifyDriver?: boolean;
-  }): RenderedContext | undefined;
+  }): BaseRenderedContext | undefined;
 }
 
 export const createTelegramEventSink = (deps: {
   configuredChatIds: ReadonlySet<string>;
   persistEvent: (event: CanonicalIMEvent) => void;
   hydrateAltText: (event: CanonicalIMEvent) => void;
-  pushPipelineEvent: (chatId: string, event: CanonicalIMEvent) => RenderedContext;
-  handleDriverEvent: (chatId: string, context: RenderedContext) => void;
+  pushPipelineEvent: (chatId: string, event: CanonicalIMEvent) => BaseRenderedContext;
+  handleDriverEvent: (chatId: string, context: BaseRenderedContext) => void;
 }): TelegramEventSink => {
   const persisted = new WeakSet<CanonicalIMEvent>();
-  const published = new WeakMap<CanonicalIMEvent, RenderedContext>();
+  const published = new WeakMap<CanonicalIMEvent, BaseRenderedContext>();
   const notified = new WeakSet<CanonicalIMEvent>();
 
   const persist = (event: CanonicalIMEvent): void => {

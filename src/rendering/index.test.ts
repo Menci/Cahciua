@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { rcToXml, render } from './index';
+import { renderedRecordsToXml, render } from './index';
 import type { CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICSystemEvent, IntermediateContext } from '../projection/types';
 
@@ -27,11 +27,43 @@ const message = (overrides?: Partial<ICMessage>): ICMessage => ({
   ...overrides,
 });
 
-const xml = (segments: ReturnType<typeof render>): string => rcToXml(segments);
+const xml = (segments: ReturnType<typeof render>): string => renderedRecordsToXml(segments);
 
 // --- render ---
 
 describe('render', () => {
+  it('publishes independent metadata snapshots without IC nodes or image bytes', () => {
+    const sender = { id: 'u', displayName: 'Original', isBot: false };
+    const replySender = { id: 'r', displayName: 'Reply author', isBot: false };
+    const attachment = { type: 'photo' as const, thumbnailWebp: 'aGVsbG8=', altText: 'a harbour' };
+    const source = message({
+      sender, replyToMessageId: 'previous', replyToSender: replySender, replyToPreview: 'earlier',
+      attachments: [attachment], editedAtSec: 1741761060, deleted: true, isSelfSent: true,
+    });
+    const records = render(ic([source]));
+    const record = records[0]!;
+    expect(record.kind).toBe('message');
+    if (record.kind !== 'message') throw new Error('Expected rendered message');
+    expect(record.metadata).toMatchObject({
+      messageId: '42', sender: { id: 'u', displayName: 'Original' },
+      replyTo: { messageId: 'previous', sender: { id: 'r', displayName: 'Reply author' }, preview: 'earlier' },
+      attachments: [{ type: 'photo', altText: 'a harbour' }],
+      editedAtSec: 1741761060, deleted: true, isSelfSent: true,
+    });
+    expect(record).not.toHaveProperty('source');
+    expect(record.metadata).not.toHaveProperty('content');
+    expect(record.metadata.attachments[0]).not.toHaveProperty('thumbnailWebp');
+    sender.displayName = 'Changed';
+    replySender.displayName = 'Changed reply';
+    attachment.altText = 'changed attachment';
+    expect(record.metadata.sender!.displayName).toBe('Original');
+    expect(record.metadata.replyTo!.sender!.displayName).toBe('Reply author');
+    expect(record.metadata.attachments[0]!.altText).toBe('a harbour');
+    expect(Object.isFrozen(records)).toBe(true);
+    expect(Object.isFrozen(record.metadata)).toBe(true);
+    expect(Object.isFrozen(record.metadata.sender)).toBe(true);
+  });
+
   describe('basic message', () => {
     it('renders a simple message with sender and timestamp', () => {
       const result = xml(render(ic([message()])));
@@ -54,8 +86,8 @@ describe('render', () => {
         message({ messageId: '43', receivedAtMs: 2000, timestampSec: 1741761060 }),
       ]));
       expect(rc).toHaveLength(2);
-      expect(rc[0]!.receivedAtMs).toBe(1000);
-      expect(rc[1]!.receivedAtMs).toBe(2000);
+      expect(rc[0]!.metadata.receivedAtMs).toBe(1000);
+      expect(rc[1]!.metadata.receivedAtMs).toBe(2000);
     });
 
     it('returns empty for empty IC', () => {
@@ -322,7 +354,7 @@ describe('render', () => {
         attachments: [{ type: 'photo', width: 800, height: 600, thumbnailWebp: 'AAAA' }],
       })]));
       expect(rc).toHaveLength(1);
-      const pieces = rc[0]!.content;
+      const pieces = rc[0]!.presentation.body;
       expect(pieces).toHaveLength(2);
       expect(pieces[0]!.type).toBe('text');
       expect(pieces[1]!.type).toBe('image');
@@ -338,14 +370,14 @@ describe('render', () => {
           altText: 'a cat sleeping on a windowsill',
         }],
       })]));
-      expect(rc[0]!.content).toHaveLength(1);
-      expect(rc[0]!.content[0]).toEqual({
+      expect(rc[0]!.presentation.body).toHaveLength(1);
+      expect(rc[0]!.presentation.body[0]).toEqual({
         type: 'text',
         text: '<message id="42" sender="Alice (@alice)" t="2025-03-12T14:30:00+08:00">\nhello\n<image type="photo" size="800x600" file-id="42:0">a cat sleeping on a windowsill</image>\n</message>',
       });
     });
 
-    it('shows [thumbnail] placeholder in rcToXml', () => {
+    it('shows [thumbnail] placeholder in renderedRecordsToXml', () => {
       const rc = render(ic([message({
         attachments: [{ type: 'photo', width: 800, height: 600, thumbnailWebp: 'AAAA' }],
       })]));
@@ -361,7 +393,7 @@ describe('render', () => {
           { type: 'photo', width: 1920, height: 1080, thumbnailWebp: 'BBB' },
         ],
       })]));
-      const pieces = rc[0]!.content;
+      const pieces = rc[0]!.presentation.body;
       expect(pieces).toHaveLength(3); // 1 text + 2 images
       expect(pieces[1]!.type).toBe('image');
       expect(pieces[2]!.type).toBe('image');
@@ -371,7 +403,7 @@ describe('render', () => {
       const rc = render(ic([message({
         attachments: [{ type: 'document', mimeType: 'application/pdf', fileName: 'test.pdf' }],
       })]));
-      expect(rc[0]!.content).toHaveLength(1); // text only
+      expect(rc[0]!.presentation.body).toHaveLength(1); // text only
     });
   });
 
@@ -524,25 +556,4 @@ describe('render', () => {
 
   });
 
-  describe('viewport filtering', () => {
-    it('skips nodes before compactCursorMs', () => {
-      const rc = render(
-        ic([
-          message({ receivedAtMs: 1000 }),
-          message({ messageId: '43', receivedAtMs: 3000, timestampSec: 1741776660 }),
-        ]),
-        { compactCursorMs: 2000 },
-      );
-      expect(rc).toHaveLength(1);
-      expect(rc[0]!.receivedAtMs).toBe(3000);
-    });
-
-    it('includes nodes at exactly compactCursorMs', () => {
-      const rc = render(
-        ic([message({ receivedAtMs: 2000 })]),
-        { compactCursorMs: 2000 },
-      );
-      expect(rc).toHaveLength(1);
-    });
-  });
 });

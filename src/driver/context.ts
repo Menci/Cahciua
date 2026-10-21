@@ -1,6 +1,6 @@
+import type { RenderedContext } from './context-types';
 import { mergeContext } from './merge';
 import type { TurnResponseV2 } from './types';
-import type { RenderedContext } from '../rendering/types';
 import { stripReasoning } from '../unified-api/reasoning';
 import type {
   ConversationEntry,

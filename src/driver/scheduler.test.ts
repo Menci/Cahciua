@@ -1,8 +1,8 @@
 import { signal } from 'alien-signals';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { RenderedContext } from './context-types';
 import { createReplyScheduler } from './scheduler';
-import type { RenderedContext } from '../rendering/types';
 
 const segment = (receivedAtMs: number, senderId: string): RenderedContext[number] => ({
   receivedAtMs,

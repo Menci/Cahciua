@@ -1,8 +1,8 @@
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 
+import type { RenderedContext } from './context-types';
 import { mergeContext } from './merge';
-import type { RenderedContext } from '../rendering/types';
 import type { ConversationEntry, InputMessage, OutputMessage, ToolResult } from '../unified-api/types';
 
 const textSeg = (ts: number, text: string): RenderedContext[number] => ({

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { composeContext, findWorkingWindowCursor, loopEndedWithoutSendMessage } from './context';
+import type { RenderedContext } from './context-types';
 import type { TurnResponseV2 } from './types';
-import type { RenderedContext } from '../rendering/types';
 import type { ConversationEntry, InputPart, ToolResult } from '../unified-api/types';
 
 const CURRENT_MODEL = 'test-model';
