@@ -1,6 +1,6 @@
 import { loadKnownChatIds } from '../../db';
 import { createTelegramClients, createTelegramManager } from '../../telegram';
-import { resolveBotDataDir, resolveUserbotDataDir } from '../../telegram/tdlib-paths';
+import { loadUserbotSession, resolveBotSessionPath } from '../../telegram/session';
 import type { Registrar } from '../registrar';
 import { TOKENS } from '../tokens';
 
@@ -12,8 +12,8 @@ export const registerTelegram = ({ get, register }: Registrar): void => {
       apiHash: config.telegram.apiHash,
       botToken: config.telegram.botToken,
       userbotEnabled: config.telegram.userbotEnabled,
-      botDataDir: resolveBotDataDir(config),
-      userbotDataDir: resolveUserbotDataDir(config),
+      userbotSession: config.telegram.userbotEnabled ? loadUserbotSession(config) : undefined,
+      botSessionPath: resolveBotSessionPath(config),
     }, get(TOKENS.LOGGER));
   });
 

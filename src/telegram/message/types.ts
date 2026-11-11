@@ -9,10 +9,9 @@ export interface MessageEntity {
   customEmojiId?: string;
   userId?: string;
 
-  // Resolved at ingress for custom_emoji entities. Populated on the same client
-  // that received the message — its TDLib has the sticker set's access_hash in
-  // memory at that moment. Persisted on the entity so downstream code never
-  // re-resolves.
+  // Resolved at ingress for custom_emoji entities. MTProto only returns the
+  // document, so the pack id and title are looked up alongside the message and
+  // stored here; downstream code never re-resolves.
   customEmojiSetId?: string;
   customEmojiSetName?: string;
   customEmojiFormat?: 'static' | 'animated' | 'video';
@@ -30,8 +29,8 @@ export interface ForwardInfo {
 export interface Attachment {
   type: 'photo' | 'sticker' | 'document' | 'video' | 'audio' | 'voice' | 'video_note' | 'animation';
 
-  // Display metadata only. Re-downloading is keyed off (chatId, messageId) —
-  // tdlib's local file ids are ephemeral and stable references aren't kept here.
+  // Display metadata only. Re-downloading is keyed off (chatId, messageId);
+  // MTProto file references expire, so no provider-local handle is kept here.
   fileName?: string;
   mimeType?: string;
   fileSize?: number;
@@ -46,8 +45,11 @@ export interface Attachment {
 
   // Sticker-specific
   emoji?: string;
-  // Raw Telegram sticker set slug (`set_name`, e.g. t.me/addstickers/<id>).
+  // Sticker sets are addressed by an opaque numeric id plus an access hash.
+  // The hash is needed to resolve the pack title at ingress and never leaves
+  // the Telegram message layer.
   stickerSetId?: string;
+  stickerSetAccessHash?: string;
   // Human-readable pack title, resolved from stickerSetId before entering the pipeline.
   stickerSetName?: string;
   isAnimatedSticker?: boolean;
@@ -70,6 +72,12 @@ export interface TelegramUser {
   username?: string;
   isBot: boolean;
   isPremium: boolean;
+  /**
+   * Account-scoped MTProto access hash for the identity that observed this
+   * user. It is only valid for that identity, so it must stay tied to the
+   * ingress message and never be reused by another client.
+   */
+  accessHash?: string;
 }
 
 export interface TelegramMessage {

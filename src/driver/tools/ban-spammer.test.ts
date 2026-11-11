@@ -34,9 +34,7 @@ describe('ban_spammer tool', () => {
     expect(payload.next_action).toContain('exactly as provided');
     expect(payload.next_action).toContain('exactly one argument: text');
     expect(renderMarkdownToTelegramHTML(payload.announcement)).toContain('<a href="tg://user?id=456">spam 账号</a>');
-    expect(decideLinkPreviewOptions('spam 账号', [{
-      _: 'textEntity', offset: 0, length: 7, type: { _: 'textEntityTypeTextUrl', url: 'tg://user?id=456' },
-    }])).toEqual({ _: 'linkPreviewOptions', is_disabled: true });
+    expect(decideLinkPreviewOptions('spam 账号', [])).toEqual({ linkPreview: false });
   });
 
   it('announces partial deletion truthfully after a successful ban', async () => {

@@ -10,7 +10,9 @@ export type {
 
 export {
   chatIdToString,
-  fromTdMessage,
-  fromTdMessageEdited,
-  fromTdDeletedMessages,
-} from './tdlib';
+  convertEntities,
+  fromTeleprotoDelete,
+  fromTeleprotoEdit,
+  fromTeleprotoMessage,
+  resolveSender,
+} from './teleproto';

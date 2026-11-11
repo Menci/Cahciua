@@ -21,7 +21,7 @@ export const createReactTool = (
     const messageIdNum = Number(message_id);
     if (!Number.isFinite(messageIdNum)) throw new Error(`Invalid message_id: ${message_id}`);
     if (!messageExists(messageIdNum))
-      return { content: JSON.stringify({ error: `No such message_id ${message_id} in this chat — refusing to call TDLib with an unknown id.` }), requiresFollowUp: true };
+      return { content: JSON.stringify({ error: `No such message_id ${message_id} in this chat — refusing to call Telegram with an unknown id.` }), requiresFollowUp: true };
     const targetEmoji = remove ? undefined : emoji;
     if (!remove && !emoji) throw new Error('emoji is required when remove is not true');
     await setReaction(messageIdNum, targetEmoji);

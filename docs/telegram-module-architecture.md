@@ -4,7 +4,7 @@
 
 ```text
 bot.ts / userbot.ts
-  raw TDLib clients
+  teleproto clients
         |
         v
 manager.ts
@@ -18,7 +18,6 @@ manager.ts
 ```
 
 - `bot.ts`: bot authentication, outbound actions, bot-limited ingress fallback.
-- `send-tracker.ts`: pairs bot sends with TDLib's terminal send updates.
 - `userbot.ts`: full-visibility ingress, history, typing, and preferred downloads.
 - `manager.ts`: creates the single active ingress stream and blocks on media transforms.
 - `adaptation.ts`: Telegram message/entity structures to canonical events.
@@ -27,7 +26,7 @@ manager.ts
 - `driver-hooks.ts`: sends, reactions, downloads, and synthetic self-events.
 - `post-startup.ts`: animation hash and custom-emoji backfills.
 - `moderation.ts`: chat/user protection rules, current-state checks, and ban/deletion execution.
-- `moderation-api.ts`: bot-only TDLib moderation calls and message-ID conversion.
+- `moderation-api.ts`: bot-only MTProto moderation calls.
 - `../db/moderation.ts`: sender lookup and distinct message-ID queries against the existing archive.
 
 Generic media code belongs in `src/media/`, not Telegram.
@@ -36,7 +35,7 @@ Generic media code belongs in `src/media/`, not Telegram.
 
 Bot is always present and always sends. Userbot is optional. When userbot exists it exclusively owns messages, edits, deletes, and typing ingress; bot ingress is not merged with it.
 
-The manager's known-chat set starts with persisted chat IDs and expands on new messages. Edits, deletes, and typing for unknown chats are ignored until the chat is known. TDLib delete updates must carry their chat ID.
+The manager's known-chat set starts with persisted chat IDs and expands on new messages. Edits, deletes, and typing for unknown chats are ignored until the chat is known. Supergroup delete updates carry a channel id; basic-group delete updates do not.
 
 ## Live Ingress Ordering
 
@@ -57,7 +56,7 @@ Unconfigured chats always retain the canonical/platform archive but never hydrat
 
 ## Blocking Transforms
 
-Bot and userbot capture ingress timestamps when the raw TDLib update arrives. Userbot re-fetches are serialized per chat; metadata, image, animation, and custom-emoji transforms then run through the manager's ordered queue. Later transforms may finish early but cannot commit past an unresolved head.
+Bot and userbot capture ingress timestamps when the raw teleproto update arrives. Userbot re-fetches are serialized per chat; metadata, image, animation, and custom-emoji transforms then run through the manager's ordered queue. Later transforms may finish early but cannot commit past an unresolved head.
 
 Transform failures are retried and keep the queue blocked. Do not replace this with timeout fallback or empty alt text.
 
@@ -65,7 +64,7 @@ Transform failures are retried and keep the queue blocked. Do not replace this w
 
 Driver hooks translate `send_message` attachments into Telegram sends and use the configured workspace read command for file bytes.
 
-Bot sends resolve through the send tracker: TDLib returns a per-dialog yet-unsent id immediately, while the media upload and server confirmation continue asynchronously. The invoke is only considered complete when TDLib emits `updateMessageSendSucceeded` (which carries the final server message id) or `updateMessageSendFailed`. There is no timeout — long uploads and FLOOD_WAIT retries legitimately keep a message pending — and pending sends are aborted only when the bot client stops. Temp files backing `inputFileLocal` are deleted after the terminal update, since removing them earlier breaks the upload.
+teleproto resolves `sendMessage`/`sendFile` only after Telegram has accepted the message and returns the server-confirmed `Api.Message` with its final id. Uploads run through teleproto file transfer, so no temp file path is kept beyond the call.
 
 After the confirmed send, each returned Telegram message becomes a synthetic canonical message with `isSelfSent=true`:
 
@@ -85,7 +84,9 @@ Tool exposure and backend authorization require the current chat to enable `tool
 
 The Driver tool supplies an evidence message ID and a private reason. Its chat comes from the active Driver scope, and its target UID comes from persisted canonical message/edit events. The backend refuses non-user senders, self, owners and administrators, missing bot permissions, and targets with 10 or more distinct observed message IDs. Left, banned, and never-joined targets are eligible; the archive identifies summoned inline bots whose evidence message may already be gone. Edits do not inflate this count; deletes and context compaction do not reduce it. Service messages do not count. Unobserved history and message types not admitted by adaptation are outside this archive count.
 
-Execution uses the bot client even when userbot owns ingress. Load and verify the evidence through that bot, recheck the archive count, ban permanently, then load each known target message into the bot's own TDLib cache, check its sender/date/deletion properties, and delete it. The archived evidence identity remains usable after its message has disappeared, covering deleted advertisements and targets already outside the group. TDLib requires loaded message IDs for server deletion. The action scope is permanent ban plus permitted deletion of known messages younger than 48 hours.
+Execution uses the bot client even when userbot owns ingress. Load and verify the evidence through that bot, recheck the archive count, ban permanently, then delete each known target message through `channels.deleteMessages`. The archived evidence identity remains usable after its message has disappeared, covering deleted advertisements and targets already outside the group. The action scope is permanent ban plus permitted deletion of known messages younger than 48 hours.
+
+MTProto scopes access hashes to the authorized account, so `moderation-api.ts` resolves every `InputUser` from a response the bot itself received: the evidence message for its author, and `contacts.resolveUsername` for a summoned account. Hashes captured by userbot ingress belong to that account and are never reused for moderation.
 
 The Driver serializes tool calls per chat. Each invocation queries current state and returns successful, unavailable, undeletable, and failed message IDs. A failed ban propagates to the existing tool error handler; deletion failures are logged and returned alongside successful deletions. The existing tool call/result history owns the audit trail, including the evidence ID, private reason, target UID, and returned outcomes.
 
@@ -95,7 +96,7 @@ The tool result requires model follow-up. After a confirmed ban, the tool result
 
 ## Downloads
 
-Logical attachment IDs are `messageId:index`. Driver validates them against persisted attachments. Manager asks userbot for current message/file references first and falls back to bot. TDLib-local file IDs never enter durable event data.
+Logical attachment IDs are `messageId:index`. Driver validates them against persisted attachments. Manager asks userbot for current message/file references first and falls back to bot. Provider-local file references never enter durable event data.
 
 ## Startup And Shutdown
 
@@ -105,4 +106,4 @@ Shutdown deactivates Driver input before stopping Driver/background tasks and cl
 
 ## Extending Telegram
 
-Put raw TDLib translation in bot/userbot/message modules, ingress side effects in live handlers, outbound capability in driver hooks, and historical work in post-startup tasks. Add a new shared persistence port only when more than one Telegram module needs it.
+Put raw teleproto translation in bot/userbot/message modules, ingress side effects in live handlers, outbound capability in driver hooks, and historical work in post-startup tasks. Add a new shared persistence port only when more than one Telegram module needs it.

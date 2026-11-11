@@ -1,29 +1,24 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import type { Logger } from '@guiiai/logg';
-import * as tdl from 'tdl';
-import type * as Td from 'tdlib-types';
+import bigInt from 'big-integer';
+import { Api, Rich, TelegramClient } from 'teleproto';
+import { NewMessage } from 'teleproto/events';
+import { HTMLParser } from 'teleproto/extensions/html';
+import { StoreSession, StringSession } from 'teleproto/sessions';
 
-import type { EntityCache } from './entity-cache';
-import { createEntityCache } from './entity-cache';
 import { createEventBus } from './event-bus';
 import { captureIngressMetadata } from './ingress-meta';
 import { decideLinkPreviewOptions } from './link-preview';
 import { hasRichOnlyMarkup, renderMarkdownToTelegramHTML } from './markdown';
 import type { TelegramMessage } from './message';
-import { serverToTdLibMessageId, tdLibToServerMessageId } from './message/id-conversion';
-import { fromTdMessage } from './message/tdlib';
-import { createSendTracker } from './send-tracker';
-import { firstNonEmptyString } from './tdlib-string';
+import { fromTeleprotoMessage } from './message/teleproto';
+import { createChatPeerResolver } from './peer';
+import { createTeleprotoLogger } from './teleproto-logger';
 
 export interface BotClientOptions {
   apiId: number;
   apiHash: string;
   token: string;
-  databaseDirectory: string;
-  filesDirectory: string;
+  sessionPath: string;
 }
 
 export interface BotInfo {
@@ -80,346 +75,193 @@ export interface BotClient {
   setMessageReaction(chatId: string | number, messageId: number, emoji: string | undefined): Promise<void>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
   getCustomEmojiInfo(customEmojiIds: string[]): Promise<CustomEmojiInfo[]>;
-  raw(): tdl.Client;
-  entityCache(): EntityCache;
+  raw(): TelegramClient;
   botUserId(): string;
   botInfo(): BotInfo | undefined;
 }
 
-const parseMode = (mode: 'HTML' | 'MarkdownV2' | undefined): Td.TextParseMode$Input => {
-  if (mode === 'MarkdownV2') return { _: 'textParseModeMarkdown', version: 2 };
-  return { _: 'textParseModeHTML' };
+const IMAGE_EXTENSIONS = /\.(png|jpe?g)$/i;
+
+/**
+ * teleproto decides photo-vs-document purely from the file name extension and
+ * only recognizes png/jpg/jpeg, so an image without one of those suffixes would
+ * be sent as a document. Callers supply names for display, not for typing.
+ */
+const photoFileName = (fileName: string | undefined): string =>
+  fileName && IMAGE_EXTENSIONS.test(fileName) ? fileName : 'photo.jpg';
+
+const namedBuffer = (buffer: Buffer, fileName: string): Buffer => {
+  Object.defineProperty(buffer, 'name', { value: fileName, enumerable: true });
+  return buffer;
 };
 
-const formattedFromHtml = (text: string, mode: 'HTML' | 'MarkdownV2' = 'HTML'): Td.formattedText => {
-  if (!text) return { _: 'formattedText', text: '', entities: [] };
-  const result = tdl.execute({ _: 'parseTextEntities', text, parse_mode: parseMode(mode) });
-  if (result._ !== 'formattedText')
-    throw new Error(`TDLib rejected rendered markup: ${result.message}`);
-  return { _: 'formattedText', text: result.text, entities: result.entities };
-};
+const captionParseMode = (mode: 'HTML' | 'MarkdownV2' | undefined): 'html' | 'md' =>
+  mode === 'MarkdownV2' ? 'md' : 'html';
 
-const writeTempBuffer = async (workDir: string, buffer: Buffer, fileName: string): Promise<string> => {
-  const safeName = fileName.replace(/[^A-Za-z0-9._-]/g, '_');
-  const path = join(workDir, safeName);
-  await writeFile(path, buffer);
-  return path;
-};
+const toSent = (message: Api.Message): SentMessage => ({
+  messageId: message.id,
+  date: message.date,
+  text: message.message,
+});
 
-const findFileInContent = (content: Td.MessageContent): Td.file | undefined => {
-  switch (content._) {
-  case 'messagePhoto': {
-    const sizes = content.photo.sizes;
-    return [...sizes].sort((a, b) => b.width * b.height - a.width * a.height)[0]?.photo;
-  }
-  case 'messageDocument': return content.document.document;
-  case 'messageVideo': return content.video.video;
-  case 'messageAudio': return content.audio.audio;
-  case 'messageVoiceNote': return content.voice_note.voice;
-  case 'messageVideoNote': return content.video_note.video;
-  case 'messageAnimation': return content.animation.animation;
-  case 'messageSticker': return content.sticker.sticker;
-  default: return undefined;
-  }
-};
+const richMessageFor = (html: string): RichContentInput | undefined =>
+  hasRichOnlyMarkup(html) ? Rich.html(html) : undefined;
+
+type RichContentInput = Api.TypeInputRichMessage;
 
 export const createBotClient = (options: BotClientOptions, logger: Logger): BotClient => {
   const log = logger.withContext('telegram:bot');
-  const cache = createEntityCache();
-  const sendTracker = createSendTracker();
-
-  const client = tdl.createClient({
-    apiId: options.apiId,
-    apiHash: options.apiHash,
-    databaseDirectory: options.databaseDirectory,
-    filesDirectory: options.filesDirectory,
-    tdlibParameters: {
-      device_model: 'Cahciua bot',
-      application_version: '1.0',
-      use_message_database: true,
-      use_chat_info_database: true,
-      use_secret_chats: false,
-    },
+  const client = new TelegramClient(options.sessionPath ? new StoreSession(options.sessionPath) : new StringSession(''), options.apiId, options.apiHash, {
+    connectionRetries: 3,
+    catchUp: false,
+    baseLogger: createTeleprotoLogger(log),
   });
-
-  client.on('error', err => { log.withError(err).error('tdl client error'); });
-
+  const resolveChatPeer = createChatPeerResolver(client);
   const messageBus = createEventBus<TelegramMessage>('bot:message', log);
-
   const userId = options.token.split(':')[0]!;
   let info: BotInfo | undefined;
 
-  client.on('update', (update: Td.Update) => {
-    switch (update._) {
-    case 'updateUser':
-      cache.putUser(update.user);
-      break;
-    case 'updateNewChat':
-      cache.putChat(update.chat);
-      break;
-    case 'updateMessageSendSucceeded':
-    case 'updateMessageSendFailed':
-      sendTracker.settle(update);
-      break;
-    case 'updateNewMessage': {
-      const msg = fromTdMessage(cache, update.message, 'bot');
-      if (msg) messageBus.emit(captureIngressMetadata(msg));
-      break;
-    }
-    }
-  });
-
   const start = async () => {
     log.log('Starting bot...');
-    await client.loginAsBot(options.token);
-    const me = await client.invoke({ _: 'getMe' }) as Td.user;
+    await client.start({ botAuthToken: options.token });
+    const me = await client.getMe();
     info = {
-      id: me.id,
-      firstName: me.first_name,
-      username: firstNonEmptyString(
-        me.usernames?.editable_username,
-        me.usernames?.active_usernames?.[0],
-      ),
+      id: Number(me.id),
+      firstName: me.firstName ?? 'Bot',
+      username: me.username === '' ? undefined : me.username,
     };
-    log.withFields({ id: info.id, username: info.username, name: [me.first_name, me.last_name].filter(Boolean).join(' ') }).log('Bot authenticated');
+    client.addEventHandler(event => {
+      if (!event.message) return;
+      const message = fromTeleprotoMessage(event.message, 'bot');
+      if (message) messageBus.emit(captureIngressMetadata(message));
+    }, new NewMessage({}));
+    log.withFields({
+      id: info.id,
+      username: info.username,
+      name: [me.firstName, me.lastName].filter(Boolean).join(' '),
+    }).log('Bot authenticated');
   };
 
   const stop = async () => {
     log.log('Stopping bot...');
-    sendTracker.abort('bot client stopped');
-    await client.close();
+    await client.destroy();
     log.log('Bot stopped');
   };
 
-  // TDLib bot clients only learn about a chat through its own `update*` stream.
-  // In the userbot-as-ingress topology, the bot client never receives those
-  // updates and has no record of the chats the user configured — so the first
-  // sendMessage / setMessageReactions / sendChatAction call surfaces as
-  // `Chat not found` or `CHANNEL_INVALID`. Warm the chat into TDLib's cache
-  // via `getChat` once per process (use_chat_info_database persists it across
-  // restarts, so subsequent sessions hit the disk cache and skip the round
-  // trip). Failures are logged and propagated — the caller's actual op will
-  // surface a clearer message about what's wrong.
-  const knownChats = new Set<number>();
-  const ensureChatKnown = async (chatIdRaw: string | number): Promise<void> => {
-    const chatId = Number(chatIdRaw);
-    if (knownChats.has(chatId)) return;
-    await client.invoke({ _: 'getChat', chat_id: chatId });
-    knownChats.add(chatId);
-  };
-
   const sendMessage = async (chatId: string | number, text: string, opts?: SendOptions): Promise<SentMessage> => {
-    await ensureChatKnown(chatId);
-    // The caller passes markdown (LLM output). We render to Telegram-supported
-    // HTML and then dispatch to either inputMessageRichMessage (for rich-only
-    // tables and math) or inputMessageText (for
-    // plain entity-style content that older clients can render correctly).
     const html = renderMarkdownToTelegramHTML(text);
-    const replyTo: Td.InputMessageReplyTo$Input | undefined = opts?.replyToMessageId
-      ? { _: 'inputMessageReplyToMessage', message_id: serverToTdLibMessageId(opts.replyToMessageId) }
-      : undefined;
-
-    const content: Td.InputMessageContent$Input = hasRichOnlyMarkup(html)
-      ? {
-          _: 'inputMessageRichMessage',
-          message: {
-            _: 'inputRichMessage',
-            source: { _: 'richMessageSourceHtml', text: html },
-            is_rtl: false,
-            detect_automatic_blocks: false,
-          },
-          clear_draft: true,
-        }
-      : (() => {
-          const formatted = formattedFromHtml(html, opts?.parseMode ?? 'HTML');
-          return {
-            _: 'inputMessageText' as const,
-            text: formatted,
-            link_preview_options: decideLinkPreviewOptions(formatted.text, formatted.entities),
-            clear_draft: true,
-          };
-        })();
-
-    const sent = await client.invoke({
-      _: 'sendMessage',
-      chat_id: Number(chatId),
-      reply_to: replyTo,
-      input_message_content: content,
-    }) as Td.message;
-    const confirmed = await sendTracker.track(sent);
-
-    const sentText = confirmed.content._ === 'messageText'
-      ? confirmed.content.text.text
-      : '';
-    return { messageId: tdLibToServerMessageId(confirmed.id), date: confirmed.date, text: sentText };
+    const richMessage = richMessageFor(html);
+    const prepared = richMessage
+      ? { richMessage }
+      : { message: html, parseMode: 'html' as const };
+    const [plainText, entities] = richMessage ? [html, []] : HTMLParser.parse(html);
+    const sent = await client.sendMessage(await resolveChatPeer(chatId), {
+      ...prepared,
+      replyTo: opts?.replyToMessageId,
+      ...decideLinkPreviewOptions(plainText, entities, String(chatId)),
+    });
+    return toSent(sent);
   };
 
-  const sendFileGeneric = async (
+  const sendMedia = async (
     chatId: string | number,
     buffer: Buffer,
-    kind: 'photo' | 'video' | 'audio' | 'voice' | 'animation' | 'video_note' | 'document',
+    kind: 'photo' | 'video' | 'audio' | 'document',
     opts?: MediaSendOptions,
   ): Promise<SentMessage> => {
-    await ensureChatKnown(chatId);
-    const workDir = await mkdtemp(join(tmpdir(), 'cahciua-tdl-'));
-    try {
-      const fileName = opts?.fileName ?? `${kind}.bin`;
-      const path = await writeTempBuffer(workDir, buffer, fileName);
-      const inputFile: Td.InputFile$Input = { _: 'inputFileLocal', path };
-      const caption = opts?.caption ? formattedFromHtml(opts.caption, opts.captionParseMode ?? 'HTML') : { _: 'formattedText' as const, text: '', entities: [] };
-
-      let content: Td.InputMessageContent$Input;
-      switch (kind) {
-      case 'photo':
-        content = { _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: inputFile }, caption };
-        break;
-      case 'video':
-        content = { _: 'inputMessageVideo', video: { _: 'inputVideo', video: inputFile, supports_streaming: true }, caption };
-        break;
-      case 'audio':
-        content = { _: 'inputMessageAudio', audio: { _: 'inputAudio', audio: inputFile }, caption };
-        break;
-      case 'voice':
-        content = { _: 'inputMessageVoiceNote', voice_note: { _: 'inputVoiceNote', voice_note: inputFile, duration: 0 }, caption };
-        break;
-      case 'animation':
-        content = { _: 'inputMessageAnimation', animation: { _: 'inputAnimation', animation: inputFile }, caption };
-        break;
-      case 'video_note':
-        content = { _: 'inputMessageVideoNote', video_note: { _: 'inputVideoNote', video_note: inputFile, duration: 0, length: 240 } };
-        break;
-      case 'document':
-      default:
-        content = { _: 'inputMessageDocument', document: { _: 'inputDocument', document: inputFile, disable_content_type_detection: false }, caption };
-        break;
-      }
-
-      const sent = await client.invoke({
-        _: 'sendMessage',
-        chat_id: Number(chatId),
-        reply_to: opts?.replyToMessageId
-          ? { _: 'inputMessageReplyToMessage', message_id: serverToTdLibMessageId(opts.replyToMessageId) }
-          : undefined,
-        input_message_content: content,
-      }) as Td.message;
-      const confirmed = await sendTracker.track(sent);
-      const captionText = 'caption' in confirmed.content && confirmed.content.caption ? confirmed.content.caption.text : '';
-      return { messageId: tdLibToServerMessageId(confirmed.id), date: confirmed.date, text: captionText };
-    } finally {
-      await rm(workDir, { recursive: true, force: true });
-    }
+    const fileName = kind === 'photo'
+      ? photoFileName(opts?.fileName)
+      : opts?.fileName ?? `${kind}.bin`;
+    const sent = await client.sendFile(await resolveChatPeer(chatId), {
+      file: namedBuffer(buffer, fileName),
+      caption: opts?.caption,
+      parseMode: captionParseMode(opts?.captionParseMode),
+      replyTo: opts?.replyToMessageId,
+      forceDocument: kind === 'document',
+    });
+    return toSent(sent);
   };
 
-  const sendPhoto = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'photo', o);
-  const sendDocument = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'document', o);
-  const sendVideo = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'video', o);
-  const sendAudio = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'audio', o);
-  const sendVoice = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'voice', o);
-  const sendAnimation = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'animation', o);
-  const sendVideoNote = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendFileGeneric(c, b, 'video_note', o);
+  const sendPhoto = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendMedia(c, b, 'photo', o);
+  const sendDocument = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendMedia(c, b, 'document', o);
+  const sendVideo = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendMedia(c, b, 'video', o);
+  const sendAudio = (c: string | number, b: Buffer, o?: MediaSendOptions) => sendMedia(c, b, 'audio', o);
+
+  const sendVoice = async (c: string | number, b: Buffer, o?: MediaSendOptions): Promise<SentMessage> =>
+    toSent(await client.sendFile(await resolveChatPeer(c), {
+      file: namedBuffer(b, o?.fileName ?? 'voice.ogg'),
+      caption: o?.caption,
+      parseMode: captionParseMode(o?.captionParseMode),
+      replyTo: o?.replyToMessageId,
+      voiceNote: true,
+    }));
+
+  const sendAnimation = async (c: string | number, b: Buffer, o?: MediaSendOptions): Promise<SentMessage> =>
+    toSent(await client.sendFile(await resolveChatPeer(c), {
+      file: namedBuffer(b, o?.fileName ?? 'animation.mp4'),
+      caption: o?.caption,
+      parseMode: captionParseMode(o?.captionParseMode),
+      replyTo: o?.replyToMessageId,
+      attributes: [new Api.DocumentAttributeAnimated()],
+    }));
+
+  const sendVideoNote = async (c: string | number, b: Buffer, o?: MediaSendOptions): Promise<SentMessage> =>
+    toSent(await client.sendFile(await resolveChatPeer(c), {
+      file: namedBuffer(b, o?.fileName ?? 'video-note.mp4'),
+      replyTo: o?.replyToMessageId,
+      videoNote: true,
+    }));
 
   const sendMediaGroup = async (chatId: string | number, media: MediaGroupItem[], opts?: SendOptions): Promise<SentMessage[]> => {
-    await ensureChatKnown(chatId);
-    const workDir = await mkdtemp(join(tmpdir(), 'cahciua-tdl-'));
-    try {
-      const contents = await Promise.all(media.map(async (m, i): Promise<Td.InputMessageContent$Input> => {
-        const fileName = m.fileName ?? `${m.type}-${i}.bin`;
-        const path = await writeTempBuffer(workDir, m.buffer, fileName);
-        const inputFile: Td.InputFile$Input = { _: 'inputFileLocal', path };
-        const caption = m.caption ? formattedFromHtml(m.caption, m.captionParseMode ?? 'HTML') : { _: 'formattedText' as const, text: '', entities: [] };
-        switch (m.type) {
-        case 'photo': return { _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: inputFile }, caption };
-        case 'video': return { _: 'inputMessageVideo', video: { _: 'inputVideo', video: inputFile, supports_streaming: true }, caption };
-        case 'audio': return { _: 'inputMessageAudio', audio: { _: 'inputAudio', audio: inputFile }, caption };
-        case 'document':
-        default: return { _: 'inputMessageDocument', document: { _: 'inputDocument', document: inputFile, disable_content_type_detection: false }, caption };
-        }
-      }));
-
-      const result = await client.invoke({
-        _: 'sendMessageAlbum',
-        chat_id: Number(chatId),
-        reply_to: opts?.replyToMessageId
-          ? { _: 'inputMessageReplyToMessage', message_id: serverToTdLibMessageId(opts.replyToMessageId) }
-          : undefined,
-        input_message_contents: contents,
-      }) as Td.messages;
-      if (result.messages.length !== media.length)
-        throw new Error(`TDLib returned ${result.messages.length} album messages for ${media.length} inputs`);
-      const confirmed = await Promise.all(result.messages.map(async message => {
-        if (!message) throw new Error('TDLib returned no album message');
-        return await sendTracker.track(message);
-      }));
-      return confirmed.map((message): SentMessage => ({
-        messageId: tdLibToServerMessageId(message.id),
-        date: message.date,
-        text: 'caption' in message.content ? message.content.caption.text : '',
-      }));
-    } finally {
-      await rm(workDir, { recursive: true, force: true });
-    }
+    const sent = await client.sendFile(await resolveChatPeer(chatId), {
+      file: media.map((item, index) => namedBuffer(
+        item.buffer,
+        item.type === 'photo'
+          ? photoFileName(item.fileName)
+          : item.fileName ?? `${item.type}-${index}.bin`,
+      )),
+      caption: media.map(item => item.caption ?? ''),
+      parseMode: captionParseMode(media[0]?.captionParseMode),
+      replyTo: opts?.replyToMessageId,
+    });
+    const messages = Array.isArray(sent) ? sent : [sent];
+    return messages.map(toSent);
   };
 
   const sendChatAction = async (chatId: string | number) => {
-    await ensureChatKnown(chatId);
-    await client.invoke({
-      _: 'sendChatAction',
-      chat_id: Number(chatId),
-      action: { _: 'chatActionTyping' },
-    });
+    await client.setTyping(await resolveChatPeer(chatId));
   };
 
   const setMessageReaction = async (chatId: string | number, messageId: number, emoji: string | undefined) => {
-    await ensureChatKnown(chatId);
-    await client.invoke({
-      _: 'setMessageReactions',
-      chat_id: Number(chatId),
-      message_id: serverToTdLibMessageId(messageId),
-      reaction_types: emoji ? [{ _: 'reactionTypeEmoji', emoji }] : [],
-      is_big: false,
-    });
-  };
-
-  const waitForFileDownload = async (fileId: number, timeoutMs = 60000): Promise<Td.file> => {
-    // tdlib's `synchronous: true` flag returns once the download succeeds, fails, or
-    // is canceled; that's what we want for our blocking download API.
-    const result = await Promise.race([
-      client.invoke({ _: 'downloadFile', file_id: fileId, priority: 1, offset: 0, limit: 0, synchronous: true }) as Promise<Td.file>,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Download timeout')), timeoutMs)),
-    ]);
-    if (!result.local.is_downloading_completed)
-      throw new Error(`File ${fileId} did not finish downloading`);
-    return result;
+    await client.sendReaction(
+      await resolveChatPeer(chatId),
+      messageId,
+      emoji ? [new Api.ReactionEmoji({ emoticon: emoji })] : [],
+    );
   };
 
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
-    await ensureChatKnown(chatId);
-    const msg = await client.invoke({ _: 'getMessage', chat_id: Number(chatId), message_id: serverToTdLibMessageId(messageId) }) as Td.message;
-    const file = findFileInContent(msg.content);
-    if (!file) return undefined;
-    const downloaded = await waitForFileDownload(file.id);
-    const fs = await import('node:fs/promises');
-    return await fs.readFile(downloaded.local.path);
+    const messages = await client.getMessages(await resolveChatPeer(chatId), { ids: [messageId] });
+    const message = messages[0];
+    if (!message || !(message instanceof Api.Message) || !message.media) return undefined;
+    const result = await client.downloadMedia(message, {});
+    return Buffer.isBuffer(result) ? result : undefined;
   };
 
   const getCustomEmojiInfo = async (customEmojiIds: string[]): Promise<CustomEmojiInfo[]> => {
     if (customEmojiIds.length === 0) return [];
-    const stickers = await client.invoke({
-      _: 'getCustomEmojiStickers',
-      custom_emoji_ids: customEmojiIds,
-    }) as Td.stickers;
-    return stickers.stickers.flatMap((s): CustomEmojiInfo[] => {
-      if (s.full_type._ !== 'stickerFullTypeCustomEmoji') return [];
-      const stickerFile = s.sticker;
+    const documents = await client.getCustomEmojiDocuments(customEmojiIds.map(id => bigInt(id)));
+    return documents.flatMap((document): CustomEmojiInfo[] => {
+      if (!(document instanceof Api.Document)) return [];
       return [{
-        customEmojiId: String(s.id),
-        format: s.format._ === 'stickerFormatTgs'
-          ? 'animated'
-          : s.format._ === 'stickerFormatWebm' ? 'video' : 'static',
+        customEmojiId: String(document.id),
+        format: document.mimeType === 'application/x-tgsticker'
+          ? 'animated' : document.mimeType === 'video/webm' ? 'video' : 'static',
         download: async () => {
-          const downloaded = await waitForFileDownload(stickerFile.id);
-          const fs = await import('node:fs/promises');
-          return await fs.readFile(downloaded.local.path);
+          const media = new Api.MessageMediaDocument({ document });
+          const result = await client.downloadMedia(media, {});
+          if (!Buffer.isBuffer(result)) throw new Error(`Failed to download custom emoji ${document.id}`);
+          return result;
         },
       }];
     });
@@ -443,7 +285,6 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     downloadMessageMedia,
     getCustomEmojiInfo,
     raw: () => client,
-    entityCache: () => cache,
     botUserId: () => userId,
     botInfo: () => info,
   };

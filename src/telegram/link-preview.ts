@@ -1,55 +1,38 @@
-import type * as Td from 'tdlib-types';
+import { Api } from 'teleproto';
 
-const TELEGRAM_HOSTS = new Set([
-  't.me',
-  'telegram.me',
-  'telegram.org',
-  'telegram.dog',
-]);
+const TELEGRAM_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.org', 'telegram.dog']);
 
-const isTelegramHost = (hostname: string): boolean => {
-  const h = hostname.toLowerCase();
-  if (TELEGRAM_HOSTS.has(h)) return true;
-  // subdomains of telegram.org (web.telegram.org, etc.)
-  return h.endsWith('.telegram.org');
+const telegramPathPrefix = (chatId: string): string =>
+  chatId.startsWith('-100') ? `https://t.me/c/${chatId.slice(4)}/` : '';
+
+/**
+ * Whether an outgoing URL should get a Telegram link preview. Internal message
+ * deep links are the only links this bot deliberately previews; arbitrary
+ * LLM-authored URLs stay inert so they cannot inject remote content.
+ */
+export const qualifiesForPreview = (rawUrl: string, chatId?: string): boolean => {
+  if (chatId && telegramPathPrefix(chatId) !== '' && rawUrl.startsWith(telegramPathPrefix(chatId)))
+    return true;
+  let url: URL;
+  try { url = new URL(rawUrl); } catch { return false; }
+  return url.protocol === 'http:' || url.protocol === 'https:'
+    ? !TELEGRAM_HOSTS.has(url.hostname.toLowerCase()) && !url.hostname.toLowerCase().endsWith('.telegram.org')
+      && (url.search.length > 1 || url.pathname.split('/').filter(Boolean).length >= 2)
+    : false;
 };
 
-const hasTwoSegmentsOrQuery = (url: URL): boolean => {
-  if (url.search.length > 1) return true;
-  const segments = url.pathname.split('/').filter(s => s.length > 0);
-  return segments.length >= 2;
-};
-
-const qualifiesForPreview = (rawUrl: string): boolean => {
-  let parsed: URL;
-  try { parsed = new URL(rawUrl); } catch { return false; }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-  if (isTelegramHost(parsed.hostname)) return false;
-  return hasTwoSegmentsOrQuery(parsed);
-};
-
-const entityUrlIfTextEqualsUrl = (text: string, entity: Td.textEntity$Input): string | undefined => {
-  if (entity.offset == null || entity.length == null || !entity.type) return undefined;
-  const displayed = text.slice(entity.offset, entity.offset + entity.length);
-  if (entity.type._ === 'textEntityTypeUrl') return displayed;
-  if (entity.type._ === 'textEntityTypeTextUrl' && entity.type.url === displayed) return entity.type.url;
-  return undefined;
-};
-
-// Whether the message should preview a link. We enable preview only when at
-// least one URL passes all three rules: its visible text equals the URL, the
-// host is not a Telegram domain, and the URL carries two or more path segments
-// or a query string. When multiple qualify, we pin the first one — otherwise
-// TDLib would default to whichever URL appears first in the text, which might
-// not be the qualifying one.
 export const decideLinkPreviewOptions = (
   text: string,
-  entities: ReadonlyArray<Td.textEntity$Input>,
-): Td.linkPreviewOptions$Input => {
-  for (const e of entities) {
-    const url = entityUrlIfTextEqualsUrl(text, e);
-    if (url !== undefined && qualifiesForPreview(url))
-      return { _: 'linkPreviewOptions', is_disabled: false, url };
-  }
-  return { _: 'linkPreviewOptions', is_disabled: true };
+  entities: ReadonlyArray<Api.TypeMessageEntity>,
+  chatId?: string,
+): { linkPreview: boolean } => {
+  const hasOwnDeepLink = chatId != null
+    && text.includes(telegramPathPrefix(chatId));
+  const hasQualifyingUrl = entities.some(entity =>
+    entity instanceof Api.MessageEntityTextUrl
+      ? qualifiesForPreview(entity.url, chatId)
+      : entity instanceof Api.MessageEntityUrl
+        ? qualifiesForPreview(text.slice(entity.offset, entity.offset + entity.length), chatId)
+        : false);
+  return { linkPreview: hasOwnDeepLink || hasQualifyingUrl };
 };

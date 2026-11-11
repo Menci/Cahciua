@@ -25,7 +25,7 @@ See [docs/dcp-design.md](docs/dcp-design.md) and [AGENTS.md](AGENTS.md).
 
 ## Telegram Runtime
 
-Both bot and optional userbot use TDLib through `tdl`. The userbot is the exclusive ingress source when enabled because Telegram bot accounts cannot observe complete group history or all updates. The bot always owns outbound sends.
+Both bot and optional userbot use `teleproto`, a pure-TypeScript MTProto client with no native dependency. The userbot is the exclusive ingress source when enabled because Telegram bot accounts cannot observe complete group history or all updates. The bot always owns outbound sends.
 
 Ingress is ordered per chat. Enabled image, animation, and custom-emoji descriptions are blocking transforms: unresolved head events prevent later events from committing. Successful bot sends immediately inject a synthetic self-event so the probe sees the bot's action before userbot echo arrives.
 
@@ -48,7 +48,7 @@ pnpm install
 cp config.example.yaml config.yaml
 ```
 
-Fill `config.yaml`. To enable full-visibility userbot ingress, set `telegram.userbotEnabled: true`, then run:
+Fill `config.yaml`. To enable full-visibility userbot ingress, set `telegram.userbotEnabled: true`, then run `pnpm login` once to save the userbot session to `data/session`. Existing gramjs/teleproto session strings can be reused.
 
 ```bash
 pnpm login
@@ -87,4 +87,4 @@ Replace the example identifiers with names from [Anthropic's beta header documen
 
 The composition root uses statically imported, factory-only tsyringe registrars. Core services remain closure factories and do not receive the container. Startup explicitly owns replay, activation, and shutdown order.
 
-Do not commit or push generated TDLib types, local databases, sessions, request dumps, or configuration secrets.
+Do not commit or push local databases, sessions, request dumps, or configuration secrets.

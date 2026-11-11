@@ -489,9 +489,9 @@ export const loadMessageAttachments = (db: DB, chatId: string, messageId: number
 
 /**
  * Cheap existence check used at tool boundaries to validate LLM-supplied
- * message_ids before they reach TDLib. TDLib aborts the process on malformed
- * ids (assertion failure, not a catchable error), so we MUST gate on this
- * before any react/reply_to call.
+ * message_ids before they reach the Telegram client. The model can name any
+ * integer, and a bogus id would otherwise be sent verbatim to the server from
+ * react/reply_to.
  */
 export const messageExists = (db: DB, chatId: string, messageId: number): boolean => {
   const row = db.select({ messageId: messages.messageId })

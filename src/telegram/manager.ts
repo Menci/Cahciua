@@ -1,6 +1,5 @@
-import { mkdirSync } from 'node:fs';
-
 import type { Logger } from '@guiiai/logg';
+import type { StringSession } from 'teleproto/sessions';
 
 import type { BotClient, CustomEmojiInfo, MediaGroupItem, MediaSendOptions, SendOptions, SentMessage } from './bot';
 import { createBotClient } from './bot';
@@ -23,8 +22,8 @@ export interface TelegramClientOptions {
   apiHash: string;
   botToken: string;
   userbotEnabled: boolean;
-  botDataDir: string;
-  userbotDataDir: string;
+  userbotSession: StringSession | undefined;
+  botSessionPath: string;
 }
 
 export interface TelegramClients {
@@ -75,22 +74,17 @@ export const createTelegramClients = (
   options: TelegramClientOptions,
   logger: Logger,
 ): TelegramClients => {
-  mkdirSync(options.botDataDir, { recursive: true });
-  if (options.userbotEnabled) mkdirSync(options.userbotDataDir, { recursive: true });
-
   const bot = createBotClient({
     apiId: options.apiId,
     apiHash: options.apiHash,
     token: options.botToken,
-    databaseDirectory: `${options.botDataDir}/db`,
-    filesDirectory: `${options.botDataDir}/files`,
+    sessionPath: options.botSessionPath,
   }, logger);
   const userbot = options.userbotEnabled
     ? createUserbotClient({
         apiId: options.apiId,
         apiHash: options.apiHash,
-        databaseDirectory: `${options.userbotDataDir}/db`,
-        filesDirectory: `${options.userbotDataDir}/files`,
+        session: options.userbotSession!,
       }, logger)
     : undefined;
   return { bot, userbot };
@@ -248,7 +242,7 @@ export const createTelegramManager = (
     });
 
     userbot.onMessageDelete(del => {
-      if (!del.chatId) throw new Error('TDLib delete update is missing chatId');
+      if (!del.chatId) throw new Error('Delete update is missing chatId');
       const chatId = del.chatId;
       if (!botChats.has(chatId)) return;
       ingressQueue.enqueue({
@@ -263,7 +257,8 @@ export const createTelegramManager = (
     bot.onMessage(ingestMessage);
   }
 
-  // openChat makes TDLib deliver updateChatAction reliably for large supergroups.
+  // Open the chat while the debounce window is active so a large supergroup
+  // keeps delivering typing updates.
   const startTypingPolling = (chatId: string) => {
     if (!userbot) return;
     void userbot.openChat(chatId).catch(err => log.withError(err).withFields({ chatId }).warn('openChat failed'));
@@ -274,10 +269,10 @@ export const createTelegramManager = (
   };
 
   const start = async () => {
-    await Promise.all([
-      bot.start(),
-      userbot?.start(),
-    ]);
+    // Both clients are teleproto clients. Start the ingress client first so its
+    // entity cache is warm before outbound actions begin.
+    if (userbot) await userbot.start();
+    await bot.start();
   };
 
   const stop = async () => {

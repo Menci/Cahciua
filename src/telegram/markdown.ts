@@ -87,9 +87,9 @@ function isTerminatorChar(ch: number): boolean {
 md.use(spoilerPlugin);
 
 // --- Math plugin: `$inline$` and `$$block$$` → <tg-math> / <tg-math-block> ---
-// Output tags are Telegram Rich Message tags (only valid in richMessageSourceHtml).
-// When the rendered HTML contains them, the caller must route the message through
-// inputMessageRichMessage instead of inputMessageText. The detection is a simple
+// Output tags belong to Telegram's rich-message HTML grammar, which only
+// `Rich.html` accepts. When the rendered HTML contains them, the caller must
+// send a rich message instead of plain HTML. The detection is a simple
 // substring scan on the output — see hasRichOnlyMarkup().
 
 md.use(MarkdownItMath, {
@@ -113,12 +113,11 @@ md.renderer.rules.em_open = () => '<i>';
 md.renderer.rules.em_close = () => '</i>';
 md.renderer.rules.hardbreak = () => '\n';
 
-// --- Blocks: prefer plain-mode HTML (parseTextEntities-acceptable) over
-// rich-only tags. Headings, lists, and hr have natural plain renderings —
-// emit those so the message dispatches via inputMessageText instead of
-// inputMessageRichMessage. Tables and math have no good plain alternative
-// and stay as rich-only tags (the send path detects them and routes through
-// inputMessageRichMessage). See hasRichOnlyMarkup.
+// --- Blocks: prefer plain-mode HTML over rich-only tags. Headings, lists,
+// and hr have natural plain renderings — emit those so the message goes out as
+// ordinary HTML. Tables and math have no good plain alternative and stay as
+// rich-only tags, which the send path detects and routes through
+// `Rich.html`. See hasRichOnlyMarkup.
 
 md.renderer.rules.paragraph_open = () => '';
 md.renderer.rules.paragraph_close = (tokens, idx) =>
@@ -209,11 +208,10 @@ export const renderMarkdownToTelegramHTML = (markdown: string): string => {
     .replace(/\n+$/, '');
 };
 
-// Tags that exist only in Telegram's Rich Message HTML grammar
-// (richMessageSourceHtml) and are rejected by the plain entity grammar
-// (parseTextEntities). When the rendered HTML contains any of these, the
-// caller must dispatch through inputMessageRichMessage; otherwise the
-// rendered HTML is a subset that parseTextEntities accepts.
+// Tags that exist only in Telegram's rich-message HTML grammar and are
+// rejected by the plain HTML parser. When the rendered HTML contains any of
+// these, the caller must send a rich message; otherwise the rendered HTML is a
+// subset that ordinary HTML parsing accepts.
 //
 // Headings, lists, and hr are intentionally NOT in this set — they degrade
 // to plain-mode renderings (bold, bullet/number prefixes, em-dash divider).

@@ -39,7 +39,7 @@ Canonical IDs are strings. Every event carries:
 
 `receivedAtMs` is the ordering timestamp. Persistence uses `(received_at, id)` as a deterministic tie-break.
 
-Media descriptions are resolved before adaptation admits an event. Raw TDLib updates capture ingress metadata before any await; metadata resolution and media work happen in the ordered manager queue. The queue can transform later events in parallel but commits only the contiguous ready prefix. Transform or commit failures retry and block the session rather than publishing incomplete context.
+Media descriptions are resolved before adaptation admits an event. Raw teleproto updates capture ingress metadata before any await; metadata resolution and media work happen in the ordered manager queue. The queue can transform later events in parallel but commits only the contiguous ready prefix. Transform or commit failures retry and block the session rather than publishing incomplete context.
 
 ## Projection
 
@@ -57,7 +57,7 @@ Projection never performs I/O and never receives LLM output.
 
 Rendering converts IC into ordered RC segments. Each segment retains `receivedAtMs` and metadata used by scheduling (`senderId`, `isMyself`, `isSelfSent`, mention/reply flags).
 
-User-controlled identity is encoded in XML attributes. Content is escaped and cannot inject sibling message attributes. Attachments expose stable logical file IDs in `messageId:index` form; TDLib-local IDs are not persisted.
+User-controlled identity is encoded in XML attributes. Content is escaped and cannot inject sibling message attributes. Attachments expose stable logical file IDs in `messageId:index` form; provider-local file references are not persisted.
 
 Configured blocked senders are masked at render time. Their source events remain in persistence and IC so changing configuration can restore them after replay.
 
@@ -166,7 +166,7 @@ The selected old window is summarized into structured plain text. A new row is a
 
 ## Telegram Runtime
 
-Telegram uses two possible TDLib clients:
+Telegram uses two possible teleproto clients:
 
 - Bot: required, owns all outbound actions.
 - Userbot: optional, exclusively owns ingress when configured.
@@ -183,7 +183,7 @@ persist platform message/edit/delete row
 
 The queue retries the same commit object on persistence/publication failure; live handlers and the event sink make each phase idempotent. Unconfigured chats stop after persistence.
 
-Driver hooks own outbound sends. After Telegram confirms a send (the terminal `updateMessageSendSucceeded`/`updateMessageSendFailed` that also carries the final server message id), they create and persist a synthetic `isSelfSent` event, project it for configured chats, and deliberately do not notify Driver. This makes the bot's action visible to the next probe before userbot echo, and its message id makes the echo deduplication in Projection an exact match.
+Driver hooks own outbound sends. teleproto resolves a send only after Telegram accepts it and returns the server-confirmed `Api.Message`, including the final server message id; the hooks create and persist a synthetic `isSelfSent` event, project it for configured chats, and deliberately do not notify Driver. This makes the bot's action visible to the next probe before userbot echo, and its message id makes the echo deduplication in Projection an exact match.
 
 Spam moderation is a bot-owned side effect enabled per chat through `tools.banSpammer` (default false). Tool exposure and backend authorization share the enabled-chat setting. Group policy is injected into probe and primary through chat `systemFiles`. Deployment-local group policies can identify eligible accounts through sufficient conversational history showing exclusively one-off solicitation. Genuine questions, feedback, and ordinary exchanges establish normal participation. For normal members discussing topics outside the bot's permitted scope, the bot remains silent on that topic and leaves member conduct to human administrators. Archived names and messages serve as internal reference examples interpreted in context. Targets are derived from persisted evidence messages and limited to eligible members with fewer than 10 distinct archived message IDs. Counting retains deleted messages and deduplicates edits, with scope limited to observed history.
 

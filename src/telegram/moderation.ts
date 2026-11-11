@@ -7,7 +7,7 @@ const BOT_DELETE_WINDOW_SEC = 48 * 60 * 60;
 
 export const createModerationService = (deps: {
   api: ModerationApi;
-  findSender: (chatId: string, messageId: number) => string | undefined;
+  findAuthor: (chatId: string, messageId: number) => { userId: string; username?: string } | undefined;
   loadMessageIds: (chatId: string, userId: string) => number[];
   botUserId: string;
   enabledChatIds: ReadonlySet<string>;
@@ -21,33 +21,41 @@ export const createModerationService = (deps: {
     if (!/^-100[1-9]\d*$/.test(chatId)) return { status: 'rejected', reason: 'unsupported_chat' };
     if (!Number.isSafeInteger(messageId) || messageId <= 0 || messageId > 0x7FFFFFFF)
       throw new Error('Invalid Telegram message ID');
-    const userId = deps.findSender(chatId, messageId);
-    if (!userId) return { status: 'rejected', reason: 'unknown_message' };
+    const archived = deps.findAuthor(chatId, messageId);
+    if (!archived) return { status: 'rejected', reason: 'unknown_message' };
+    const userId = archived.userId;
     if (!/^[1-9]\d*$/.test(userId) || !Number.isSafeInteger(Number(userId)) || userId === deps.botUserId)
       return { status: 'rejected', reason: 'protected_user' };
 
-    const memberships = await deps.api.inspectMembers(chatId, userId);
+    const memberships = await deps.api.inspectMembers(chatId, {
+      messageId,
+      userId,
+      ...archived.username ? { username: archived.username } : {},
+    });
     if (!memberships.canModerate) return { status: 'rejected', reason: 'missing_permissions' };
-    if (memberships.targetStatus === 'protected') return { status: 'rejected', reason: 'protected_user' };
+    // The archive identifies the author after the evidence is gone, e.g. a
+    // summoned bot that never joined then deleted its advertisement. The ban
+    // handle must be resolved through the bot's own access hash; a target the
+    // bot cannot address is not actionable, so report it as a mismatch rather
+    // than risk banning a different account.
+    const target = memberships.target;
+    if (!target) return { status: 'rejected', reason: 'sender_mismatch' };
+    if (target.status === 'protected') return { status: 'rejected', reason: 'protected_user' };
 
     const evidence = await deps.api.inspectMessage(chatId, messageId);
     if (evidence && evidence.senderId !== userId) return { status: 'rejected', reason: 'sender_mismatch' };
-    // The archive identifies the author after the evidence is gone, e.g. a
-    // summoned bot that never joined then deleted its advertisement.
 
     const messageIds = deps.loadMessageIds(chatId, userId);
     if (messageIds.length === 0 || messageIds.length >= MESSAGE_LIMIT)
       return { status: 'rejected', reason: 'message_limit' };
 
-    await deps.api.ban(chatId, userId);
+    await deps.api.ban(chatId, target);
     const result: Extract<BanSpammerResult, { banned: true }> = {
       status: 'completed', userId, banned: true,
       deletedMessageIds: [], unavailableMessageIds: [], notDeletableMessageIds: [], failedMessageIds: [],
     };
     for (const id of messageIds) {
       try {
-        // Load the bot's own cache: TDLib silently skips unknown IDs during deletion.
-        // https://github.com/tdlib/td/blob/a17f87c4cff7b90b278d12b91ba0614383aaee82/td/telegram/MessagesManager.cpp#L8272
         const message = await deps.api.inspectMessage(chatId, id);
         if (!message) {
           result.unavailableMessageIds.push(id);

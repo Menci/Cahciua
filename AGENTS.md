@@ -19,11 +19,11 @@ See `docs/dcp-design.md` for rationale and data flow.
 
 ## Technology
 
-Node >=22, TypeScript, pnpm, tdl/libtdjson, better-sqlite3 + Drizzle, Immer, alien-signals, Valibot, `@velin-dev/core`, `@guiiai/logg`, tsyringe (factory registration only), Vitest, sharp, ffmpeg-static, ffprobe-static, and lottie-frame. lottie-frame requires system `libpng-dev` and `librlottie-dev`.
+Node >=22, TypeScript, pnpm, teleproto, better-sqlite3 + Drizzle, Immer, alien-signals, Valibot, `@velin-dev/core`, `@guiiai/logg`, tsyringe (factory registration only), Vitest, sharp, ffmpeg-static, ffprobe-static, and lottie-frame. lottie-frame requires system `libpng-dev` and `librlottie-dev`.
 
 ## Commands
 
-`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm typecheck` / `pnpm lint[:fix]` / `pnpm test[:run]` / `pnpm login` / `pnpm db:generate` / `pnpm tdlib:build` / `pnpm tdlib:types`.
+`pnpm dev` / `pnpm start` / `pnpm build` / `pnpm typecheck` / `pnpm lint[:fix]` / `pnpm test[:run]` / `pnpm login` / `pnpm db:generate`.
 
 ## Ownership
 
@@ -36,7 +36,7 @@ src/
 ├── llm/          Non-streaming provider transports, request prep, request dumps
 ├── media/        Thumbnails, frame extraction, alt-text resolvers, media runtime
 ├── driver/       Scheduling, probe/primary wake-up, runner, tools, compaction
-├── telegram/     TDLib clients, manager, adaptation, ingress/egress adapters
+├── telegram/     teleproto clients, manager, adaptation, ingress/egress adapters
 ├── container/    Typed tsyringe tokens and statically imported registrars
 ├── startup/      Replay and application lifecycle orchestration
 ├── db/           Drizzle schema and persistence
@@ -84,13 +84,13 @@ DB replay orders by `(received_at, id)`.
 
 Enabled media transforms are blocking. A per-chat queue may transform later events speculatively, but only a contiguous ready prefix commits. A failed head retries indefinitely and blocks the session; partially transformed events never enter Adaptation.
 
-### TDLib Resolution
+### MTProto Runtime
 
-Runtime resolves `vendor/libtdjson.so` first and falls back to `prebuilt-tdlib`. `types/tdlib-types.d.ts` is generated and gitignored. `pnpm tdlib:build` builds TDLib master, applies `scripts/tdlib-patches/*.patch`, and regenerates types. `postinstall` runs `pnpm tdlib:types`.
+Both clients use `teleproto`, a pure-TypeScript MTProto implementation with no native dependency. Bot login uses the bot token; userbot login persists a `StringSession` to `data/session` through `pnpm login`. `new StringSession(existing)` accepts the gramjs-era session string, so existing userbot sessions keep working without a new login.
 
 ### Telegram Clients And Ingress
 
-Bot and userbot are both tdl clients. With a configured userbot, it exclusively owns message/edit/delete/typing ingress; otherwise the bot provides limited ingress. Outbound sends always use the bot and wait for TDLib's terminal `updateMessageSendSucceeded`/`updateMessageSendFailed` before returning: TDLib resolves `sendMessage` with a per-dialog yet-unsent id while the upload and server confirmation continue asynchronously, so temp files backing `inputFileLocal` must live until that confirmation and the final server message id is only known there. There is no confirmation timeout — large uploads and FLOOD_WAIT retries keep the message pending for unbounded time while still making progress; pending sends are aborted only on client stop. Downloads prefer userbot and fall back to bot, keyed by `(chatId, messageId)` rather than persisted TDLib-local file IDs.
+Bot and userbot are both teleproto `TelegramClient` instances. With a configured userbot, it exclusively owns message/edit/delete/typing ingress; otherwise the bot provides limited ingress. Outbound sends always use the bot; teleproto returns the server-confirmed `Api.Message`, including its final server message id. Downloads prefer userbot and fall back to bot, keyed by `(chatId, messageId)` rather than persisted provider-local file references.
 
 `TelegramManager` owns clients, the ordered ingress queue, and blocking transforms. Metadata resolution and media work run inside that queue after timestamps are captured. `live-handlers.ts` owns Telegram update side effects. `event-sink.ts` centralizes canonical persistence/publication. Commit and publication phases are idempotent so failures retry without advancing the queue cursor or duplicating events. `driver-hooks.ts` owns send/react/download and synthetic self-events. `post-startup.ts` owns historical media backfills.
 
@@ -100,7 +100,7 @@ Configured chats are the in-memory residency whitelist. Unconfigured chats persi
 
 `ban_spammer(message_id, reason)` is chat-scoped and opt-in through `tools.banSpammer: true` (default false). The backend enforces the enabled-chat set. Group policy reaches both probe and primary through chat `systemFiles` alongside identity files. Deployment-local group policies can identify eligible accounts through sufficient conversational history showing exclusively one-off solicitation. Genuine questions, feedback, and ordinary exchanges establish normal participation. For normal members discussing topics outside the bot's permitted scope, the bot remains silent on that topic and leaves member conduct to human administrators. Archived names and messages serve as internal reference examples interpreted in context. The service derives the target from a persisted message author, verifies bot permissions and target privileges, and authorizes eligible targets with fewer than 10 distinct observed message IDs, including accounts that left, were banned, or never joined (such as summoned inline bots and their summoners). The archive count retains deleted messages, deduplicates edits, and survives compaction and rejoining; its scope is observed speech history. Eligibility is independent of join age.
 
-Moderation uses the bot account for permanent bans and deletion of known accessible messages permitted within Telegram's 48-hour window. `src/telegram/moderation.ts` checks current state and performs each requested action; `moderation-api.ts` owns TDLib calls; `src/db/moderation.ts` queries the existing event archive. The existing tool call/result history records evidence ID, private reason, target UID, and actual outcomes. Each invocation freshly checks membership, evidence, and message count, then returns deletion results for that invocation. Confirmed removals enter Pipeline as canonical delete events with Driver notification disabled.
+Moderation uses the bot account for permanent bans and deletion of known accessible messages permitted within Telegram's 48-hour window. `src/telegram/moderation.ts` checks current state and performs each requested action; `moderation-api.ts` owns MTProto moderation calls; `src/db/moderation.ts` queries the existing event archive. MTProto access hashes are scoped to the authorized account, so `moderation-api.ts` derives every `InputUser` from a response the bot received itself — the evidence message for its author, username resolution for a summoned account — and never reuses ingress hashes, which belong to the userbot. The existing tool call/result history records evidence ID, private reason, target UID, and actual outcomes. Each invocation freshly checks membership, evidence, and message count, then returns deletion results for that invocation. Confirmed removals enter Pipeline as canonical delete events with Driver notification disabled.
 
 After a confirmed ban, the tool result supplies an exact announcement with a `tg://user?id=...` link labeled "spam 账号". Primary calls `send_message` with exactly one argument, `text`, containing that announcement. Names, usernames, profile text, spam content, media, and audit reasoning stay in the private assessment. Partial cleanup receives its own factual announcement. The tool always requires follow-up. The group file directs probe activation for eligible cleanup and its notice, preserving the mandatory-send invariant.
 
@@ -110,7 +110,7 @@ Every successful bot send creates a canonical `isSelfSent=true` event carrying t
 
 ### Telegram Markdown
 
-Output flows Markdown -> Telegram-supported HTML. Plain-compatible markup passes through TDLib `parseTextEntities`; table/math markup uses `inputMessageRichMessage`. TDLib remains the canonical entity parser, and entity arrays are never constructed manually.
+Output flows Markdown -> Telegram-supported HTML. Plain-compatible markup is sent as teleproto HTML; table/math markup uses teleproto `Rich.html` so Telegram parses the rich-message source. Entity arrays are never constructed manually. Link previews stay disabled on outbound messages.
 
 ### IC Mutation
 
@@ -182,7 +182,7 @@ Vitest tests live next to source as `*.test.ts`. Add regression tests for bugs a
 
 Use `pnpm add [-D]`; never hand-edit dependency manifests. Finish with `pnpm typecheck`, `pnpm lint:fix`, `pnpm test:run`, and `pnpm build`.
 
-Generated/local directories (`data/`, `.tdlib-build/`, `types/`, `dist/`) are excluded from lint.
+Generated/local directories (`data/`, `dist/`) are excluded from lint.
 
 ## Data Migration
 

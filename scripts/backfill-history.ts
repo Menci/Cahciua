@@ -10,30 +10,17 @@
  *
  * `--until` is exclusive: history is walked strictly OLDER than this id.
  * Typical value is the earliest message id already persisted for the chat.
- * For a freshly-joined group with no prior history, pass the id of the
- * most recent message you have seen (the bot's own join service message
- * works too).
  *
- * Pacing: between page fetches we sleep a uniform random 1-5 seconds to
- * stay well under any FloodWait threshold and avoid looking like a tight
- * scrape loop.
- *
- * Requires `pnpm login` to have populated the userbot tdlib data dir.
- * After backfill, add the chat id to `chats:` in config.yaml so cold-start
- * replay picks it up.
+ * Requires `pnpm login` to have created the userbot session.
  */
-import { mkdirSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { Format, initLogger, LogLevel, useLogger } from '@guiiai/logg';
-import * as tdl from 'tdl';
-import type * as Td from 'tdlib-types';
 
 import { loadConfig } from '../src/config/config';
 import { createDatabase, persistEvent, persistMessage, runMigrations } from '../src/db';
 import { adaptMessage, adaptServiceEvent, isServiceMessage } from '../src/telegram/adaptation';
-import { resolveTdjson } from '../src/telegram/tdjson';
-import { resolveUserbotDataDir } from '../src/telegram/tdlib-paths';
+import { loadUserbotSession } from '../src/telegram/session';
 import { createUserbotClient } from '../src/telegram/userbot';
 
 initLogger(LogLevel.Log, Format.Pretty);
@@ -61,17 +48,10 @@ const maxDays = Number(flag('--max-days') ?? 30);
 const maxMessages = Number(flag('--max-messages') ?? 5000);
 
 const config = loadConfig();
-tdl.configure({ tdjson: resolveTdjson() });
-
-const dataDir = resolveUserbotDataDir(config);
-mkdirSync(`${dataDir}/db`, { recursive: true });
-mkdirSync(`${dataDir}/files`, { recursive: true });
-
 const userbot = createUserbotClient({
   apiId: config.telegram.apiId,
   apiHash: config.telegram.apiHash,
-  databaseDirectory: `${dataDir}/db`,
-  filesDirectory: `${dataDir}/files`,
+  session: loadUserbotSession(config),
 }, logger);
 
 const db = createDatabase(config.database.path, logger);
@@ -79,21 +59,17 @@ runMigrations(db, logger);
 
 const resolveChatId = async (query: string): Promise<string> => {
   if (/^-?\d+$/.test(query)) return query;
-  const raw = userbot.raw();
-  const result = await raw.invoke({ _: 'searchChats', query, limit: 20 }) as Td.chats;
-  const matches: { id: number; title: string }[] = [];
-  for (const id of result.chat_ids) {
-    const chat = await raw.invoke({ _: 'getChat', chat_id: id }) as Td.chat;
-    matches.push({ id, title: chat.title });
-  }
+  const dialogs = await userbot.raw().getDialogs({ limit: 500 });
+  const matches = dialogs.filter(dialog => typeof dialog.title === 'string' && dialog.title.includes(query));
   if (matches.length === 0) throw new Error(`No chat matches "${query}"`);
   if (matches.length > 1) {
     console.error('Multiple matches — pass the numeric id instead:');
-    for (const m of matches) console.error(`  ${m.id}\t${m.title}`);
+    for (const match of matches) console.error(`  ${match.id}\t${match.title}`);
     throw new Error('Ambiguous chat name');
   }
-  logger.withFields(matches[0]!).log('Resolved chat');
-  return String(matches[0]!.id);
+  const match = matches[0]!;
+  logger.withFields({ id: String(match.id), title: match.title }).log('Resolved chat');
+  return String(match.id);
 };
 
 const randomBetween = (loMs: number, hiMs: number): number =>
@@ -138,26 +114,19 @@ try {
   }
   logger.withFields({ total: collected.length, reachedCutoff }).log('History fetch complete');
 
-  // Persist oldest-first so created_at matches conversation order.
   collected.reverse();
   const utcOffsetMin = -new Date().getTimezoneOffset();
   let persisted = 0;
   let services = 0;
   for (const msg of collected) {
-    const enriched = {
-      ...msg,
-      receivedAtMs: msg.date * 1000,
-      utcOffsetMin,
-    };
-
+    const enriched = { ...msg, receivedAtMs: msg.date * 1000, utcOffsetMin };
     if (isServiceMessage(enriched)) {
-      const ev = adaptServiceEvent(enriched);
-      persistEvent(db, ev);
+      persistEvent(db, adaptServiceEvent(enriched));
       services++;
     } else {
       persistEvent(db, adaptMessage(enriched));
     }
-    try { persistMessage(db, enriched); } catch (err) { logger.withError(err).warn('persistMessage failed'); }
+    persistMessage(db, enriched);
     persisted++;
   }
 

@@ -21,7 +21,7 @@ import {
   persistTurnResponse,
   updateEventAttachments,
 } from '../../db';
-import { findModerationSender, loadModerationMessageIds } from '../../db/moderation';
+import { findModerationAuthor, loadModerationMessageIds } from '../../db/moderation';
 import { createDriver } from '../../driver';
 import { createDriverInputBus } from '../../driver/input-bus';
 import { renderOldMessagesXml } from '../../driver/read-old-messages';
@@ -87,8 +87,8 @@ export const registerDriver = ({ get, register }: Registrar): void => {
     const bot = get(TOKENS.TELEGRAM_CLIENTS).bot;
     const eventSink = get(TOKENS.TELEGRAM_EVENT_SINK);
     const moderation = createModerationService({
-      api: createModerationApi(bot.raw(), bot.botUserId()),
-      findSender: (chatId, messageId) => findModerationSender(db, chatId, messageId),
+      api: createModerationApi(bot.raw()),
+      findAuthor: (chatId, messageId) => findModerationAuthor(db, chatId, messageId),
       loadMessageIds: (chatId, userId) => loadModerationMessageIds(db, chatId, userId),
       botUserId: bot.botUserId(),
       enabledChatIds: new Set(get(TOKENS.CHAT_IDS).filter(chatId => resolveChatConfig(config, chatId).tools.banSpammer)),

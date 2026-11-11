@@ -1,14 +1,8 @@
-import * as tdl from 'tdl';
-
 import { contentToPlainText } from '../adaptation/content';
 import { buildContainer } from '../container';
 import { TOKENS } from '../container/tokens';
 import { loadCompaction, loadEventsWithId, loadKnownChatIds, migrateV1ToV2 } from '../db';
 import { selectStartupReplayChatIds } from './chat-selection';
-import { resolveTdjson } from '../telegram/tdjson';
-
-tdl.configure({ tdjson: resolveTdjson() });
-
 export const startApp = async (): Promise<void> => {
   const container = buildContainer();
   const logger = container.get(TOKENS.LOGGER);

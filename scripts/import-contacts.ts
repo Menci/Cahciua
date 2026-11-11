@@ -9,12 +9,10 @@ import { readFileSync } from 'node:fs';
 
 import { Format, initLogger, LogLevel, useGlobalLogger } from '@guiiai/logg';
 import bigInt from 'big-integer';
-import { Api, TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
+import { Api, TelegramClient } from 'teleproto';
 
 import { loadConfig } from '../src/config/config';
-import { createGramjsLogger } from '../src/telegram/gramjs-logger';
-import { loadSession } from '../src/telegram/session';
+import { loadUserbotSession } from '../src/telegram/session';
 
 const DELAY_MS = 2000;
 
@@ -50,10 +48,8 @@ const main = async () => {
   if (config.telegram.apiId == null || config.telegram.apiHash == null)
     throw new Error('telegram.apiId and telegram.apiHash are required');
 
-  const session = new StringSession(loadSession(config.telegram.session ?? ''));
-  const client = new TelegramClient(session, config.telegram.apiId, config.telegram.apiHash, {
+  const client = new TelegramClient(loadUserbotSession(config), config.telegram.apiId, config.telegram.apiHash, {
     connectionRetries: 3,
-    baseLogger: createGramjsLogger(log),
   });
 
   await client.connect();

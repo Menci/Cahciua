@@ -27,8 +27,7 @@ telegram:
   apiId: 0
   apiHash: ""
   userbotEnabled: false
-  # botDataDir: "data/tdlib-bot"
-  # userbotDataDir: "data/tdlib-userbot"
+  # userbotSessionPath: "data/session"
 
 database:
   path: "./data/cahciua.db"

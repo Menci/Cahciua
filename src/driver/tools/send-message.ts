@@ -55,7 +55,7 @@ export const createSendMessageTool = (
       if (reply_to != null && reply_to !== '') {
         const replyToNum = Number(reply_to);
         if (!Number.isFinite(replyToNum) || !messageExists(replyToNum))
-          return { content: JSON.stringify({ error: `No such reply_to message_id ${reply_to} in this chat — refusing to call TDLib with an unknown id. Send the message without reply_to, or use a valid id.` }), requiresFollowUp: true };
+          return { content: JSON.stringify({ error: `No such reply_to message_id ${reply_to} in this chat — refusing to call Telegram with an unknown id. Send the message without reply_to, or use a valid id.` }), requiresFollowUp: true };
       }
       const result = await send(text, reply_to, attachments);
       return {

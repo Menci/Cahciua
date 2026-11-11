@@ -1,17 +1,17 @@
-import type * as Td from 'tdlib-types';
+import type { Api } from 'teleproto';
 
 const TYPING_LIKE_ACTIONS = new Set<string>([
-  'chatActionTyping',
-  'chatActionRecordingVideo',
-  'chatActionUploadingVideo',
-  'chatActionRecordingVoiceNote',
-  'chatActionUploadingVoiceNote',
-  'chatActionUploadingPhoto',
-  'chatActionUploadingDocument',
-  'chatActionRecordingVideoNote',
-  'chatActionUploadingVideoNote',
-  'chatActionChoosingSticker',
+  'SendMessageTypingAction',
+  'SendMessageRecordVideoAction',
+  'SendMessageUploadVideoAction',
+  'SendMessageRecordAudioAction',
+  'SendMessageUploadAudioAction',
+  'SendMessageUploadPhotoAction',
+  'SendMessageUploadDocumentAction',
+  'SendMessageRecordRoundAction',
+  'SendMessageUploadRoundAction',
+  'SendMessageChooseStickerAction',
 ]);
 
-export const isTypingLikeAction = (action: Td.ChatAction): boolean =>
-  TYPING_LIKE_ACTIONS.has(action._);
+export const isTypingLikeAction = (action: Api.TypeSendMessageAction): boolean =>
+  TYPING_LIKE_ACTIONS.has(action.className);

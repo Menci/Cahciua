@@ -12,17 +12,20 @@ const fixture = (count = 1) => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   const api = {
-    inspectMembers: vi.fn<ModerationApi['inspectMembers']>(async () => ({ canModerate: true, targetStatus: 'member' })),
+    inspectMembers: vi.fn<ModerationApi['inspectMembers']>(async () => ({
+      canModerate: true,
+      target: { userId: USER, status: 'member', inputUser: { className: 'InputUser' } },
+    })),
     inspectMessage: vi.fn<ModerationApi['inspectMessage']>(async () => ({ senderId: USER, date: NOW / 1000 - 1, canDelete: true })),
     ban: vi.fn<ModerationApi['ban']>(async () => {}),
     deleteMessage: vi.fn<ModerationApi['deleteMessage']>(async () => {}),
   };
-  const findSender = vi.fn((chatId: string, messageId: number): string | undefined => chatId === CHAT && messageId === 1 ? USER : undefined);
+  const findAuthor = vi.fn((chatId: string, messageId: number): { userId: string; username?: string } | undefined => chatId === CHAT && messageId === 1 ? { userId: USER } : undefined);
   const loadMessageIds = vi.fn(() => Array.from({ length: count }, (_, i) => i + 1));
   const logger = { withContext: vi.fn(), withFields: vi.fn(), withError: vi.fn(), error: vi.fn() };
   for (const method of [logger.withContext, logger.withFields, logger.withError]) method.mockReturnValue(logger);
   const publishDeletions = vi.fn();
-  const deps = { api, findSender, loadMessageIds, botUserId: '999', enabledChatIds: new Set([CHAT, '-100987']), publishDeletions, logger: logger as unknown as Logger };
+  const deps = { api, findAuthor, loadMessageIds, botUserId: '999', enabledChatIds: new Set([CHAT, '-100987']), publishDeletions, logger: logger as unknown as Logger };
   const service = createModerationService(deps);
   return { ...deps, service, restart: () => createModerationService(deps) };
 };
@@ -34,7 +37,7 @@ describe('spam moderation', () => {
     const f = fixture();
     f.enabledChatIds.delete(CHAT);
     expect(await f.service.banSpammer(CHAT, 1)).toEqual({ status: 'rejected', reason: 'disabled_chat' });
-    expect(f.findSender).not.toHaveBeenCalled();
+    expect(f.findAuthor).not.toHaveBeenCalled();
     expect(f.api.inspectMembers).not.toHaveBeenCalled();
     expect(f.api.ban).not.toHaveBeenCalled();
   });
@@ -43,7 +46,7 @@ describe('spam moderation', () => {
     const f = fixture(count);
     const result = await f.service.banSpammer(CHAT, 1);
     expect(result).toMatchObject({ status: 'completed', banned: true });
-    expect(f.api.ban).toHaveBeenCalledExactlyOnceWith(CHAT, USER);
+    expect(f.api.ban).toHaveBeenCalledExactlyOnceWith(CHAT, expect.objectContaining({ userId: USER }));
     expect(f.api.deleteMessage).toHaveBeenCalledTimes(count);
     expect(f.publishDeletions).toHaveBeenCalledWith(CHAT, Array.from({ length: count }, (_, i) => i + 1));
   });
@@ -73,28 +76,28 @@ describe('spam moderation', () => {
 
   it.each(['999', '-100123', 'invalid'])('protects self and non-user identities (%s)', async userId => {
     const f = fixture();
-    f.findSender.mockReturnValue(userId);
+    f.findAuthor.mockReturnValue({ userId });
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'protected_user' });
     expect(f.api.inspectMembers).not.toHaveBeenCalled();
   });
 
   it('protects owners and administrators', async () => {
     const f = fixture();
-    f.api.inspectMembers.mockResolvedValue({ canModerate: true, targetStatus: 'protected' });
+    f.api.inspectMembers.mockResolvedValue({ canModerate: true, target: { userId: USER, status: 'protected', inputUser: {} } });
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'protected_user' });
     expect(f.api.ban).not.toHaveBeenCalled();
   });
 
   it.each(['left', 'banned'] as const)('bans a summoned bot with %s membership', async targetStatus => {
     const f = fixture();
-    f.api.inspectMembers.mockResolvedValue({ canModerate: true, targetStatus });
+    f.api.inspectMembers.mockResolvedValue({ canModerate: true, target: { userId: USER, status: targetStatus, inputUser: {} } });
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', banned: true });
-    expect(f.api.ban).toHaveBeenCalledWith(CHAT, USER);
+    expect(f.api.ban).toHaveBeenCalledWith(CHAT, expect.objectContaining({ userId: USER }));
   });
 
   it('requires both ban and delete permissions before any action', async () => {
     const f = fixture();
-    f.api.inspectMembers.mockResolvedValue({ canModerate: false, targetStatus: 'member' });
+    f.api.inspectMembers.mockResolvedValue({ canModerate: false, target: { userId: USER, status: 'member', inputUser: {} } });
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'missing_permissions' });
     expect(f.api.ban).not.toHaveBeenCalled();
   });
@@ -103,7 +106,7 @@ describe('spam moderation', () => {
     const f = fixture();
     f.api.inspectMessage.mockResolvedValue(undefined);
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', banned: true });
-    expect(f.api.ban).toHaveBeenCalledWith(CHAT, USER);
+    expect(f.api.ban).toHaveBeenCalledWith(CHAT, expect.objectContaining({ userId: USER }));
   });
 
   it('rejects evidence whose current sender differs from the archive', async () => {
@@ -125,7 +128,7 @@ describe('spam moderation', () => {
     const f = fixture(2);
     f.api.deleteMessage.mockImplementation(async (_chatId, id) => { if (id === 2) throw new Error('network failure'); });
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'partial', banned: true, deletedMessageIds: [1], failedMessageIds: [2] });
-    f.api.inspectMembers.mockResolvedValue({ canModerate: true, targetStatus: 'banned' });
+    f.api.inspectMembers.mockResolvedValue({ canModerate: true, target: { userId: USER, status: 'banned', inputUser: {} } });
     f.api.inspectMessage.mockImplementation(async (_chatId, id) => id === 1 ? undefined : { senderId: USER, date: NOW / 1000 - 1, canDelete: true });
     f.api.deleteMessage.mockResolvedValue();
     expect(await f.restart().banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', deletedMessageIds: [2], unavailableMessageIds: [1] });

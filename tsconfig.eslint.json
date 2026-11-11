@@ -10,7 +10,10 @@
   "include": [
     "src/**/*.ts",
     "scripts/**/*.ts",
-    "eslint.config.ts"
+    "eslint.config.ts",
+    "vitest.config.ts",
+    "tsdown.config.ts",
+    "drizzle.config.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }
