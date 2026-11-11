@@ -82,6 +82,7 @@ export const createCompactionController = (deps: {
             apiFormat: compactEndpoint.apiFormat,
             timeoutSec: compactEndpoint.timeoutSec,
             extraBody: compactEndpoint.extraBody,
+            anthropicBetas: compactEndpoint.anthropicBetas,
             chatId: deps.chatId,
             rcWindow: deps.context().filter(segment =>
               segment.receivedAtMs >= oldCursorMs && segment.receivedAtMs < newCursorMs),

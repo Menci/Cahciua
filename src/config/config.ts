@@ -18,7 +18,14 @@ const llmEndpointEntries = {
   maxImagesAllowed: v.optional(v.number()),
   timeoutSec: v.optional(v.number()),
   extraBody: v.optional(v.record(v.string(), v.unknown())),
+  anthropicBetas: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
 };
+
+const LlmEndpointSchema = v.pipe(
+  v.object(llmEndpointEntries),
+  v.check(endpoint => endpoint.anthropicBetas === undefined || endpoint.apiFormat === 'anthropic-messages',
+    'anthropicBetas requires apiFormat="anthropic-messages"'),
+);
 
 // --- Runtime config schema (top-level, global) ---
 
@@ -151,7 +158,7 @@ const BackgroundTasksSchema = v.optional(v.object({
 }), {});
 
 const ConfigSchema = v.object({
-  models: v.record(v.string(), v.object(llmEndpointEntries)),
+  models: v.record(v.string(), LlmEndpointSchema),
   telegram: v.object({
     botToken: v.string(),
     apiId: v.number(),

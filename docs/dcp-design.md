@@ -99,6 +99,8 @@ The existing summary does not contribute to the raw compaction trigger estimate.
 
 Usage is normalized at this boundary. OpenAI input totals already include cache hits. Anthropic reports uncached input separately, so cache reads and writes are added to produce total `inputTokens`.
 
+Anthropic model entries may declare `anthropicBetas: string[]`. Config parsing confines this option to `anthropic-messages`. The selected model carries the names through primary, probe, compaction, and media-description calls; `messagesApi` joins them into one `anthropic-beta` request header and omits the header for an empty or absent list. Names pass through unchanged so Anthropic validates availability and compatibility. Some beta features also need request-body fields or new response decoding; these remain explicit work at the provider boundary.
+
 Request and response JSON is written to `/tmp/cahciua/<id>.*.json` for debugging.
 
 ## Wake-Up Scheduling

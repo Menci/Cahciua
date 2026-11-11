@@ -142,7 +142,7 @@ Compaction is an independent per-chat controller, not a turn feature or TR. Raw 
 
 ### Provider Boundaries
 
-`src/llm/call.ts` is the common non-streaming call boundary. It enforces `maxImagesAllowed` on every request, converts IR through `src/unified-api/`, normalizes usage, and writes debug request/response JSON under `/tmp/cahciua/`.
+`src/llm/call.ts` is the common non-streaming call boundary. It enforces `maxImagesAllowed` on every request, converts IR through `src/unified-api/`, normalizes usage, and writes debug request/response JSON under `/tmp/cahciua/`. Per-model `anthropicBetas` applies only to `anthropic-messages`; the transport joins configured names into one `anthropic-beta` request header. The selected model setting reaches probe, primary, compaction, and media-description calls. Provider-specific beta bodies and response shapes still require explicit codec support.
 
 Reasoning survives replay only when the stored model identity is compatible. Tool call IDs remain provider-native in storage and are sanitized only for wire formats that require it.
 

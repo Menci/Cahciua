@@ -104,6 +104,7 @@ export const createDriver = (config: DriverConfig, deps: {
       apiFormat: chatConfig.primary.model.apiFormat,
       timeoutSec: chatConfig.primary.model.timeoutSec,
       extraBody: chatConfig.primary.model.extraBody,
+      anthropicBetas: chatConfig.primary.model.anthropicBetas,
     });
 
     const createTools = () => createPrimaryTools({

@@ -8,4 +8,5 @@ export interface LlmEndpoint {
   maxImagesAllowed?: number;
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
+  anthropicBetas?: string[];
 }

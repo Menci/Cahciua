@@ -17,6 +17,8 @@ models:
     apiKey: ""
     model: "claude-haiku-4-5"
     apiFormat: "anthropic-messages"
+    # Optional exact beta names for this model; sent as one anthropic-beta header.
+    # anthropicBetas: ["example-feature-2026-01-01"]
     timeoutSec: 60
     maxImagesAllowed: 10
 

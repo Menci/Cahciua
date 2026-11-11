@@ -123,7 +123,8 @@ export const callLlm = async (
     const response = await messagesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
-      extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
+      extraBody: config.extraBody, anthropicBetas: config.anthropicBetas,
+      forceToolChoice: config.forceToolChoice,
       onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
       log, label, timeoutSec: config.timeoutSec,
     });

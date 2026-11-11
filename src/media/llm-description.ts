@@ -75,6 +75,7 @@ export const callDescriptionLlm = async (params: {
     apiFormat: model.apiFormat,
     timeoutSec: model.timeoutSec,
     extraBody: model.extraBody,
+    anthropicBetas: model.anthropicBetas,
   }, entries, system, undefined, {
     log,
     label,

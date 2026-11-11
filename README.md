@@ -69,7 +69,19 @@ pnpm test:run
 pnpm build
 ```
 
-Configuration is YAML-first. `CONFIG_PATH` may select a different file; `CONTACTS_PATH` may select a contact-name mapping.
+Configuration is YAML-first. `CONFIG_PATH` may select a different file; `CONTACTS_PATH` may select a contact-name mapping. For an Anthropic Messages model, set `anthropicBetas` to the exact beta identifiers required by the selected features:
+
+```yaml
+models:
+  claude:
+    apiBaseUrl: "https://api.anthropic.com/v1"
+    apiKey: "..."
+    model: "..."
+    apiFormat: "anthropic-messages"
+    anthropicBetas: ["feature-one-YYYY-MM-DD", "feature-two-YYYY-MM-DD"]
+```
+
+Replace the example identifiers with names from [Anthropic's beta header documentation](https://platform.claude.com/docs/en/api/beta-headers). Cahciua sends them together in one `anthropic-beta` header for requests using that model, including probe, primary, compaction, and media-description calls. A beta may require matching request-body fields or a compatible response codec; the header alone enables only the provider's beta gate. Invalid or unavailable identifiers surface as provider errors.
 
 ## Development
 

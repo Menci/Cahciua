@@ -64,6 +64,7 @@ export interface MessagesApiParams {
   tools?: AnthropicTool[];
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
+  anthropicBetas?: string[];
   forceToolChoice?: 'any' | { name: string };
   onRequestBody: (body: unknown) => void;
   log: Logger;
@@ -113,6 +114,7 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
         'Content-Type': 'application/json',
         'x-api-key': params.apiKey,
         'anthropic-version': '2023-06-01',
+        ...(params.anthropicBetas?.length ? { 'anthropic-beta': params.anthropicBetas.join(',') } : {}),
       },
       body,
       signal: abortController.signal,
