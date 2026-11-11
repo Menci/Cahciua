@@ -78,11 +78,18 @@ describe('spam moderation', () => {
     expect(f.api.inspectMembers).not.toHaveBeenCalled();
   });
 
-  it('protects owners, administrators, and other non-member states', async () => {
+  it('protects owners and administrators', async () => {
     const f = fixture();
     f.api.inspectMembers.mockResolvedValue({ canModerate: true, targetStatus: 'protected' });
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'protected_user' });
     expect(f.api.ban).not.toHaveBeenCalled();
+  });
+
+  it.each(['left', 'banned'] as const)('bans a summoned bot with %s membership', async targetStatus => {
+    const f = fixture();
+    f.api.inspectMembers.mockResolvedValue({ canModerate: true, targetStatus });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', banned: true });
+    expect(f.api.ban).toHaveBeenCalledWith(CHAT, USER);
   });
 
   it('requires both ban and delete permissions before any action', async () => {
@@ -92,10 +99,17 @@ describe('spam moderation', () => {
     expect(f.api.ban).not.toHaveBeenCalled();
   });
 
-  it.each([undefined, { senderId: '321', date: NOW / 1000, canDelete: true }])('rejects missing or mismatched evidence', async message => {
+  it('uses the archive when the evidence message has already disappeared', async () => {
     const f = fixture();
-    f.api.inspectMessage.mockResolvedValue(message);
-    expect((await f.service.banSpammer(CHAT, 1)).status).toBe('rejected');
+    f.api.inspectMessage.mockResolvedValue(undefined);
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', banned: true });
+    expect(f.api.ban).toHaveBeenCalledWith(CHAT, USER);
+  });
+
+  it('rejects evidence whose current sender differs from the archive', async () => {
+    const f = fixture();
+    f.api.inspectMessage.mockResolvedValue({ senderId: '321', date: NOW / 1000, canDelete: true });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'sender_mismatch' });
     expect(f.api.ban).not.toHaveBeenCalled();
   });
 

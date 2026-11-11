@@ -40,12 +40,20 @@ describe('bot moderation TDLib boundary', () => {
     ]);
   });
 
-  it.each(['chatMemberStatusCreator', 'chatMemberStatusAdministrator', 'chatMemberStatusLeft'])('protects target status %s', async status => {
+  it.each(['chatMemberStatusCreator', 'chatMemberStatusAdministrator'])('protects privileged target status %s', async status => {
     const { api, invoke } = fixture();
     invoke.mockResolvedValueOnce({ type: { _: 'chatTypeSupergroup', is_channel: false } });
     invoke.mockResolvedValueOnce({ status: { _: 'chatMemberStatusAdministrator', rights: { can_restrict_members: true, can_delete_messages: true } } });
     invoke.mockResolvedValueOnce({ status: { _: status } });
     expect(await api.inspectMembers('-100123', '456')).toEqual({ canModerate: true, targetStatus: 'protected' });
+  });
+
+  it.each(['chatMemberStatusLeft', 'chatMemberStatusRestricted'])('allows non-participant status %s', async status => {
+    const { api, invoke } = fixture();
+    invoke.mockResolvedValueOnce({ type: { _: 'chatTypeSupergroup', is_channel: false } });
+    invoke.mockResolvedValueOnce({ status: { _: 'chatMemberStatusAdministrator', rights: { can_restrict_members: true, can_delete_messages: true } } });
+    invoke.mockResolvedValueOnce({ status: { _: status, is_member: false } });
+    expect(await api.inspectMembers('-100123', '456')).toEqual({ canModerate: true, targetStatus: 'left' });
   });
 
   it.each([

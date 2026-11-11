@@ -32,8 +32,8 @@ export const createModerationService = (deps: {
 
     const evidence = await deps.api.inspectMessage(chatId, messageId);
     if (evidence && evidence.senderId !== userId) return { status: 'rejected', reason: 'sender_mismatch' };
-    // A repeated call can still clean up a banned user's messages after its evidence was deleted.
-    if (!evidence && memberships.targetStatus !== 'banned') return { status: 'rejected', reason: 'unavailable_evidence' };
+    // The archive identifies the author after the evidence is gone, e.g. a
+    // summoned bot that never joined then deleted its advertisement.
 
     const messageIds = deps.loadMessageIds(chatId, userId);
     if (messageIds.length === 0 || messageIds.length >= MESSAGE_LIMIT)

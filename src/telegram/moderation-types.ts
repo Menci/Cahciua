@@ -5,7 +5,6 @@ export type ModerationRejection =
   | 'protected_user'
   | 'message_limit'
   | 'missing_permissions'
-  | 'unavailable_evidence'
   | 'sender_mismatch';
 
 export type BanSpammerResult = {
@@ -24,7 +23,7 @@ export type BanSpammerResult = {
 export interface ModerationApi {
   inspectMembers(chatId: string, userId: string): Promise<{
     canModerate: boolean;
-    targetStatus: 'member' | 'banned' | 'protected';
+    targetStatus: 'member' | 'left' | 'banned' | 'protected';
   }>;
   inspectMessage(chatId: string, messageId: number): Promise<{
     senderId: string | undefined;

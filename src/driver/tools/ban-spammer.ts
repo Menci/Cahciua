@@ -6,7 +6,7 @@ export const createBanSpammerTool = (
   banSpammer: (messageId: number) => Promise<BanSpammerResult>,
 ): CahciuaTool => createTool({
   name: 'ban_spammer',
-  description: 'Permanently ban the verified author of a spam message in this chat and delete known messages that Telegram permits within the 48-hour bot window. Apply the moderation policy in the current chat system files. Eligible targets have fewer than 10 observed messages and a membership status authorized by the backend. After a confirmed ban, send the exact announcement returned by the tool; it describes the completed actions and any remaining cleanup.',
+  description: 'Permanently ban the verified author of a spam message in this chat and delete known messages that Telegram permits within the 48-hour bot window. Apply the moderation policy in the current chat system files. Eligible targets have fewer than 10 observed messages. Summoned inline bots and their summoners remain eligible, including accounts outside the group; owners and administrators are protected. After a confirmed ban, send the exact announcement returned by the tool; it describes the completed actions and any remaining cleanup.',
   parameters: {
     type: 'object',
     properties: {

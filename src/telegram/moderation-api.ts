@@ -23,8 +23,9 @@ export const createModerationApi = (client: Pick<Client, 'invoke'>, botUserId: s
     return {
       canModerate: hasModerationRights(self!.status),
       targetStatus: status._ === 'chatMemberStatusBanned' ? 'banned'
-        : status._ === 'chatMemberStatusMember' || (status._ === 'chatMemberStatusRestricted' && status.is_member)
-          ? 'member' : 'protected',
+        : status._ === 'chatMemberStatusCreator' || status._ === 'chatMemberStatusAdministrator' ? 'protected'
+          : status._ === 'chatMemberStatusMember' || (status._ === 'chatMemberStatusRestricted' && status.is_member)
+            ? 'member' : 'left',
     };
   },
 
