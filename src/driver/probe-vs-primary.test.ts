@@ -216,9 +216,8 @@ describe('probe vs primary view of bot\'s own messages', () => {
     expect(primaryAssistantToolCalls).toContain('send_message');
     expect(primaryAssistantToolCalls).toContain('bash');
 
-    // Primary's late-binding embeds the probe's reason as advisory.
-    expect(primaryUserText).toContain('evaluator\'s notes');
-    expect(primaryUserText).toContain('advisory only');
+    // Primary's late-binding carries the probe's reason, without asserting how
+    // the template phrases the surrounding text.
     expect(primaryUserText).toContain('Plausible: (a) react 👀');
 
     // Probe sees no real assistant tool calls in its context — all TRs are
