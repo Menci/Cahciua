@@ -1,5 +1,5 @@
 import type { IngressTelegramMessage, IngressTelegramMessageDelete, IngressTelegramMessageEdit } from './ingress-meta';
-import type { Attachment, ForwardInfo, MessageEntity, TelegramMessage, TelegramUser } from './message';
+import type { Attachment, ForwardInfo, MessageEntity, SharedContact, TelegramMessage, TelegramUser } from './message';
 import type {
   CanonicalAttachment,
   CanonicalDeleteEvent,
@@ -161,6 +161,22 @@ const buildContentTree = (
   return nodes;
 };
 
+/**
+ * Adapt a shared contact card. The display name follows the same
+ * first+last-with-username-fallback rule as senders, and an empty card still
+ * renders so the message is never mistaken for an empty body.
+ */
+const adaptContact = (contact: SharedContact): ContentNode => {
+  const name = [contact.firstName, contact.lastName].filter(Boolean).join(' ').trim();
+  return {
+    type: 'contact',
+    displayName: name !== '' ? name : contact.phoneNumber,
+    phoneNumber: contact.phoneNumber,
+    ...contact.vcard && { vcard: contact.vcard },
+    ...contact.userId !== '0' && { userId: contact.userId },
+  };
+};
+
 export const parseContent = (text: string, entities?: MessageEntity[]): ContentNode[] => {
   if (!entities || entities.length === 0) {
     return text ? [{ type: 'text', text }] : [];
@@ -177,7 +193,7 @@ export const adaptMessage = (msg: IngressTelegramMessage): CanonicalMessageEvent
     receivedAtMs: msg.receivedAtMs,
     timestampSec: msg.date,
     utcOffsetMin: msg.utcOffsetMin,
-    content: parseContent(msg.text, msg.entities),
+    content: msg.contact ? [adaptContact(msg.contact)] : parseContent(msg.text, msg.entities),
     attachments: adaptAttachments(msg.attachments),
   };
   if (msg.sender) event.sender = adaptUser(msg.sender);
@@ -196,7 +212,7 @@ export const adaptEdit = (edit: IngressTelegramMessageEdit): CanonicalEditEvent 
     receivedAtMs: edit.receivedAtMs,
     timestampSec: edit.editDate,
     utcOffsetMin: edit.utcOffsetMin,
-    content: parseContent(edit.text, edit.entities),
+    content: edit.contact ? [adaptContact(edit.contact)] : parseContent(edit.text, edit.entities),
     attachments: adaptAttachments(edit.attachments),
   };
   if (edit.sender) event.sender = adaptUser(edit.sender);

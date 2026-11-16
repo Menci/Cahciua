@@ -1,6 +1,6 @@
 import { Api } from 'teleproto';
 
-import type { Attachment, ForwardInfo, MessageEntity, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from './types';
+import type { Attachment, ForwardInfo, MessageEntity, SharedContact, TelegramMessage, TelegramMessageDelete, TelegramMessageEdit, TelegramUser } from './types';
 
 export const chatIdToString = (id: number | string): string => String(id);
 
@@ -165,6 +165,20 @@ const convertMedia = (media: Api.TypeMessageMedia | undefined): ContentResult | 
   return undefined;
 };
 
+/**
+ * A shared contact carries no text, so a message whose media is a contact used
+ * to adapt into an empty body and reach the model as a bare empty element.
+ * Keep the card's fields instead: the name and vCard are where solicitation
+ * text goes, and the phone number is what makes the card actionable.
+ */
+const convertContact = (media: Api.MessageMediaContact): SharedContact => ({
+  phoneNumber: media.phoneNumber,
+  firstName: media.firstName,
+  lastName: media.lastName,
+  vcard: media.vcard,
+  userId: String(media.userId),
+});
+
 const convertContent = (message: Api.Message): ContentResult => {
   const rawText = message.message !== '' ? message.message : (message.richText ?? '');
   const base = { text: rawText, entities: convertEntities(message.entities) };
@@ -255,6 +269,9 @@ export const fromTeleprotoMessage = (
     forwardInfo: convertForwardInfo(message),
     mediaGroupId: message.groupedId?.toString(),
     viaBotId: message.viaBotId == null ? undefined : String(message.viaBotId),
+    ...message.media instanceof Api.MessageMediaContact
+      ? { contact: convertContact(message.media) }
+      : {},
     source,
   };
 };
@@ -271,6 +288,9 @@ export const fromTeleprotoEdit = (message: Api.Message): TelegramMessageEdit | n
     text: content.text,
     entities: content.entities,
     attachments: content.attachments,
+    ...message.media instanceof Api.MessageMediaContact
+      ? { contact: convertContact(message.media) }
+      : {},
   };
 };
 

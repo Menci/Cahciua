@@ -254,6 +254,41 @@ describe('contentToPlainText', () => {
   });
 });
 
+// --- adaptMessage: shared contact ---
+
+describe('adaptMessage contact', () => {
+  it('turns a shared contact into content instead of an empty body', () => {
+    const event = adaptMessage(baseTelegramMessage({
+      contact: { phoneNumber: '+1 555 0100', firstName: 'Jose', lastName: 'Smith', vcard: 't.me/promo', userId: '0' },
+    }));
+    expect(event.content).toEqual([{
+      type: 'contact',
+      displayName: 'Jose Smith',
+      phoneNumber: '+1 555 0100',
+      vcard: 't.me/promo',
+    }]);
+  });
+
+  it('falls back to the number when the card has no name', () => {
+    const event = adaptMessage(baseTelegramMessage({
+      contact: { phoneNumber: '+1 555 0111', firstName: '', lastName: '', vcard: '', userId: '0' },
+    }));
+    expect(event.content).toEqual([{ type: 'contact', displayName: '+1 555 0111', phoneNumber: '+1 555 0111' }]);
+  });
+
+  it('keeps the linked account id and drops the placeholder zero', () => {
+    const linked = adaptMessage(baseTelegramMessage({
+      contact: { phoneNumber: '+1', firstName: 'A', lastName: '', vcard: '', userId: '555' },
+    }));
+    expect(linked.content[0]).toMatchObject({ type: 'contact', userId: '555' });
+
+    const bare = adaptMessage(baseTelegramMessage({
+      contact: { phoneNumber: '+1', firstName: 'A', lastName: '', vcard: '', userId: '0' },
+    }));
+    expect(bare.content[0]).not.toHaveProperty('userId');
+  });
+});
+
 // --- adaptMessage ---
 
 describe('adaptMessage', () => {

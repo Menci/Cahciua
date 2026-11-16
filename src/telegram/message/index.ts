@@ -2,6 +2,7 @@ export type {
   Attachment,
   ForwardInfo,
   MessageEntity,
+  SharedContact,
   TelegramMessage,
   TelegramMessageDelete,
   TelegramMessageEdit,

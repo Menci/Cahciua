@@ -56,6 +56,14 @@ const renderContentNode = (node: ContentNode): string => {
   case 'mention': return node.userId
     ? `<mention uid="${escapeXml(node.userId)}">${renderContent(node.children)}</mention>`
     : `<mention>${renderContent(node.children)}</mention>`;
+  case 'contact': {
+    // Names and vCard text are attacker-controlled, so every field goes through
+    // escapeXml and the shape carries no inline label the sender can forge.
+    const attrs = [`name="${escapeXml(node.displayName)}"`, `phone="${escapeXml(node.phoneNumber)}"`];
+    if (node.userId) attrs.push(`uid="${escapeXml(node.userId)}"`);
+    if (node.vcard) return `<contact ${attrs.join(' ')}>${escapeXml(node.vcard)}</contact>`;
+    return `<contact ${attrs.join(' ')}/>`;
+  }
   case 'custom_emoji':
     if (node.altText) {
       const packAttr = node.stickerSetName ? ` pack="${escapeXml(node.stickerSetName)}"` : '';

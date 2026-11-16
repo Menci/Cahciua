@@ -36,7 +36,11 @@ export type ContentNode =
   | { type: 'blockquote'; children: ContentNode[] }
   | { type: 'link'; url: string; children: ContentNode[] }
   | { type: 'mention'; userId?: string; children: ContentNode[] }
-  | { type: 'custom_emoji'; customEmojiId: string; children: ContentNode[]; altText?: string; altTextError?: string; stickerSetId?: string; stickerSetName?: string; format?: 'static' | 'animated' | 'video' };
+  | { type: 'custom_emoji'; customEmojiId: string; children: ContentNode[]; altText?: string; altTextError?: string; stickerSetId?: string; stickerSetName?: string; format?: 'static' | 'animated' | 'video' }
+  // A shared contact card. Rendered as structured XML rather than text so the
+  // model can tell the shared name from the number and from the free-form
+  // vCard, each of which spammers abuse differently.
+  | { type: 'contact'; displayName: string; phoneNumber: string; vcard?: string; userId?: string };
 
 export interface CanonicalForwardInfo {
   fromUserId?: string;

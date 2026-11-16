@@ -80,6 +80,16 @@ export interface TelegramUser {
   accessHash?: string;
 }
 
+export interface SharedContact {
+  phoneNumber: string;
+  firstName: string;
+  lastName: string;
+  /** Free-form vCard body; senders frequently stuff promotional text here. */
+  vcard: string;
+  /** Telegram account the contact belongs to, or 0 for a bare phone entry. */
+  userId: string;
+}
+
 export interface TelegramMessage {
   messageId: number;
   chatId: string;
@@ -95,6 +105,13 @@ export interface TelegramMessage {
   mediaGroupId?: string;
   viaBotId?: string;
   attachments?: Attachment[];
+  /**
+   * A contact card shared as message media. Messengers deliver it as structured
+   * fields rather than text, so it needs its own slot; folding it into `text`
+   * would lose the distinction between the shared name, the number, and the
+   * free-form vCard the sender attached.
+   */
+  contact?: SharedContact;
   source: 'bot' | 'userbot';
 
   // Service message fields (mutually exclusive with regular text content)
@@ -120,6 +137,7 @@ export interface TelegramMessageEdit {
   entities?: MessageEntity[];
   replyToMessageId?: number;
   attachments?: Attachment[];
+  contact?: SharedContact;
   receivedAtMs?: number;
   utcOffsetMin?: number;
 }
