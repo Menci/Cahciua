@@ -11,14 +11,14 @@ afterEach(() => opened.splice(0).forEach(db => db.close()));
 const fixture = () => {
   const sqlite = new Database(':memory:');
   opened.push(sqlite);
-  sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT);
+  sqlite.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT, access_hash TEXT);
     CREATE TABLE events (
     id INTEGER PRIMARY KEY, chat_id TEXT NOT NULL, type TEXT NOT NULL,
     received_at INTEGER NOT NULL, timestamp INTEGER NOT NULL,
     message_id TEXT, sender_id TEXT
   )`);
-  sqlite.prepare('INSERT INTO users (id, username) VALUES (?,?)').run('user', 'spammer');
   const db = drizzle(sqlite, { schema });
+  sqlite.prepare('INSERT INTO users (id, username) VALUES (?,?)').run('user', 'spammer');
   const insert = sqlite.prepare('INSERT INTO events (chat_id,type,received_at,timestamp,message_id,sender_id) VALUES (?,?,?,?,?,?)');
   return { db, insert };
 };
@@ -37,8 +37,7 @@ describe('moderation archive queries', () => {
     insert.run('chat', 'message', 9, 9, '5', 'other-user');
     expect(loadModerationMessageIds(db, 'chat', 'user')).toEqual([1, 2, 3]);
     expect(findModerationAuthor(db, 'chat', 4)).toBeUndefined();
-    expect(findModerationAuthor(db, 'other-chat', 4)).toEqual({ userId: 'user', username: 'spammer' });
+    expect(findModerationAuthor(db, 'other-chat', 4)).toEqual({ userId: 'user' });
     expect(findModerationAuthor(db, 'chat', 5)).toEqual({ userId: 'other-user' });
   });
-
 });

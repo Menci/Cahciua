@@ -56,6 +56,6 @@ export const executeToolCall = async (
     };
   } catch (error) {
     log.withError(error).error(`Tool ${name} failed`);
-    return toolError(id, String(error));
+    return toolError(id, tool.failureMessage ?? String(error));
   }
 };

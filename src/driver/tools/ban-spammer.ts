@@ -2,6 +2,15 @@ import { createTool } from './create-tool';
 import type { CahciuaTool } from './types';
 import type { BanSpammerResult } from '../../telegram/moderation-types';
 
+/**
+ * Moderation output is public-facing the moment the model writes it, and the
+ * material behind it is attacker-controlled: a display name or message body can
+ * itself be the advertisement. Repeat this instruction on every non-success
+ * path, because a failed attempt is exactly when the model is tempted to explain
+ * what it saw.
+ */
+const CONFIDENTIALITY_NOTICE = 'Do not repeat the spam message text, the sender name or username, or any detail about the content, links, or reasoning. Nothing was published about this account; if a human should know, say only that an account could not be removed and let them inspect.';
+
 export const createBanSpammerTool = (
   banSpammer: (messageId: number) => Promise<BanSpammerResult>,
 ): CahciuaTool => createTool({
@@ -16,12 +25,16 @@ export const createBanSpammerTool = (
     required: ['message_id', 'reason'],
     additionalProperties: false,
   },
+  failureMessage: `The moderation request failed before any action was confirmed. ${CONFIDENTIALITY_NOTICE}`,
   execute: async input => {
     const { message_id, reason } = input as { message_id: string; reason: string };
     if (reason.trim().length === 0) throw new Error('A moderation reason is required');
     const result = await banSpammer(Number(message_id));
     if (result.status === 'rejected')
-      return { content: JSON.stringify(result), requiresFollowUp: true };
+      return {
+        content: JSON.stringify({ ...result, confidentiality: CONFIDENTIALITY_NOTICE }),
+        requiresFollowUp: true,
+      };
 
     const accountLink = `[spam 账号](tg://user?id=${result.userId})`;
     const announcement = result.status === 'completed'

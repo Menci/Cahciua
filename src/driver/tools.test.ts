@@ -127,6 +127,20 @@ describe('executeToolCall', () => {
     },
   });
 
+  it('substitutes failureMessage for the thrown error text', async () => {
+    const failing = createTool({
+      name: 'sensitive',
+      description: 'Test tool that fails with material the model must not repeat.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+      execute: async () => { throw new Error('internal detail: spammer@example'); },
+      failureMessage: 'The request failed. Do not repeat the account details.',
+    });
+    const result = await executeToolCall('id1', 'sensitive', '{}', [failing], log);
+    const payload = JSON.parse(result.payload as string);
+    expect(payload.error).toContain('Do not repeat the account details');
+    expect(payload.error).not.toContain('spammer@example');
+  });
+
   it('returns error for unknown tool', async () => {
     const result = await executeToolCall('id1', 'nonexistent', '{}', [greetTool], log);
     const payload = JSON.parse(result.payload as string);

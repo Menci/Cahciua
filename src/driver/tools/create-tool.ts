@@ -7,6 +7,7 @@ export const createTool = (def: {
   description: string;
   parameters: Record<string, unknown>;
   execute: CahciuaTool['execute'];
+  failureMessage?: string;
 }): CahciuaTool => {
   const validator = new Validator(def.parameters as object);
   return {
@@ -21,5 +22,6 @@ export const createTool = (def: {
       };
     },
     execute: def.execute,
+    ...def.failureMessage ? { failureMessage: def.failureMessage } : {},
   };
 };

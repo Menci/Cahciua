@@ -5,7 +5,8 @@ export type ModerationRejection =
   | 'protected_user'
   | 'message_limit'
   | 'missing_permissions'
-  | 'sender_mismatch';
+  /** The bot has no access hash for the target, so Telegram cannot be asked to act on them. */
+  | 'unresolved_target';
 
 export type BanSpammerResult = {
   status: 'rejected';
@@ -21,9 +22,9 @@ export type BanSpammerResult = {
 };
 
 /**
- * A ban target addressed through the bot's own MTProto identity. Telegram
- * scopes access hashes to the authorized account, so the handle must be
- * resolved from a bot-side response before any moderation call.
+ * A ban target addressed through the bot's own MTProto identity. Telegram scopes
+ * access hashes to the authorized account, so the bot's copy of the hash is the
+ * only handle it can use.
  */
 export interface ModerationTarget {
   userId: string;
@@ -33,19 +34,25 @@ export interface ModerationTarget {
 
 export interface ModerationApi {
   /**
-   * Resolve the target and report both the bot's rights and the target's
-   * current status. `username` is the ingress-observed fallback handle for an
-   * account whose evidence message is already gone.
+   * Look up the bot-session access hash for a user that is still in the chat.
+   * Telegram scopes hashes per account and offers no way to address a bare user
+   * id, so this is the only source for an account the bot has not seen yet.
+   * Returns undefined once the user is gone, since nothing can be addressed then.
    */
-  inspectMembers(chatId: string, evidence: { messageId: number; userId: string; username?: string }): Promise<{
+  resolveAccessHash(chatId: string, userId: string): Promise<string | undefined>;
+  /**
+   * Report the bot's own rights in the chat and the target's current membership.
+   * The target is identified purely by the archived user id plus the access hash
+   * the caller already holds — moderation never needs the evidence message to
+   * still exist.
+   */
+  inspectMembers(chatId: string, target: { userId: string; accessHash: string }): Promise<{
     canModerate: boolean;
-    target?: ModerationTarget;
+    status: ModerationTarget['status'];
+    inputUser: unknown;
   }>;
-  inspectMessage(chatId: string, messageId: number): Promise<{
-    senderId: string | undefined;
-    date: number;
-    canDelete: boolean;
-  } | undefined>;
+  /** Message timestamp, used only to decide whether Telegram still permits deletion. */
+  inspectMessage(chatId: string, messageId: number): Promise<{ date: number } | undefined>;
   ban(chatId: string, target: ModerationTarget): Promise<void>;
   deleteMessage(chatId: string, messageId: number): Promise<void>;
 }

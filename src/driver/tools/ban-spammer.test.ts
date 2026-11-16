@@ -56,4 +56,12 @@ describe('ban_spammer tool', () => {
     expect(JSON.parse(result.content as string)).not.toHaveProperty('announcement');
     expect(result.requiresFollowUp).toBe(true);
   });
+
+  it('tells the model not to repeat the account or its content when the request is rejected', async () => {
+    const result = await createBanSpammerTool(async () => ({ status: 'rejected', reason: 'unresolved_target' } as const))
+      .execute({ message_id: '1', reason: 'spam' });
+    const payload = JSON.parse(result.content as string);
+    expect(payload.confidentiality).toContain('Do not repeat the spam message text');
+    expect(payload.confidentiality).toContain('sender name or username');
+  });
 });

@@ -1,17 +1,16 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import type { DB } from './client';
-import { events, users } from './schema';
+import { events } from './schema';
 
 /**
- * The archived author of an evidence message, with the username observed at
- * ingress. MTProto access hashes are account-scoped, so the bot cannot reuse
- * the userbot's handle; the username lets the bot resolve its own.
+ * The archived author of an evidence message. This is the only input moderation
+ * needs to identify a target, so an account stays actionable after its message
+ * is gone.
  */
-export const findModerationAuthor = (db: DB, chatId: string, messageId: number): { userId: string; username?: string } | undefined => {
-  const row = db.select({ senderId: events.senderId, username: users.username })
+export const findModerationAuthor = (db: DB, chatId: string, messageId: number): { userId: string } | undefined => {
+  const row = db.select({ senderId: events.senderId })
     .from(events)
-    .leftJoin(users, eq(users.id, events.senderId))
     .where(and(
       eq(events.chatId, chatId),
       eq(events.messageId, String(messageId)),
@@ -20,9 +19,7 @@ export const findModerationAuthor = (db: DB, chatId: string, messageId: number):
     .orderBy(events.id)
     .limit(1)
     .get();
-  return row?.senderId
-    ? { userId: row.senderId, ...(row.username ? { username: row.username } : {}) }
-    : undefined;
+  return row?.senderId ? { userId: row.senderId } : undefined;
 };
 
 export const loadModerationMessageIds = (db: DB, chatId: string, userId: string): number[] =>

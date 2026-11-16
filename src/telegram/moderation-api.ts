@@ -1,3 +1,4 @@
+import bigInt from 'big-integer';
 import { Api, type TelegramClient } from 'teleproto';
 
 import type { ModerationApi, ModerationTarget } from './moderation-types';
@@ -13,11 +14,12 @@ const participantStatus = (participant: Api.TypeChannelParticipant): ModerationT
 const NOT_A_PARTICIPANT = /USER_NOT_PARTICIPANT|PARTICIPANT_ID_INVALID|CHANNEL_INVALID/;
 
 /**
- * Spam moderation runs as the bot. Telegram scopes access hashes to the
- * authorized account, so every `InputUser` here comes from a response the bot
- * itself received: the evidence message for its author, and username resolution
- * for an account that already left or never joined. Hashes captured by userbot
- * ingress belong to that account and are rejected by the server.
+ * Spam moderation runs as the bot and addresses targets purely by id plus the
+ * bot's stored access hash. It deliberately never reads the evidence message to
+ * learn who the target is: the archive already answers that, and a deleted
+ * message would otherwise make an account unbanable. The message is only read
+ * for its timestamp, to decide whether deletion is still within Telegram's
+ * window.
  */
 export const createModerationApi = (client: TelegramClient): ModerationApi => {
   const resolveChatPeer = createChatPeerResolver(client);
@@ -27,33 +29,36 @@ export const createModerationApi = (client: TelegramClient): ModerationApi => {
     return peer;
   };
 
-  const fetchMessage = async (chatId: string, messageId: number): Promise<Api.Message | undefined> => {
-    const messages = await client.getMessages(await channelPeer(chatId), { ids: [messageId] });
-    const message = messages[0];
-    return message instanceof Api.Message ? message : undefined;
-  };
-
   /**
-   * The evidence message is authoritative: Telegram returns its author along
-   * with a bot-side access hash. When the message is already gone, the username
-   * captured at ingress is the remaining handle. Both paths verify the account
-   * id, so a stale archive row can never redirect a ban.
+   * Hashes are only obtainable while the account is still a participant, so this
+   * walks the member list rather than reading any message. Telegram paginates by
+   * offset without an incremental API, and the search filter matches the query
+   * against names that spammers control, so every page is scanned by id.
    */
-  const resolveUser = async (chatId: string, evidence: { messageId: number; userId: string; username?: string }): Promise<Api.User | undefined> => {
-    const message = await fetchMessage(chatId, evidence.messageId);
-    const sender = message?.fromId ?? message?.senderId;
-    if (sender instanceof Api.PeerUser && String(sender.userId) === evidence.userId) {
-      const user = message?._entities?.get(evidence.userId);
-      if (user instanceof Api.User) return user;
+  const resolveAccessHash = async (chatId: string, userId: string): Promise<string | undefined> => {
+    const channel = await channelPeer(chatId);
+    const pageSize = 200;
+    for (let offset = 0; ; offset += pageSize) {
+      const page = await client.invoke(new Api.channels.GetParticipants({
+        channel,
+        filter: new Api.ChannelParticipantsRecent(),
+        offset,
+        limit: pageSize,
+        hash: bigInt(0),
+      }));
+      if (page instanceof Api.channels.ChannelParticipantsNotModified) return undefined;
+      for (const candidate of page.users) {
+        if (candidate instanceof Api.User && String(candidate.id) === userId && candidate.accessHash != null)
+          return String(candidate.accessHash);
+      }
+      if (page.users.length < pageSize || offset + page.users.length >= page.count) return undefined;
     }
-    if (!evidence.username) return undefined;
-    const resolved = await client.invoke(new Api.contacts.ResolveUsername({ username: evidence.username }));
-    const user = resolved.users.find((candidate): candidate is Api.User => candidate instanceof Api.User);
-    return user && String(user.id) === evidence.userId ? user : undefined;
   };
 
   return {
-    inspectMembers: async (chatId, evidence) => {
+    resolveAccessHash,
+
+    inspectMembers: async (chatId, target) => {
       const channel = await channelPeer(chatId);
       const self = await client.invoke(new Api.channels.GetParticipant({
         channel,
@@ -65,34 +70,25 @@ export const createModerationApi = (client: TelegramClient): ModerationApi => {
           && selfStatus.adminRights.deleteMessages === true
           && selfStatus.adminRights.banUsers === true);
 
-      const user = await resolveUser(chatId, evidence);
-      if (!user?.accessHash) return { canModerate };
-
-      const inputUser = new Api.InputUser({ userId: user.id, accessHash: user.accessHash });
-      let status: ModerationTarget['status'] = 'left';
+      const inputUser = new Api.InputUser({
+        userId: bigInt(target.userId),
+        accessHash: bigInt(target.accessHash),
+      });
       try {
         const result = await client.invoke(new Api.channels.GetParticipant({ channel, participant: inputUser }));
-        status = participantStatus(result.participant);
+        return { canModerate, status: participantStatus(result.participant), inputUser };
       } catch (error) {
+        // A target who left or was never a member is still bannable, so an
+        // unknown-participant answer means "not currently here", not "invalid".
         if (!(error instanceof Error) || !NOT_A_PARTICIPANT.test(error.message)) throw error;
+        return { canModerate, status: 'left', inputUser };
       }
-      return {
-        canModerate,
-        target: { userId: String(user.id), status, inputUser },
-      };
     },
 
     inspectMessage: async (chatId, messageId) => {
-      const message = await fetchMessage(chatId, messageId);
-      if (!message) return undefined;
-      const sender = message.fromId ?? message.senderId;
-      return {
-        senderId: sender instanceof Api.PeerUser ? String(sender.userId) : undefined,
-        date: message.date,
-        // Bots can delete any message an admin's rights allow; the archive
-        // already bounds deletion by Telegram's 48-hour window.
-        canDelete: true,
-      };
+      const messages = await client.getMessages(await channelPeer(chatId), { ids: [messageId] });
+      const message = messages[0];
+      return message instanceof Api.Message ? { date: message.date } : undefined;
     },
 
     ban: async (chatId, target) => {
