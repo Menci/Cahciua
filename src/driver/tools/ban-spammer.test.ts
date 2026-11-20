@@ -5,10 +5,9 @@ import { decideLinkPreviewOptions } from '../../telegram/link-preview';
 import { renderMarkdownToTelegramHTML } from '../../telegram/markdown';
 import type { BanSpammerResult } from '../../telegram/moderation-types';
 
-const completed: BanSpammerResult = {
-  status: 'completed', userId: '456', banned: true, deletedMessageIds: [1], unavailableMessageIds: [],
-  notDeletableMessageIds: [], failedMessageIds: [],
-};
+const deletion = { deletedMessageIds: [1], unavailableMessageIds: [], notDeletableMessageIds: [], failedMessageIds: [] };
+
+const completed: BanSpammerResult = { status: 'completed', userId: '456', ban: { status: 'banned' }, deletion };
 
 describe('ban_spammer tool', () => {
   it('accepts only a message ID and an audit reason', () => {
@@ -38,8 +37,11 @@ describe('ban_spammer tool', () => {
   });
 
   it('announces partial deletion truthfully after a successful ban', async () => {
-    const result = await createBanSpammerTool(async () => ({ ...completed, status: 'partial', notDeletableMessageIds: [2] }))
-      .execute({ message_id: '1', reason: 'spam' });
+    const result = await createBanSpammerTool(async () => ({
+      ...completed,
+      status: 'partial',
+      deletion: { ...deletion, notDeletableMessageIds: [2] },
+    })).execute({ message_id: '1', reason: 'spam' });
     expect(JSON.parse(result.content as string).announcement).toContain('部分消息需人工处理');
   });
 
@@ -55,6 +57,18 @@ describe('ban_spammer tool', () => {
     const result = await createBanSpammerTool(async () => outcome).execute({ message_id: '1', reason: 'spam' });
     expect(JSON.parse(result.content as string)).not.toHaveProperty('announcement');
     expect(result.requiresFollowUp).toBe(true);
+  });
+
+  it('does not claim a ban when the account had already left', async () => {
+    const result = await createBanSpammerTool(async () => ({
+      status: 'partial', userId: '456',
+      ban: { status: 'unresolved' },
+      deletion: { deletedMessageIds: [1, 2], unavailableMessageIds: [], notDeletableMessageIds: [], failedMessageIds: [] },
+    })).execute({ message_id: '1', reason: 'spam' });
+    const announcement = JSON.parse(result.content as string).announcement as string;
+    expect(announcement).not.toContain('已踢出');
+    expect(announcement).toContain('已不在群中');
+    expect(announcement).toContain('2 条');
   });
 
   it('tells the model not to repeat the account or its content when the request is rejected', async () => {

@@ -8,17 +8,33 @@ export type ModerationRejection =
   /** The bot has no access hash for the target, so Telegram cannot be asked to act on them. */
   | 'unresolved_target';
 
+/**
+ * Banning and deleting are reported separately because they succeed and fail
+ * independently: an account that already left cannot be banned, yet its messages
+ * are still removable, and a failed deletion never invalidates a successful ban.
+ */
+export type BanOutcome =
+  | { status: 'banned' }
+  /** The account could not be addressed, typically because it already left. */
+  | { status: 'unresolved' }
+  | { status: 'protected' }
+  | { status: 'missing_permissions' };
+
+export type DeletionOutcome = {
+  deletedMessageIds: number[];
+  unavailableMessageIds: number[];
+  notDeletableMessageIds: number[];
+  failedMessageIds: number[];
+};
+
 export type BanSpammerResult = {
   status: 'rejected';
   reason: ModerationRejection;
 } | {
   status: 'completed' | 'partial';
   userId: string;
-  banned: true;
-  deletedMessageIds: number[];
-  unavailableMessageIds: number[];
-  notDeletableMessageIds: number[];
-  failedMessageIds: number[];
+  ban: BanOutcome;
+  deletion: DeletionOutcome;
 };
 
 /**

@@ -26,7 +26,7 @@ const fixture = (count = 1) => {
   const findAuthor = vi.fn((chatId: string, messageId: number): { userId: string } | undefined =>
     chatId === CHAT && messageId === 1 ? { userId: USER } : undefined);
   const loadMessageIds = vi.fn(() => Array.from({ length: count }, (_, i) => i + 1));
-  const logger = { withContext: vi.fn(), withFields: vi.fn(), withError: vi.fn(), error: vi.fn(), warn: vi.fn() };
+  const logger = { withContext: vi.fn(), withFields: vi.fn(), withError: vi.fn(), error: vi.fn(), warn: vi.fn(), log: vi.fn() };
   for (const method of [logger.withContext, logger.withFields, logger.withError]) method.mockReturnValue(logger);
   const publishDeletions = vi.fn();
   const deps = {
@@ -53,7 +53,7 @@ describe('spam moderation', () => {
   it.each([1, 9])('allows %i messages and publishes actual deletions', async count => {
     const f = fixture(count);
     const result = await f.service.banSpammer(CHAT, 1);
-    expect(result).toMatchObject({ status: 'completed', banned: true });
+    expect(result).toMatchObject({ status: 'completed', ban: { status: 'banned' } });
     expect(f.api.ban).toHaveBeenCalledExactlyOnceWith(CHAT, expect.objectContaining({ userId: USER }));
     expect(f.api.deleteMessage).toHaveBeenCalledTimes(count);
     expect(f.publishDeletions).toHaveBeenCalledWith(CHAT, Array.from({ length: count }, (_, i) => i + 1));
@@ -66,13 +66,13 @@ describe('spam moderation', () => {
     expect(f.api.deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('counts new messages arriving during asynchronous preflight', async () => {
+  it('rechecks the message count before mutating anything', async () => {
     const f = fixture(9);
-    f.api.inspectMembers.mockImplementation(async () => {
-      f.loadMessageIds.mockReturnValue(Array.from({ length: 10 }, (_, i) => i + 1));
-      return { canModerate: true, status: 'member', inputUser: {} };
-    });
+    // Nine observed messages is eligible, but the account crossed the limit
+    // between the probe decision and this call.
+    f.loadMessageIds.mockReturnValue(Array.from({ length: 10 }, (_, i) => i + 1));
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'message_limit' });
+    expect(f.api.resolveAccessHash).not.toHaveBeenCalled();
     expect(f.api.ban).not.toHaveBeenCalled();
   });
 
@@ -90,47 +90,60 @@ describe('spam moderation', () => {
     expect(f.api.inspectMembers).not.toHaveBeenCalled();
   });
 
-  it('protects owners and administrators', async () => {
-    const f = fixture();
-    f.api.inspectMembers.mockResolvedValue({ canModerate: true, status: 'protected', inputUser: {} });
-    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'protected_user' });
-    expect(f.api.ban).not.toHaveBeenCalled();
-  });
-
   it.each(['left', 'banned'] as const)('bans an account with %s membership', async status => {
     const f = fixture();
     f.api.inspectMembers.mockResolvedValue({ canModerate: true, status, inputUser: {} });
-    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', banned: true });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', ban: { status: 'banned' } });
     expect(f.api.ban).toHaveBeenCalledWith(CHAT, expect.objectContaining({ userId: USER }));
-  });
-
-  it('requires both ban and delete permissions before any action', async () => {
-    const f = fixture();
-    f.api.inspectMembers.mockResolvedValue({ canModerate: false, status: 'member', inputUser: {} });
-    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'missing_permissions' });
-    expect(f.api.ban).not.toHaveBeenCalled();
   });
 
   it('bans using the archive alone, so a deleted evidence message is irrelevant', async () => {
     const f = fixture();
     f.api.inspectMessage.mockResolvedValue(undefined);
-    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', banned: true });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', ban: { status: 'banned' } });
     expect(f.api.ban).toHaveBeenCalledWith(CHAT, expect.objectContaining({ userId: USER }));
   });
 
   it('resolves the access hash live and uses it for the ban', async () => {
     const f = fixture();
-    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', banned: true });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', ban: { status: 'banned' } });
     expect(f.api.resolveAccessHash).toHaveBeenCalledWith(CHAT, USER);
     expect(f.api.inspectMembers).toHaveBeenCalledWith(CHAT, { userId: USER, accessHash: HASH });
   });
 
-  it('rejects when the target cannot be resolved through the bot session', async () => {
-    const f = fixture();
+  it('still deletes messages when the account already left and cannot be banned', async () => {
+    const f = fixture(2);
     f.api.resolveAccessHash.mockResolvedValue(undefined);
-    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ reason: 'unresolved_target' });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({
+      status: 'partial',
+      ban: { status: 'unresolved' },
+      deletion: { deletedMessageIds: [1, 2] },
+    });
     expect(f.api.ban).not.toHaveBeenCalled();
-    expect(f.api.deleteMessage).not.toHaveBeenCalled();
+    expect(f.api.deleteMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes messages even when the bot lacks ban rights', async () => {
+    const f = fixture();
+    f.api.inspectMembers.mockResolvedValue({ canModerate: false, status: 'member', inputUser: {} });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({
+      status: 'partial',
+      ban: { status: 'missing_permissions' },
+      deletion: { deletedMessageIds: [1] },
+    });
+    expect(f.api.ban).not.toHaveBeenCalled();
+    expect(f.api.deleteMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('deletes messages even when the target is protected', async () => {
+    const f = fixture();
+    f.api.inspectMembers.mockResolvedValue({ canModerate: true, status: 'protected', inputUser: {} });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({
+      ban: { status: 'protected' },
+      deletion: { deletedMessageIds: [1] },
+    });
+    expect(f.api.ban).not.toHaveBeenCalled();
+    expect(f.api.deleteMessage).toHaveBeenCalledTimes(1);
   });
 
   it('propagates ban failures before deleting anything', async () => {
@@ -144,11 +157,11 @@ describe('spam moderation', () => {
   it('rechecks current messages on a repeated call after partial deletion', async () => {
     const f = fixture(2);
     f.api.deleteMessage.mockImplementation(async (_chatId, id) => { if (id === 2) throw new Error('network failure'); });
-    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'partial', banned: true, deletedMessageIds: [1], failedMessageIds: [2] });
+    expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({ status: 'partial', ban: { status: 'banned' }, deletion: { deletedMessageIds: [1], failedMessageIds: [2] } });
     f.api.inspectMembers.mockResolvedValue({ canModerate: true, status: 'banned', inputUser: {} });
     f.api.inspectMessage.mockImplementation(async (_chatId, id) => id === 1 ? undefined : { date: NOW / 1000 - 1 });
     f.api.deleteMessage.mockResolvedValue();
-    expect(await f.restart().banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', deletedMessageIds: [2], unavailableMessageIds: [1] });
+    expect(await f.restart().banSpammer(CHAT, 1)).toMatchObject({ status: 'completed', deletion: { deletedMessageIds: [2], unavailableMessageIds: [1] } });
     expect(f.api.deleteMessage.mock.calls.map(call => call[1])).toEqual([1, 2, 2]);
     expect(f.publishDeletions).toHaveBeenLastCalledWith(CHAT, [2, 1]);
   });
@@ -158,7 +171,8 @@ describe('spam moderation', () => {
     f.api.inspectMessage.mockImplementation(async (_chatId, id) =>
       id === 2 ? undefined : { date: NOW / 1000 - (id === 3 ? 172800 : 1) });
     expect(await f.service.banSpammer(CHAT, 1)).toMatchObject({
-      status: 'partial', banned: true, deletedMessageIds: [1], unavailableMessageIds: [2], notDeletableMessageIds: [3], failedMessageIds: [],
+      status: 'partial', ban: { status: 'banned' },
+      deletion: { deletedMessageIds: [1], unavailableMessageIds: [2], notDeletableMessageIds: [3], failedMessageIds: [] },
     });
     expect(f.api.deleteMessage).toHaveBeenCalledExactlyOnceWith(CHAT, 1);
     expect(f.publishDeletions).toHaveBeenCalledWith(CHAT, [1, 2]);

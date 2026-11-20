@@ -37,9 +37,23 @@ export const createBanSpammerTool = (
       };
 
     const accountLink = `[spam 账号](tg://user?id=${result.userId})`;
-    const announcement = result.status === 'completed'
-      ? `已踢出并永久封禁 ${accountLink}，已清理记录中可删除的消息。`
-      : `已踢出并永久封禁 ${accountLink}，部分消息需人工处理。`;
+    const deleted = result.deletion.deletedMessageIds.length;
+    const cleanup = result.status === 'completed'
+      ? '已清理记录中可删除的消息。'
+      : '部分消息需人工处理。';
+    const announcement = result.ban.status === 'banned'
+      ? `已踢出并永久封禁 ${accountLink}，${cleanup}`
+      : result.ban.status === 'unresolved'
+        // The account already left, so there is nothing to remove from the
+        // group; its messages are still cleaned up independently.
+        ? deleted > 0
+          ? `清理了 ${deleted} 条记录中可删除的消息；${accountLink} 已不在群中，无需踢出。`
+          : `${accountLink} 已不在群中，无需踢出；记录中可删除的消息已清理。`
+        : result.ban.status === 'protected'
+          ? `${accountLink} 是受保护账号，未踢出；${cleanup}`
+          : result.ban.status === 'missing_permissions'
+            ? `缺少管理权限，未踢出 ${accountLink}；${cleanup}`
+            : `无法踢出 ${accountLink}，${cleanup}`;
     return {
       content: JSON.stringify({
         ...result,
