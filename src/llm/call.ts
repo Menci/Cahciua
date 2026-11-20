@@ -5,7 +5,7 @@ import { trimImages } from './images';
 import { applyAnthropicCachePoints, messagesApi } from './messages';
 import { dumpLlmPayload } from './request-dump';
 import { responsesApi } from './responses';
-import type { LlmEndpoint } from './types';
+import type { ForcedToolChoiceMode, LlmEndpoint } from './types';
 import {
   fromChatCompletionsOutput,
   fromMessagesOutput,
@@ -25,6 +25,28 @@ export type ForceToolChoice = 'any' | { name: string };
 export interface LlmCallConfig extends Omit<LlmEndpoint, 'maxImagesAllowed'> {
   forceToolChoice?: ForceToolChoice;
 }
+
+/**
+ * Translate a forced choice into the tool list and choice a provider should see.
+ *
+ * `specified` is the direct form: every schema goes out and `tool_choice` names
+ * one. `filtered` sends only that schema and leaves the choice at `any`, which
+ * is what providers that mishandle a named choice need. Collapsing to one tool
+ * is safe because the caller only wants that one call; any other choice is
+ * impossible once the others are absent.
+ */
+const narrowToForcedTool = (
+  forceToolChoice: ForceToolChoice | undefined,
+  tools: ToolSchema[] | undefined,
+  mode: ForcedToolChoiceMode | undefined,
+): { forceToolChoice: ForceToolChoice | undefined; tools: ToolSchema[] | undefined } => {
+  if (mode !== 'filtered' || !forceToolChoice || forceToolChoice === 'any' || !tools) {
+    return { forceToolChoice, tools };
+  }
+  const only = tools.filter(tool => tool.name === forceToolChoice.name);
+  if (only.length === 0) throw new Error(`forceToolChoice names unknown tool ${forceToolChoice.name}`);
+  return { forceToolChoice: 'any', tools: only };
+};
 
 export interface ToolSchema {
   name: string;
@@ -86,6 +108,9 @@ export const callLlm = async (
 ): Promise<LlmCallResult> => {
   if (config.forceToolChoice && (!tools || tools.length === 0))
     throw new Error('forceToolChoice requires at least one tool');
+  const narrowed = narrowToForcedTool(config.forceToolChoice, tools, config.forcedToolChoiceMode);
+  tools = narrowed.tools;
+  const forceToolChoice = narrowed.forceToolChoice;
   const apiFormat = config.apiFormat;
   const { log, label } = options;
 
@@ -100,7 +125,7 @@ export const callLlm = async (
     const response = await responsesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
-      extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
+      extraBody: config.extraBody, forceToolChoice,
       onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
       log, label, timeoutSec: config.timeoutSec,
     });
@@ -124,7 +149,7 @@ export const callLlm = async (
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
       extraBody: config.extraBody, anthropicBetas: config.anthropicBetas,
-      forceToolChoice: config.forceToolChoice,
+      forceToolChoice,
       onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
       log, label, timeoutSec: config.timeoutSec,
     });
@@ -142,7 +167,7 @@ export const callLlm = async (
   const response = await chatCompletions({
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
-    extraBody: config.extraBody, forceToolChoice: config.forceToolChoice,
+    extraBody: config.extraBody, forceToolChoice,
     onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
     log, label, timeoutSec: config.timeoutSec,
   });

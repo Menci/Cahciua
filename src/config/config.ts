@@ -19,6 +19,7 @@ const llmEndpointEntries = {
   timeoutSec: v.optional(v.number()),
   extraBody: v.optional(v.record(v.string(), v.unknown())),
   anthropicBetas: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
+  forcedToolChoiceMode: v.optional(v.picklist(['specified', 'filtered'])),
 };
 
 const LlmEndpointSchema = v.pipe(
