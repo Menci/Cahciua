@@ -68,15 +68,7 @@ export const callDescriptionLlm = async (params: {
     ],
   } satisfies InputMessage];
 
-  const result = await callLlm({
-    apiBaseUrl: model.apiBaseUrl,
-    apiKey: model.apiKey,
-    model: model.model,
-    apiFormat: model.apiFormat,
-    timeoutSec: model.timeoutSec,
-    extraBody: model.extraBody,
-    anthropicBetas: model.anthropicBetas,
-  }, entries, system, undefined, {
+  const result = await callLlm(model, entries, system, undefined, {
     log,
     label,
     maxImagesAllowed: model.maxImagesAllowed,

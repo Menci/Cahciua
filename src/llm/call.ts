@@ -5,7 +5,7 @@ import { trimImages } from './images';
 import { applyAnthropicCachePoints, messagesApi } from './messages';
 import { dumpLlmPayload } from './request-dump';
 import { responsesApi } from './responses';
-import type { ForcedToolChoiceMode, LlmEndpoint } from './types';
+import type { ForceToolChoiceSupport, LlmEndpoint } from './types';
 import {
   fromChatCompletionsOutput,
   fromMessagesOutput,
@@ -24,28 +24,49 @@ export type ForceToolChoice = 'any' | { name: string };
 
 export interface LlmCallConfig extends Omit<LlmEndpoint, 'maxImagesAllowed'> {
   forceToolChoice?: ForceToolChoice;
+  /**
+   * Set by the caller for the last-resort call that must yield a message. It is
+   * the only call allowed to trade reasoning away for a forced choice on models
+   * that cannot do both.
+   */
+  needsForcedOutput?: boolean;
 }
 
 /**
- * Translate a forced choice into the tool list and choice a provider should see.
- *
- * `specified` is the direct form: every schema goes out and `tool_choice` names
- * one. `filtered` sends only that schema and leaves the choice at `any`, which
- * is what providers that mishandle a named choice need. Collapsing to one tool
- * is safe because the caller only wants that one call; any other choice is
- * impossible once the others are absent.
+ * A forced call competes with reasoning: models advertised as
+ * `reasoningDisabledOnly` accept a forced `tool_choice` only when thinking is
+ * switched off. Ordinary turns keep their reasoning and simply go unforced;
+ * only the last-resort call opts into disabling it, because ensuring the turn
+ * produces a message matters more there than the model's deliberation.
  */
-const narrowToForcedTool = (
-  forceToolChoice: ForceToolChoice | undefined,
+const resolveForcing = (
+  config: LlmCallConfig,
   tools: ToolSchema[] | undefined,
-  mode: ForcedToolChoiceMode | undefined,
-): { forceToolChoice: ForceToolChoice | undefined; tools: ToolSchema[] | undefined } => {
-  if (mode !== 'filtered' || !forceToolChoice || forceToolChoice === 'any' || !tools) {
-    return { forceToolChoice, tools };
+): {
+  forceToolChoice: ForceToolChoice | undefined;
+  tools: ToolSchema[] | undefined;
+  disableReasoning: boolean;
+} => {
+  const support: ForceToolChoiceSupport = config.forceToolChoiceSupport ?? 'full';
+  const requested = config.forceToolChoice;
+  const unforced = { forceToolChoice: undefined, tools, disableReasoning: false };
+
+  if (!requested) return unforced;
+  if (support === 'none') return unforced;
+  if (support === 'reasoningDisabledOnly') {
+    if (!config.needsForcedOutput) return unforced;
+    return { forceToolChoice: requested, tools, disableReasoning: true };
   }
-  const only = tools.filter(tool => tool.name === forceToolChoice.name);
-  if (only.length === 0) throw new Error(`forceToolChoice names unknown tool ${forceToolChoice.name}`);
-  return { forceToolChoice: 'any', tools: only };
+  if (support === 'anyToolOnly') {
+    // The provider accepts "any" but not a named choice, so the only way to pin
+    // the tool is to stop offering the others. An "any" request already means
+    // that, so it needs no narrowing.
+    if (requested === 'any' || !tools) return { forceToolChoice: requested, tools, disableReasoning: false };
+    const only = tools.filter(tool => tool.name === requested.name);
+    if (only.length === 0) throw new Error(`forceToolChoice names unknown tool ${requested.name}`);
+    return { forceToolChoice: 'any', tools: only, disableReasoning: false };
+  }
+  return { forceToolChoice: requested, tools, disableReasoning: false };
 };
 
 export interface ToolSchema {
@@ -64,6 +85,16 @@ export interface LlmCallUsage {
 export interface LlmCallResult {
   entries: ConversationEntry[];
   usage: LlmCallUsage;
+  /**
+   * Whether this request actually constrained the model's choice. Callers that
+   * enforce a forced call must use this rather than their own intent: a model
+   * may be configured to drop the constraint (e.g. to keep its reasoning).
+   *
+   * Optional because test doubles stub this boundary without describing a wire
+   * request; absent is read as "the constraint was applied", which is the
+   * behaviour every stubbed call had before this field existed.
+   */
+  forceApplied?: boolean;
 }
 
 export interface LlmCallOptions {
@@ -108,9 +139,11 @@ export const callLlm = async (
 ): Promise<LlmCallResult> => {
   if (config.forceToolChoice && (!tools || tools.length === 0))
     throw new Error('forceToolChoice requires at least one tool');
-  const narrowed = narrowToForcedTool(config.forceToolChoice, tools, config.forcedToolChoiceMode);
-  tools = narrowed.tools;
-  const forceToolChoice = narrowed.forceToolChoice;
+  const forcing = resolveForcing(config, tools);
+  tools = forcing.tools;
+  const forceToolChoice = forcing.forceToolChoice;
+  const reasoningEffort = forcing.disableReasoning ? undefined : config.reasoningEffort;
+  const disableReasoning = forcing.disableReasoning;
   const apiFormat = config.apiFormat;
   const { log, label } = options;
 
@@ -125,7 +158,7 @@ export const callLlm = async (
     const response = await responsesApi({
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       input, instructions: system, ...(wireTools ? { tools: wireTools } : {}),
-      extraBody: config.extraBody, forceToolChoice,
+      extraBody: config.extraBody, forceToolChoice, reasoningEffort, disableReasoning,
       onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
       log, label, timeoutSec: config.timeoutSec,
     });
@@ -136,6 +169,7 @@ export const callLlm = async (
     return {
       entries: fromResponsesOutput(assistantItems),
       usage: response.usage,
+      forceApplied: forceToolChoice != null,
     };
   }
 
@@ -149,7 +183,7 @@ export const callLlm = async (
       baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
       system: tagged.system, messages: tagged.messages, ...(wireTools ? { tools: wireTools } : {}),
       extraBody: config.extraBody, anthropicBetas: config.anthropicBetas,
-      forceToolChoice,
+      forceToolChoice, reasoningEffort, disableReasoning,
       onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
       log, label, timeoutSec: config.timeoutSec,
     });
@@ -158,6 +192,7 @@ export const callLlm = async (
     return {
       entries: fromMessagesOutput(response.content),
       usage: response.usage,
+      forceApplied: forceToolChoice != null,
     };
   }
 
@@ -167,7 +202,7 @@ export const callLlm = async (
   const response = await chatCompletions({
     baseURL: config.apiBaseUrl, apiKey: config.apiKey, model: config.model,
     messages: chatMessages, system, ...(wireTools ? { tools: wireTools } : {}),
-    extraBody: config.extraBody, forceToolChoice,
+    extraBody: config.extraBody, forceToolChoice, reasoningEffort, disableReasoning,
     onRequestBody: body => dumpLlmPayload(options.dumpId, 'request', body),
     log, label, timeoutSec: config.timeoutSec,
   });
@@ -179,5 +214,6 @@ export const callLlm = async (
   return {
     entries: fromChatCompletionsOutput([choice.message as ChatCompletionsAssistantMessage]),
     usage: response.usage,
+    forceApplied: forceToolChoice != null,
   };
 };

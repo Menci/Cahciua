@@ -21,9 +21,12 @@ const logger = useLogger('probe-vs-primary-test');
 
 const mockCallLlm = vi.mocked(callLlm);
 
-const makeChatConfig = (): ResolvedChatConfig => ({
+const makeChatConfig = (primarySupport?: 'none'): ResolvedChatConfig => ({
   primary: {
-    model: { apiBaseUrl: 'mock', apiKey: 'k', model: 'mock-primary', apiFormat: 'openai-chat' },
+    model: {
+      apiBaseUrl: 'mock', apiKey: 'k', model: 'mock-primary', apiFormat: 'openai-chat',
+      ...(primarySupport ? { forceToolChoiceSupport: primarySupport } : {}),
+    },
   },
   systemFiles: [],
   sendTypingAction: false,
@@ -318,11 +321,86 @@ describe('probe vs primary view of bot\'s own messages', () => {
 
     expect(primaryCallCount).toBe(2);
     expect(fallbackCall).toBeDefined();
-    // Fallback call's config carries the specific tool_choice constraint.
+    // Fallback call's config carries the specific tool_choice constraint and is
+    // flagged as the last-resort call, which is what lets a
+    // `reasoningDisabledOnly` model trade reasoning for a message.
     expect(fallbackCall![0]!.forceToolChoice).toEqual({ name: 'send_message' });
+    expect(fallbackCall![0]!.needsForcedOutput).toBe(true);
     // Actual TG send happened once (the fallback message).
     expect(sendMessageCalls).toEqual([{ text: 'forced fallback message' }]);
 
+    driver.stop();
+  });
+
+  it('skips the forced fallback when the model cannot force a tool at all', async () => {
+    mockCallLlm.mockReset();
+
+    let primaryCallCount = 0;
+    mockCallLlm.mockImplementation(async config => {
+      if (config.model === 'mock-probe') {
+        return {
+          entries: [{
+            kind: 'message', role: 'assistant', reasoning: undefined,
+            parts: [{ kind: 'toolCall', callId: 'p1', name: 'decide', args: JSON.stringify({ should_act: 'send_message', reason: 'addressed' }) }],
+          }],
+          usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          forceApplied: true,
+        };
+      }
+      primaryCallCount++;
+      return {
+        entries: [{
+          kind: 'message', role: 'assistant', reasoning: undefined,
+          parts: [{ kind: 'toolCall', callId: 'pr1', name: 'end_turn', args: '{}' }],
+        }],
+        usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        forceApplied: false,
+      };
+    });
+
+    const sendMessageCalls: unknown[] = [];
+    const driver = createDriver(
+      { chatIds: ['-100125'], resolveChatConfig: () => makeChatConfig('none') },
+      {
+        loadTurnResponses: async () => [],
+        persistTurnResponse: async () => {},
+        persistProbeResponse: async () => {},
+        sendTypingAction: async () => {},
+        setMessageReaction: async () => {},
+        onDebounceStateChange: () => {},
+        sendMessage: async (_chatId: string, text: string) => {
+          sendMessageCalls.push({ text });
+          return { messageId: 1, date: 1 };
+        },
+        banSpammer: async () => ({ status: 'rejected', reason: 'unknown_message' }),
+        loadCompaction: () => null,
+        loadLastProbeTime: () => 0,
+        persistCompaction: () => {},
+        setCompactCursor: () => buildRC(),
+        getChatTitle: () => 'g',
+        messageExists: () => true,
+        downloadMessageMedia: async () => undefined,
+        readOldMessages: () => '',
+        resolveModel: () => ({ apiBaseUrl: 'mock', apiKey: 'k', model: 'mock', apiFormat: 'openai-chat' }),
+        runtimeConfig: { shell: ['/bin/bash', '-c'], writeFile: ['cat'], readFile: ['cat'], writeFileSizeLimit: 1024, readFileSizeLimit: 1024 },
+        loadMessageAttachments: () => undefined,
+        backgroundTask: {
+          startTask: () => 0,
+          killTask: () => ({ ok: true }),
+          getActiveTasks: () => [],
+          readTaskOutput: async () => ({ content: '', totalLines: 0, truncated: false }),
+        },
+        logger,
+      },
+    );
+
+    driver.handleEvent('-100125', buildRC());
+
+    await vi.waitFor(() => expect(mockCallLlm).toHaveBeenCalledTimes(2), { timeout: 1000, interval: 10 });
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(primaryCallCount).toBe(1);
+    expect(mockCallLlm.mock.calls[1]![0]!.forceToolChoiceSupport).toBe('none');
+    expect(sendMessageCalls).toEqual([]);
     driver.stop();
   });
 });

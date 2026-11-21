@@ -315,6 +315,14 @@ describe('loopEndedWithoutSendMessage', () => {
     ];
     expect(loopEndedWithoutSendMessage(trs)).toBe(true);
   });
+
+  it('returns true when an unforced model step ends with plain text and no tool calls', () => {
+    const trs = [
+      sendMsgTr(50),
+      tr(200, [assistantText('draft that never reached Telegram')]),
+    ];
+    expect(loopEndedWithoutSendMessage(trs)).toBe(true);
+  });
 });
 
 describe('findWorkingWindowCursor', () => {

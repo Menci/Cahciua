@@ -16,6 +16,8 @@ interface CallModelStepParams {
   step: number;
   maxImagesAllowed?: number;
   forceToolChoice?: ForceToolChoice;
+  /** Marks the last-resort call that must yield a message. */
+  needsForcedOutput?: boolean;
   log: Logger;
 }
 
@@ -51,7 +53,7 @@ export const createRunner = (config: RunnerConfig) => {
     const toolSchemas = params.tools.map(toToolSchema);
 
     const invokeModel = () => callLlm(
-      { ...config, forceToolChoice: params.forceToolChoice },
+      { ...config, forceToolChoice: params.forceToolChoice, needsForcedOutput: params.needsForcedOutput },
       params.entries,
       params.system,
       toolSchemas,
@@ -66,7 +68,7 @@ export const createRunner = (config: RunnerConfig) => {
     let result = await invokeModel();
     let usage = { ...result.usage };
 
-    if (params.forceToolChoice) {
+    if (params.forceToolChoice && result.forceApplied !== false) {
       const choice = params.forceToolChoice;
       // Providers may ignore tool_choice. Rejected responses contribute usage,
       // but only the selected/final response can reach tool execution.
@@ -132,6 +134,7 @@ export const createRunner = (config: RunnerConfig) => {
         step,
         maxImagesAllowed: params.maxImagesAllowed,
         forceToolChoice: params.forceToolChoice,
+        needsForcedOutput: params.needsForcedOutput,
         log: params.log,
       }),
       executeToolStep: modelStep => executeToolStep({

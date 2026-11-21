@@ -413,4 +413,34 @@ describe('Runner persistence and force-tool characterization', () => {
     expect(sendExecute).not.toHaveBeenCalled();
     expect(onStepComplete).not.toHaveBeenCalled();
   });
+
+  it('skips force-tool retry enforcement when callLlm reports forceApplied=false', async () => {
+    const plainText: ConversationEntry[] = [{
+      kind: 'message',
+      role: 'assistant',
+      parts: [{ kind: 'text', text: 'unforced reply' }],
+      reasoning: undefined,
+    }];
+    mockCallLlm.mockResolvedValue({
+      entries: plainText,
+      usage: makeUsage(4, 6),
+      forceApplied: false,
+    });
+    const onStepComplete = vi.fn(async () => {});
+
+    await createTestRunner().runStepLoop({
+      chatId: 'unforced-model',
+      entries: initialEntries,
+      system: 'system',
+      tools: [],
+      maxSteps: 1,
+      forceToolChoice: 'any',
+      onStepComplete,
+      checkInterrupt: () => false,
+      log: logger,
+    });
+
+    expect(mockCallLlm).toHaveBeenCalledTimes(1);
+    expect(onStepComplete).toHaveBeenCalledTimes(1);
+  });
 });

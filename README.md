@@ -81,6 +81,18 @@ models:
     anthropicBetas: ["feature-one-YYYY-MM-DD", "feature-two-YYYY-MM-DD"]
 ```
 
+Per-model reasoning and forced-tool behaviour are configured alongside the endpoint:
+
+```yaml
+models:
+  kimi:
+    # ...
+    reasoningEffort: "max"
+    forceToolChoiceSupport: anyToolOnly   # none | reasoningDisabledOnly | anyToolOnly | full
+```
+
+`reasoningEffort` is one level name that each protocol renders its own way (Anthropic adaptive thinking plus `output_config.effort`, Responses `reasoning.effort`, Chat Completions `reasoning_effort`). Non-effort reasoning settings such as a summary preference stay in `extraBody` and are merged rather than replaced. `forceToolChoiceSupport` controls how a forced call is requested: `full` names the tool, `anyToolOnly` offers only that tool and asks for "any", `reasoningDisabledOnly` keeps reasoning except for the last-resort forced message, and `none` never forces (and skips that last-resort call).
+
 Replace the example identifiers with names from [Anthropic's beta header documentation](https://platform.claude.com/docs/en/api/beta-headers). Cahciua sends them together in one `anthropic-beta` header for requests using that model, including probe, primary, compaction, and media-description calls. A beta may require matching request-body fields or a compatible response codec; the header alone enables only the provider's beta gate. Invalid or unavailable identifiers surface as provider errors.
 
 ## Development

@@ -97,15 +97,7 @@ export const createDriver = (config: DriverConfig, deps: {
       log,
     });
     const { cursorMs, summary } = compaction;
-    const runner = createRunner({
-      apiBaseUrl: chatConfig.primary.model.apiBaseUrl,
-      apiKey: chatConfig.primary.model.apiKey,
-      model: chatConfig.primary.model.model,
-      apiFormat: chatConfig.primary.model.apiFormat,
-      timeoutSec: chatConfig.primary.model.timeoutSec,
-      extraBody: chatConfig.primary.model.extraBody,
-      anthropicBetas: chatConfig.primary.model.anthropicBetas,
-    });
+    const runner = createRunner(chatConfig.primary.model);
 
     const createTools = () => createPrimaryTools({
       chatId,

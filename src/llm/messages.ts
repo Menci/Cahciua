@@ -66,6 +66,10 @@ export interface MessagesApiParams {
   extraBody?: Record<string, unknown>;
   anthropicBetas?: string[];
   forceToolChoice?: 'any' | { name: string };
+  /** Provider-neutral reasoning level; rendered as adaptive thinking + effort. */
+  reasoningEffort?: string;
+  /** Last-resort forced calls give up reasoning to obtain a tool call. */
+  disableReasoning?: boolean;
   onRequestBody: (body: unknown) => void;
   log: Logger;
   label: string;
@@ -95,6 +99,12 @@ export const messagesApi = async (params: MessagesApiParams): Promise<MessagesAp
       ...(params.system ? { system: params.system } : {}),
       messages: params.messages,
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+      ...(params.disableReasoning
+        ? { thinking: { type: 'disabled' as const } }
+        : params.reasoningEffort
+          // Adaptive lets the model decide how deeply to think; effort steers it.
+          ? { thinking: { type: 'adaptive' as const }, output_config: { effort: params.reasoningEffort } }
+          : {}),
       ...(params.forceToolChoice && params.tools && params.tools.length > 0
         ? {
             tool_choice: params.forceToolChoice === 'any'

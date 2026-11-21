@@ -50,7 +50,7 @@ Add characterization tests in `driver-characterization.test.ts` before changing 
 
 ## Runner Changes
 
-`callModelStep()` may retry ignored forced tool choices. Rejected attempts contribute token usage but must never execute tools. `executeToolStep()` handles only the chosen model entries.
+`callModelStep()` retries ignored forced tool choices only when `callLlm` actually applied a constraint (`forceApplied !== false`). Rejected attempts contribute token usage but must never execute tools. `executeToolStep()` handles only the chosen model entries.
 
 `runTurnLoop()` owns ordering:
 
@@ -77,7 +77,7 @@ Do not store summaries as TRs or delete historical rows.
 - Probe: valid send/no-action, missing/malformed decide, persistence order.
 - Primary: still_working, terminal tools, interrupted continuation, fallback, anonymous moderation announcements.
 - Moderation: per-chat opt-in, omitted schemas and shared prompt introductions, group policy injection into both probe/primary, sender/chat binding, 9/10-message boundary, protected members, permissions, deletion age, partial outcomes, repeated calls against current Telegram state, and tool-history audit identity.
-- Runner: retry limits, usage aggregation, selected-output execution.
+- Runner: retry limits, `forceApplied=false` bypass, usage aggregation, selected-output execution.
 - Scheduler: sender-aware delay, typing extension, hard cap, cleanup.
 - Compaction: threshold boundaries, cursor window, persistence/update order.
 - Context: RC/TR ordering, reasoning compatibility, image and tool-result trimming.

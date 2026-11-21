@@ -76,13 +76,7 @@ export const createCompactionController = (deps: {
           }).log('Triggering compaction');
 
           const meta = await runCompaction({
-            apiBaseUrl: compactEndpoint.apiBaseUrl,
-            apiKey: compactEndpoint.apiKey,
-            model: compactEndpoint.model,
-            apiFormat: compactEndpoint.apiFormat,
-            timeoutSec: compactEndpoint.timeoutSec,
-            extraBody: compactEndpoint.extraBody,
-            anthropicBetas: compactEndpoint.anthropicBetas,
+            ...compactEndpoint,
             chatId: deps.chatId,
             rcWindow: deps.context().filter(segment =>
               segment.receivedAtMs >= oldCursorMs && segment.receivedAtMs < newCursorMs),
@@ -91,7 +85,6 @@ export const createCompactionController = (deps: {
             existingSummary: summary(),
             oldCursorMs,
             newCursorMs,
-            maxImagesAllowed: compactEndpoint.maxImagesAllowed,
             log: deps.log,
           });
           deps.persistCompaction(deps.chatId, meta);

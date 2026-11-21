@@ -105,11 +105,10 @@ const trWasInterrupted = (tr: TurnResponseV2): boolean => {
 export const loopEndedWithoutSendMessage = (trs: TurnResponseV2[]): boolean => {
   if (trs.length === 0) return false;
   const endIdx = trs.length - 1;
-  const ended = trs[endIdx]!.entries.some(entry =>
-    entry.kind === 'message'
-    && entry.role === 'assistant'
-    && entry.parts.some(part => part.kind === 'toolCall' && part.name === 'end_turn'));
-  if (!ended) return false;
+  // A loop is still open while its latest step awaits follow-up; any other exit
+  // (end_turn, send_message, or an unforced plain-text step with no tool calls)
+  // closed the loop and must be checked for a successful send.
+  if (trWasInterrupted(trs[endIdx]!)) return false;
 
   for (let i = endIdx; i >= 0; i--) {
     if (wasSendMessageSuccessful(trs[i]!)) return false;

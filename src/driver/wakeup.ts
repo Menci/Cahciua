@@ -187,7 +187,11 @@ export const executeWakeup = async (params: {
     });
 
     const latestTurnResponses = await params.loadTurnResponses(params.chatId, params.cursorMs);
-    if (loopEndedWithoutSendMessage(latestTurnResponses)) {
+    // A model that cannot force a tool has no way to be made to speak, so the
+    // last-resort call would only burn a request and fail. Ending the turn is the
+    // honest outcome.
+    const canForce = (params.chatConfig.primary.model.forceToolChoiceSupport ?? 'full') !== 'none';
+    if (canForce && loopEndedWithoutSendMessage(latestTurnResponses)) {
       params.log.withFields({ chatId: params.chatId }).log('Loop ended without send_message — running forced fallback');
       await params.runner.runStepLoop({
         chatId: params.chatId,
@@ -197,6 +201,9 @@ export const executeWakeup = async (params: {
         maxSteps: 1,
         maxImagesAllowed: params.chatConfig.primary.model.maxImagesAllowed,
         forceToolChoice: { name: 'send_message' },
+        // The last-resort call is the one place a `reasoningDisabledOnly` model
+        // trades reasoning for a guaranteed message.
+        needsForcedOutput: true,
         onStepComplete: persistStep,
         checkInterrupt: () => false,
         log: params.log,

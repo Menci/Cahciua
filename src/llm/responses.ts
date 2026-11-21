@@ -32,6 +32,8 @@ export interface ResponsesApiParams {
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
+  reasoningEffort?: string;
+  disableReasoning?: boolean;
   onRequestBody: (body: unknown) => void;
   log: Logger;
   label: string;
@@ -55,6 +57,7 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
     : undefined;
 
   try {
+    const reasoningEffort = params.disableReasoning ? 'none' : params.reasoningEffort;
     const requestBody = {
       model: params.model,
       input: params.input,
@@ -68,6 +71,11 @@ export const responsesApi = async (params: ResponsesApiParams): Promise<Response
           }
         : {}),
       ...params.extraBody,
+      // `extraBody` may carry non-effort reasoning knobs such as a summary
+      // preference, so effort is merged in rather than replacing them.
+      ...(reasoningEffort
+        ? { reasoning: { ...(params.extraBody?.reasoning as object | undefined), effort: reasoningEffort } }
+        : {}),
     };
     params.onRequestBody(requestBody);
     const body = JSON.stringify(requestBody);

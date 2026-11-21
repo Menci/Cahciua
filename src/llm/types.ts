@@ -1,15 +1,18 @@
 export type ProviderFormat = 'openai-chat' | 'responses' | 'anthropic-messages';
 
 /**
- * How to ask a provider for one specific tool when the caller forces a choice.
+ * What a model can do when the caller needs a specific tool to be called.
  *
- * - `specified` names the tool in `tool_choice` and ships every tool schema.
- * - `filtered` narrows the request to that one tool and asks for "any" call.
- *
- * Some providers reject a named `tool_choice`, or handle it less reliably than
- * a single-tool constraint, so the wire shape has to be selectable per model.
+ * - `none`: forcing is unavailable. The request omits `tool_choice` entirely and
+ *   the caller must not rely on a forced call to rescue the turn.
+ * - `reasoningDisabledOnly`: forcing works only with reasoning switched off, so
+ *   it is reserved for the last-resort call that must produce a message.
+ *   Ordinary calls keep their reasoning and never force a choice.
+ * - `anyToolOnly`: `tool_choice` may ask for "any" call but cannot name one, so
+ *   the offered tool list is narrowed to the single tool instead.
+ * - `full`: `tool_choice` may name the tool directly.
  */
-export type ForcedToolChoiceMode = 'specified' | 'filtered';
+export type ForceToolChoiceSupport = 'none' | 'reasoningDisabledOnly' | 'anyToolOnly' | 'full';
 
 export interface LlmEndpoint {
   apiBaseUrl: string;
@@ -20,5 +23,11 @@ export interface LlmEndpoint {
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
   anthropicBetas?: string[];
-  forcedToolChoiceMode?: ForcedToolChoiceMode;
+  /** Defaults to `full`. */
+  forceToolChoiceSupport?: ForceToolChoiceSupport;
+  /**
+   * How much reasoning the model should spend. Each transport renders this in
+   * its own vocabulary; the level names are the providers' shared scale.
+   */
+  reasoningEffort?: string;
 }

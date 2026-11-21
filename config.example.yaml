@@ -19,6 +19,11 @@ models:
     apiFormat: "anthropic-messages"
     # Optional exact beta names for this model; sent as one anthropic-beta header.
     # anthropicBetas: ["example-feature-2026-01-01"]
+    # Optional reasoning level, rendered per protocol (adaptive thinking + effort
+    # on Anthropic, reasoning.effort on Responses, reasoning_effort on Chat).
+    # reasoningEffort: "medium"
+    # How a forced tool call is requested: none | reasoningDisabledOnly | anyToolOnly | full.
+    # forceToolChoiceSupport: full
     timeoutSec: 60
     maxImagesAllowed: 10
 

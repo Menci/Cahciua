@@ -19,7 +19,8 @@ const llmEndpointEntries = {
   timeoutSec: v.optional(v.number()),
   extraBody: v.optional(v.record(v.string(), v.unknown())),
   anthropicBetas: v.optional(v.array(v.pipe(v.string(), v.minLength(1)))),
-  forcedToolChoiceMode: v.optional(v.picklist(['specified', 'filtered'])),
+  forceToolChoiceSupport: v.optional(v.picklist(['none', 'reasoningDisabledOnly', 'anyToolOnly', 'full'])),
+  reasoningEffort: v.optional(v.pipe(v.string(), v.minLength(1))),
 };
 
 const LlmEndpointSchema = v.pipe(
@@ -229,6 +230,12 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
   const merged: ChatConfig = merge(structuredClone(config.chats.default), override);
 
   const primaryModel = resolveModel(config, merged.primary.model);
+  const probeModel = merged.probe.model ? resolveModel(config, merged.probe.model) : primaryModel;
+  // The probe is a forced call to `decide` that cannot be expressed any other
+  // way, so a model without that capability would silently answer nothing and
+  // the chat would never wake. Fail at load time instead.
+  if ((probeModel.forceToolChoiceSupport ?? 'full') === 'none')
+    throw new Error(`Chat ${chatId}: probe model "${probeModel.model}" cannot force a tool call (forceToolChoiceSupport=none)`);
   const web = merged.tools.web;
   const providers = web.providers;
 
@@ -263,9 +270,7 @@ export const resolveChatConfig = (config: Config, chatId: string): ResolvedChatC
       ...merged.compaction,
       model: merged.compaction.model ? resolveModel(config, merged.compaction.model) : undefined,
     },
-    probe: {
-      model: merged.probe.model ? resolveModel(config, merged.probe.model) : primaryModel,
-    },
+    probe: { model: probeModel },
     imageToText: {
       enabled: merged.imageToText.enabled,
       model: merged.imageToText.model,

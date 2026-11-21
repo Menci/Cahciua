@@ -22,6 +22,8 @@ export interface ChatCompletionsParams {
   timeoutSec?: number;
   extraBody?: Record<string, unknown>;
   forceToolChoice?: 'any' | { name: string };
+  reasoningEffort?: string;
+  disableReasoning?: boolean;
   onRequestBody: (body: unknown) => void;
   log: Logger;
   label: string;
@@ -66,6 +68,9 @@ export const chatCompletions = async (params: ChatCompletionsParams): Promise<Ch
         ...params.messages,
       ],
       ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
+      ...(params.disableReasoning
+        ? { reasoning_effort: 'none' }
+        : params.reasoningEffort ? { reasoning_effort: params.reasoningEffort } : {}),
       ...(params.forceToolChoice && params.tools && params.tools.length > 0
         ? {
             tool_choice: params.forceToolChoice === 'any'

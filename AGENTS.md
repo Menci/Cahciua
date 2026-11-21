@@ -120,7 +120,7 @@ Message edits/deletes mutate the target node in place. Entity metadata changes a
 
 RC uses `receivedAtMs`; turn responses use `requestedAtMs`. Equal timestamps order RC before TR for Anthropic role alternation. Stored TRs contain `ConversationEntry[]`, token totals, cache components, and model identity.
 
-The runner performs model-call retries for ignored forced tool choices, aggregates retry usage, and executes/persists only the selected/final response. A completed step is persisted before `checkInterrupt`; interruption is cooperative at step boundaries, never preemptive during model/tool/persistence work.
+The runner performs model-call retries for ignored forced tool choices when `forceApplied` is true, aggregates retry usage, and executes/persists only the selected/final response. A completed step is persisted before `checkInterrupt`; interruption is cooperative at step boundaries, never preemptive during model/tool/persistence work.
 
 `send_message.still_working=true` keeps the tool loop open. Without it, `send_message` is terminal unless another parallel tool result requires follow-up.
 
@@ -143,6 +143,8 @@ Compaction is an independent per-chat controller, not a turn feature or TR. Raw 
 ### Provider Boundaries
 
 `src/llm/call.ts` is the common non-streaming call boundary. It enforces `maxImagesAllowed` on every request, converts IR through `src/unified-api/`, normalizes usage, and writes debug request/response JSON under `/tmp/cahciua/`. Per-model `anthropicBetas` applies only to `anthropic-messages`; the transport joins configured names into one `anthropic-beta` request header. The selected model setting reaches probe, primary, compaction, and media-description calls. Provider-specific beta bodies and response shapes still require explicit codec support.
+
+Two per-model fields decide how a forced tool call is expressed and how reasoning is steered. `forceToolChoiceSupport` is `none`, `reasoningDisabledOnly`, `anyToolOnly`, or `full` (default). `none` drops the constraint entirely and also disables the last-resort call that forces a message, since that model could never satisfy it. `reasoningDisabledOnly` keeps reasoning on ordinary calls and forces only that last-resort call, switching reasoning off for it because the two cannot coexist on such models. `anyToolOnly` narrows the offered tools to one and asks for "any" call instead of naming it. `full` names the tool directly. `reasoningEffort` is a single level rendered per protocol — Anthropic `thinking: adaptive` plus `output_config.effort`, Responses `reasoning.effort`, Chat `reasoning_effort` — and merges with, rather than replaces, non-effort reasoning knobs left in `extraBody` such as a summary preference.
 
 Reasoning survives replay only when the stored model identity is compatible. Tool call IDs remain provider-native in storage and are sanitized only for wire formats that require it.
 
