@@ -25,6 +25,7 @@ export const createDriver = (config: DriverConfig, deps: {
   loadTurnResponses: (chatId: string, afterMs?: number) => Promise<TurnResponseV2[]>;
   persistTurnResponse: (chatId: string, tr: TurnResponseV2) => Promise<void>;
   persistProbeResponse: (chatId: string, probe: ProbeResponseV2) => Promise<void>;
+  loadLastActivatedProbe: (chatId: string) => Promise<ProbeResponseV2 | null>;
   sendMessage: (chatId: string, text: string, replyToMessageId?: number, attachments?: SendMessageAttachment[]) => Promise<{ messageId: number; date: number }>;
   banSpammer: (chatId: string, messageId: number) => Promise<BanSpammerResult>;
   setMessageReaction: (chatId: string, messageId: number, emoji: string | undefined) => Promise<void>;
@@ -135,6 +136,7 @@ export const createDriver = (config: DriverConfig, deps: {
             loadTurnResponses: deps.loadTurnResponses,
             persistTurnResponse: deps.persistTurnResponse,
             persistProbeResponse: deps.persistProbeResponse,
+            loadLastActivatedProbe: deps.loadLastActivatedProbe,
             getChatTitle: deps.getChatTitle,
             getActiveBackgroundTasks: deps.backgroundTask.getActiveTasks,
             sendTypingAction: deps.sendTypingAction,

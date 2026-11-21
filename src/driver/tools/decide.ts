@@ -4,9 +4,9 @@ import type { ConversationEntry } from '../../unified-api/types';
 
 const DECIDE_TOOL_NAME = 'decide';
 
-type DecideAction = 'send_message' | 'no_action';
+export type DecideAction = 'send_message' | 'any' | 'no_action';
 
-interface DecideArgs {
+export interface DecideArgs {
   should_act: DecideAction;
   reason: string;
 }
@@ -14,15 +14,16 @@ interface DecideArgs {
 export const createDecideTool = (): CahciuaTool => createTool({
   name: DECIDE_TOOL_NAME,
   description:
-    'Submit your prediction whether the chatbot will immediately perform new actions or send new messages to the chatroom.',
+    'Submit your prediction of how the chatbot will act at this turn.',
   parameters: {
     type: 'object',
     properties: {
       should_act: {
         type: 'string',
-        enum: ['send_message', 'no_action'],
+        enum: ['send_message', 'any', 'no_action'],
         description:
-          '`send_message`: You predict that the chatbot will immediately perform new actions or send new messages to the chatroom.\n'
+          '`send_message`: You predict that the chatbot will send at least one message to the chatroom at this turn (optionally alongside reactions or other tool calls).\n'
+          + '`any`: You predict that the chatbot will perform an action (such as a tool call or reaction) without needing to send a message, or where speaking is optional.\n'
           + '`no_action`: You predict that the chatbot will keep silent (no message, no reaction, no tool call) at this turn.',
       },
       reason: {
@@ -36,7 +37,7 @@ export const createDecideTool = (): CahciuaTool => createTool({
 });
 
 const isDecideAction = (value: unknown): value is DecideAction =>
-  value === 'send_message' || value === 'no_action';
+  value === 'send_message' || value === 'any' || value === 'no_action';
 
 export const extractDecideResult = (entries: ConversationEntry[]): DecideArgs | null => {
   for (const entry of entries) {

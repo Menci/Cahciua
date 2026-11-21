@@ -7,6 +7,7 @@ import {
   loadEventsByMessageIds,
   loadEventsWithId,
   loadImageAltTextByHash,
+  loadLastActivatedProbe,
   loadLastProbeTime,
   loadLatestMessageContent,
   loadMessageAttachments,
@@ -120,6 +121,7 @@ export const registerDriver = ({ get, register }: Registrar): void => {
       sendMessage: telegram.sendMessage,
       banSpammer: moderation.banSpammer,
       loadCompaction: chatId => loadCompaction(db, chatId),
+      loadLastActivatedProbe: chatId => loadLastActivatedProbe(db, chatId),
       loadLastProbeTime: chatId => loadLastProbeTime(db, chatId),
       persistCompaction: (chatId, meta) => persistCompaction(db, chatId, meta),
       setCompactCursor: (chatId, cursorMs) => {

@@ -5,9 +5,19 @@ import { decideLinkPreviewOptions } from '../../telegram/link-preview';
 import { renderMarkdownToTelegramHTML } from '../../telegram/markdown';
 import type { BanSpammerResult } from '../../telegram/moderation-types';
 
-const deletion = { deletedMessageIds: [1], unavailableMessageIds: [], notDeletableMessageIds: [], failedMessageIds: [] };
+const cleanDeletion = {
+  deletedMessageIds: [1],
+  unavailableMessageIds: [],
+  notDeletableMessageIds: [],
+  failedMessageIds: [],
+};
 
-const completed: BanSpammerResult = { status: 'completed', userId: '456', ban: { status: 'banned' }, deletion };
+const completed: BanSpammerResult = {
+  status: 'completed',
+  userId: '456',
+  ban: { status: 'banned' },
+  deletion: cleanDeletion,
+};
 
 describe('ban_spammer tool', () => {
   it('accepts only a message ID and an audit reason', () => {
@@ -22,60 +32,122 @@ describe('ban_spammer tool', () => {
     ]) expect(tool.validate(input).valid).toBe(false);
   });
 
-  it('returns a fixed anonymous audit link and requires a follow-up send', async () => {
-    const ban = vi.fn(async () => completed);
-    const result = await createBanSpammerTool(ban).execute({ message_id: '1', reason: 'Private spam content and attacker name' });
+  it.each<{ label: string; outcome: BanSpammerResult }>([
+    {
+      label: 'full ban and message deletion',
+      outcome: completed,
+    },
+    {
+      label: 'target already left the group',
+      outcome: {
+        status: 'partial',
+        userId: '456',
+        ban: { status: 'unresolved' },
+        deletion: { ...cleanDeletion, deletedMessageIds: [1, 2] },
+      },
+    },
+    {
+      label: 'messages were already deleted',
+      outcome: {
+        status: 'completed',
+        userId: '456',
+        ban: { status: 'banned' },
+        deletion: { ...cleanDeletion, deletedMessageIds: [], unavailableMessageIds: [1] },
+      },
+    },
+    {
+      label: 'both target and messages were already gone',
+      outcome: {
+        status: 'partial',
+        userId: '456',
+        ban: { status: 'unresolved' },
+        deletion: { ...cleanDeletion, deletedMessageIds: [], unavailableMessageIds: [1] },
+      },
+    },
+  ])('instructs silence without an announcement on $label', async ({ outcome }) => {
+    const ban = vi.fn(async () => outcome);
+    const result = await createBanSpammerTool(ban).execute({
+      message_id: '1',
+      reason: 'Private spam content and attacker name',
+    });
     const payload = JSON.parse(result.content as string);
     expect(ban).toHaveBeenCalledWith(1);
     expect(result.requiresFollowUp).toBe(true);
-    expect(payload.announcement).toBe('已踢出并永久封禁 [spam 账号](tg://user?id=456)，已清理记录中可删除的消息。');
     expect(result.content).not.toContain('Private spam content');
-    expect(payload.next_action).toContain('exactly as provided');
-    expect(payload.next_action).toContain('exactly one argument: text');
-    expect(renderMarkdownToTelegramHTML(payload.announcement)).toContain('<a href="tg://user?id=456">spam 账号</a>');
+    expect(payload).not.toHaveProperty('announcement');
+    expect(payload).not.toHaveProperty('account_link');
+    expect(payload.next_action).toContain('Do not send any message');
+    expect(payload.next_action).toContain('end_turn');
+  });
+
+  it.each<{ label: string; outcome: BanSpammerResult }>([
+    {
+      label: 'missing bot permissions',
+      outcome: {
+        status: 'partial',
+        userId: '456',
+        ban: { status: 'missing_permissions' },
+        deletion: cleanDeletion,
+      },
+    },
+    {
+      label: 'protected target',
+      outcome: {
+        status: 'partial',
+        userId: '456',
+        ban: { status: 'protected' },
+        deletion: cleanDeletion,
+      },
+    },
+    {
+      label: 'message past the 48-hour deletion window',
+      outcome: {
+        status: 'partial',
+        userId: '456',
+        ban: { status: 'banned' },
+        deletion: { ...cleanDeletion, notDeletableMessageIds: [2] },
+      },
+    },
+    {
+      label: 'failed message deletion',
+      outcome: {
+        status: 'partial',
+        userId: '456',
+        ban: { status: 'banned' },
+        deletion: { ...cleanDeletion, failedMessageIds: [2] },
+      },
+    },
+  ])('supplies an anonymous UID link and confidentiality notice on $label', async ({ outcome }) => {
+    const result = await createBanSpammerTool(async () => outcome).execute({
+      message_id: '1',
+      reason: 'Private spam content',
+    });
+    const payload = JSON.parse(result.content as string);
+    expect(result.requiresFollowUp).toBe(true);
+    expect(result.content).not.toContain('Private spam content');
+    expect(payload.account_link).toBe('[spam 账号](tg://user?id=456)');
+    expect(payload.confidentiality).toContain('Do not repeat the spam message text');
+    expect(payload.confidentiality).toContain('sender display name or username');
+    expect(payload.next_action).toContain('send_message');
+    expect(renderMarkdownToTelegramHTML(payload.account_link)).toContain('<a href="tg://user?id=456">spam 账号</a>');
     expect(decideLinkPreviewOptions('spam 账号', [])).toEqual({ linkPreview: false });
   });
 
-  it('announces partial deletion truthfully after a successful ban', async () => {
-    const result = await createBanSpammerTool(async () => ({
-      ...completed,
-      status: 'partial',
-      deletion: { ...deletion, notDeletableMessageIds: [2] },
-    })).execute({ message_id: '1', reason: 'spam' });
-    expect(JSON.parse(result.content as string).announcement).toContain('部分消息需人工处理');
-  });
-
-  it('propagates a failed ban to the existing tool error handler', async () => {
+  it('propagates a thrown error with a confidential failureMessage configured', async () => {
     const failure = new Error('Telegram ban failed');
     const tool = createBanSpammerTool(async () => { throw failure; });
+    expect(tool.failureMessage).toContain('Do not repeat the spam message text');
     await expect(tool.execute({ message_id: '1', reason: 'spam' })).rejects.toBe(failure);
   });
 
-  it.each<BanSpammerResult>([
-    { status: 'rejected', reason: 'message_limit' },
-  ])('does not claim to have banned a rejected or failed target', async outcome => {
-    const result = await createBanSpammerTool(async () => outcome).execute({ message_id: '1', reason: 'spam' });
-    expect(JSON.parse(result.content as string)).not.toHaveProperty('announcement');
-    expect(result.requiresFollowUp).toBe(true);
-  });
-
-  it('does not claim a ban when the account had already left', async () => {
-    const result = await createBanSpammerTool(async () => ({
-      status: 'partial', userId: '456',
-      ban: { status: 'unresolved' },
-      deletion: { deletedMessageIds: [1, 2], unavailableMessageIds: [], notDeletableMessageIds: [], failedMessageIds: [] },
-    })).execute({ message_id: '1', reason: 'spam' });
-    const announcement = JSON.parse(result.content as string).announcement as string;
-    expect(announcement).not.toContain('已踢出');
-    expect(announcement).toContain('已不在群中');
-    expect(announcement).toContain('2 条');
-  });
-
-  it('tells the model not to repeat the account or its content when the request is rejected', async () => {
-    const result = await createBanSpammerTool(async () => ({ status: 'rejected', reason: 'unresolved_target' } as const))
+  it('includes confidentiality guidance without an account link when rejected', async () => {
+    const result = await createBanSpammerTool(async () => ({ status: 'rejected', reason: 'message_limit' } as const))
       .execute({ message_id: '1', reason: 'spam' });
     const payload = JSON.parse(result.content as string);
+    expect(result.requiresFollowUp).toBe(true);
+    expect(payload).not.toHaveProperty('announcement');
+    expect(payload).not.toHaveProperty('account_link');
     expect(payload.confidentiality).toContain('Do not repeat the spam message text');
-    expect(payload.confidentiality).toContain('sender name or username');
+    expect(payload.confidentiality).toContain('sender display name or username');
   });
 });

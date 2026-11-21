@@ -32,6 +32,7 @@ export const executeWakeup = async (params: {
   loadTurnResponses: (chatId: string, afterMs?: number) => Promise<TurnResponseV2[]>;
   persistTurnResponse: (chatId: string, response: TurnResponseV2) => Promise<void>;
   persistProbeResponse: (chatId: string, response: ProbeResponseV2) => Promise<void>;
+  loadLastActivatedProbe: (chatId: string) => Promise<ProbeResponseV2 | null>;
   getChatTitle: (chatId: string) => string | undefined;
   getActiveBackgroundTasks: (chatId: string) => ActiveTaskInfo[];
   sendTypingAction: (chatId: string) => Promise<void>;
@@ -60,6 +61,7 @@ export const executeWakeup = async (params: {
   const interrupted = wasToolLoopInterrupted(turnResponses);
   const backgroundTasks = params.getActiveBackgroundTasks(params.chatId);
   const timeNow = localTimeNow();
+  let activationAction: 'send_message' | 'any';
   let probeReason: string | undefined;
 
   if (!interrupted) {
@@ -105,9 +107,11 @@ export const executeWakeup = async (params: {
       },
     );
     const decision = extractDecideResult(result.entries);
-    const activated = decision?.should_act === 'send_message';
+    const chosenAction = decision && decision.should_act !== 'no_action' ? decision.should_act : null;
+    const activated = chosenAction !== null;
     params.log.withFields({
       chatId: params.chatId,
+      decision: decision?.should_act ?? null,
       shouldAct: activated,
       reason: decision?.reason,
     }).log('Probe result');
@@ -123,9 +127,17 @@ export const executeWakeup = async (params: {
       createdAt: Date.now(),
     });
     params.setLastProcessedMs(requestedAtMs);
-    if (!activated) return;
+    if (!chosenAction || !decision) return;
+    activationAction = chosenAction;
     probeReason = decision.reason;
+  } else {
+    // An interrupted loop skips probe, so recover the action mode chosen when
+    // this chain originally woke up.
+    const priorProbe = await params.loadLastActivatedProbe(params.chatId);
+    const priorDecision = priorProbe ? extractDecideResult(priorProbe.entries) : null;
+    activationAction = priorDecision?.should_act === 'any' ? 'any' : 'send_message';
   }
+  const mustSendMessage = activationAction === 'send_message';
 
   let typingInterval: ReturnType<typeof setInterval> | undefined;
   const sendTyping = (): void => {
@@ -151,6 +163,7 @@ export const executeWakeup = async (params: {
     injectLateBindingPrompt(primaryContext.entries, await renderLateBindingPrompt({
       mode: 'primary',
       timeNow,
+      mustSendMessage,
       isInterrupted: interrupted,
       activeBackgroundTasks: backgroundTasks,
       ...(probeReason ? { probeReason } : {}),
@@ -191,7 +204,7 @@ export const executeWakeup = async (params: {
     // last-resort call would only burn a request and fail. Ending the turn is the
     // honest outcome.
     const canForce = (params.chatConfig.primary.model.forceToolChoiceSupport ?? 'full') !== 'none';
-    if (canForce && loopEndedWithoutSendMessage(latestTurnResponses)) {
+    if (mustSendMessage && canForce && loopEndedWithoutSendMessage(latestTurnResponses)) {
       params.log.withFields({ chatId: params.chatId }).log('Loop ended without send_message — running forced fallback');
       await params.runner.runStepLoop({
         chatId: params.chatId,

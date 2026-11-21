@@ -3,10 +3,7 @@ export type ModerationRejection =
   | 'unknown_message'
   | 'unsupported_chat'
   | 'protected_user'
-  | 'message_limit'
-  | 'missing_permissions'
-  /** The bot has no access hash for the target, so Telegram cannot be asked to act on them. */
-  | 'unresolved_target';
+  | 'message_limit';
 
 /**
  * Banning and deleting are reported separately because they succeed and fail

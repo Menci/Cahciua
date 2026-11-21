@@ -2,6 +2,7 @@ export { createAttachmentDownloader } from './attachment-downloader';
 export { createBanSpammerTool } from './ban-spammer';
 export { createBashTool } from './bash';
 export { createDecideTool, extractDecideResult } from './decide';
+export type { DecideAction, DecideArgs } from './decide';
 export { createDownloadFileTool } from './download-file';
 export { createEndTurnTool } from './end-turn';
 export { executeToolCall, extractToolCalls } from './execution';

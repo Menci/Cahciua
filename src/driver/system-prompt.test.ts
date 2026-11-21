@@ -46,6 +46,20 @@ describe.each(MODES)('late-binding.velin.md (mode=%s)', mode => {
   });
 });
 
+describe.each([true, false])('late-binding.velin.md primary mustSendMessage=%s', mustSendMessage => {
+  it('compiles with probeReason', async () => {
+    const rendered = await renderTemplate('late-binding.velin.md', {
+      mode: 'primary',
+      timeNow: '2026-09-30T00:00:00Z',
+      mustSendMessage,
+      probeReason: 'check message 1',
+    });
+    expectCompiled(rendered);
+    if (mustSendMessage) expect(rendered).toContain('MUST send at least one response message');
+    else expect(rendered).toContain('Sending a message is NOT required on this turn');
+  });
+});
+
 // Remaining prompt templates compile
 describe.each([
   'compaction-system.velin.md',

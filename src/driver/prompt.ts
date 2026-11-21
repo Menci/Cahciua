@@ -44,6 +44,7 @@ export const renderSystemPrompt = async (params: {
 export const renderLateBindingPrompt = async (params: {
   mode: PromptMode;
   timeNow: string;
+  mustSendMessage?: boolean;
   isInterrupted?: boolean;
   activeBackgroundTasks?: { id: number; typeName: string; intention?: string; liveSummary: string; startedMs: number; timeoutMs: number }[];
   probeReason?: string;

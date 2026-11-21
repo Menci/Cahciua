@@ -15,7 +15,7 @@ Cahciua reconstructs model context from durable inputs rather than maintaining a
 3. Rendering serializes Intermediate Context into provider-independent XML segments.
 4. Driver merges those segments with its own stored turn responses and orchestrates LLM/tool calls.
 
-The Driver uses a mandatory probe/primary gate. A small outside-judge call first decides `send_message` or `no_action`; malformed decisions fail closed. Activated primary turns may use tools across multiple steps but must eventually send at least one message.
+The Driver uses a mandatory probe/primary gate. A small outside-judge call first decides `send_message`, `any`, or `no_action`; malformed decisions fail closed. `send_message` wakes primary and requires at least one message before the turn finishes; `any` wakes primary with typing and forced tool use for silent or optional-speech actions without requiring a message.
 
 Context compaction runs independently from reply scheduling. It summarizes old raw RC/TR content at a high water mark while retaining a configurable working window. Summaries are append-only and do not enter turn-response storage.
 
@@ -35,9 +35,9 @@ Enable `tools.banSpammer: true` in the intended chat override; its default is fa
 
 Store the group policy in a deployment-local Markdown file. Deployment-local group policies can identify eligible accounts through sufficient conversational history showing exclusively one-off solicitation. Genuine questions, feedback, and ordinary exchanges establish normal participation. For normal members discussing topics outside the bot's permitted scope, the bot remains silent on that topic and leaves member conduct to human administrators. Archived names and messages serve as internal reference examples interpreted in context. Backend protections cover owners, administrators, the bot itself, and users with at least 10 archived messages. Accounts outside the group, including inline bots summoned by members, remain eligible because the archive supplies their identity. The summoner is a separate target and is banned through its own mention message. Deleted messages retain their contribution to the observed count; eligibility is independent of join age.
 
-The bot needs administrator permissions to restrict members and delete messages. Its action scope is permanent ban plus deletion of known messages permitted within Telegram's 48-hour bot window. Each call checks current Telegram state and returns its actual outcomes. Existing tool call/result history provides the audit record; message lookup and counting use the existing event archive.
+The bot needs administrator permissions to restrict members and delete messages. Its action scope is permanent ban plus deletion of known messages permitted within Telegram's 48-hour bot window, attempted independently so an account that already left still has its messages removed. Existing tool call/result history provides the audit record; message lookup and counting use the existing event archive.
 
-After a confirmed ban, the tool result supplies an exact announcement with a `tg://user?id=...` link labeled "spam 账号". Primary calls `send_message` with exactly one argument, `text`, containing that announcement. Names, usernames, profile text, spam content, media, and audit reasoning stay in the private assessment. Partial cleanup receives its own factual announcement. Link accessibility depends on Telegram clients and account privacy; the numeric UID is also retained in the audit record.
+Moderation stays silent when cleanup succeeds and on expected non-actions such as an account that already left or messages that were already deleted. Primary speaks only when an unexpected operational problem blocks cleanup (such as missing bot permissions, a protected target, failed message deletions, messages past the 48-hour window, or a rejected flood), using an anonymous `[spam 账号](tg://user?id=...)` link when available and never repeating names, usernames, spam content, or audit reasoning.
 
 ## Setup
 

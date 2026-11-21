@@ -8,6 +8,7 @@ const props = defineProps({
   timeNow: { type: String, required: true },
 
   // primary-only signals
+  mustSendMessage: { type: Boolean, default: true },
   isInterrupted: { type: Boolean, default: false },
   activeBackgroundTasks: { type: Array, default: () => [] },
   // The probe's reason (decide tool's `reason` arg) when probe gated this
@@ -36,9 +37,11 @@ Current time: {{ timeNow }}
 
 ## Your task
 
+<template v-if="mustSendMessage">
+
 1. Inspect the attached chat log, including multimedia attachments if they are relavent.
 2. (Optional) Use `react` to attach one or more emoji reactions to other people's messages to show your feelings.
-3. (Optional) Perform agentic tasks: use `bash` to interact with your computer; check background processes from earlier turns; search the web for relavent knowledge.
+3. (Optional) Perform agentic or chat-specific actions: use `bash` to interact with your computer; check background processes from earlier turns; search the web for relavent knowledge; or run any other configured tool.
    * Parallel tool calls are supported. Try calling multiple tools in a single step for efficiency.
 4. Draft your responses.
 5. Double check your prepared response:
@@ -51,13 +54,34 @@ Current time: {{ timeNow }}
 
 **At least one response:** You MUST send at least one response message per turn.
 
+</template>
+<template v-else>
+
+1. Inspect the attached chat log, including multimedia attachments if they are relavent.
+2. Perform the needed actions with your available tools (such as `react`, `bash`, `web_search`, or chat-specific tools).
+   * Parallel tool calls are supported. Try calling multiple tools in a single step for efficiency.
+3. Sending a message is NOT required on this turn. Once your silent actions are done (or if no action is needed after inspection), call `end_turn` without calling `send_message`.
+4. Send a message via `send_message` ONLY if an unexpected problem must be reported or if the conversation genuinely warrants a reply. When you do send a message, draft and double check its Markdown escaping, human casual tone, and concise length first.
+5. Loop from Line 2, or use `end_turn` to end your turn.
+
+</template>
+
 **Continue or end the loop:** When calling `send_message`, you MUST set `still_working` to `true` if you need another step to finish your foreground tasks. Otherwise, you MUST use `end_turn` when you are done with your current foreground tasks. Background tasks carries across turns and you will be notified when they finish.
 
 <template v-if="probeReason">
 
-## A hint for your response
+## A hint for this turn
+
+<template v-if="mustSendMessage">
 
 Here is a note that someone else wrote about why you should respond now:
+
+</template>
+<template v-else>
+
+Here is a note that someone else wrote about why you were woken up now:
+
+</template>
 
 > {{ probeReason }}
 
@@ -86,7 +110,7 @@ Active background tasks:
 You are given two pieces of materials: a personality description of a chatbot and a chatlog of a Telegram group chat.
 
 Your task:
-1. Predict whether the chatbot will immediately perform a new action or send new messages to the chatroom.
+1. Predict how the chatbot will immediately act in the chatroom: send a message (`send_message`), perform a silent or non-message action without needing to speak (`any`), or do nothing (`no_action`).
 2. Call the `decide` tool to submit your decision.
 
 The chatlog may contain multiple chatbots. please focus on the chatbot that matches the provided personality description.

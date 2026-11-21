@@ -64,6 +64,7 @@ const makeDriverDeps = (overrides: Partial<DriverDeps> = {}): DriverDeps => ({
   loadTurnResponses: async () => [],
   persistTurnResponse: async () => {},
   persistProbeResponse: async () => {},
+  loadLastActivatedProbe: async () => null,
   sendMessage: async () => ({ messageId: 1, date: 0 }),
   banSpammer: async () => ({ status: 'rejected' as const, reason: 'unknown_message' as const }),
   setMessageReaction: async () => {},
@@ -98,10 +99,14 @@ const makeDriverDeps = (overrides: Partial<DriverDeps> = {}): DriverDeps => ({
 
 const activeDrivers: ReturnType<typeof createDriver>[] = [];
 
-const startDriver = (chatId: string, deps: DriverDeps) => {
+const startDriver = (
+  chatId: string,
+  deps: DriverDeps,
+  configOverrides: Partial<ResolvedChatConfig> = {},
+) => {
   const driver = createDriver({
     chatIds: [chatId],
-    resolveChatConfig: () => makeChatConfig(),
+    resolveChatConfig: () => ({ ...makeChatConfig(), ...configOverrides }),
   }, deps);
   activeDrivers.push(driver);
   return driver;
@@ -219,6 +224,146 @@ describe('Driver probe gate characterization', () => {
     expect(onDebounceStateChange).not.toHaveBeenCalled();
     expect(mockCallLlm).not.toHaveBeenCalled();
     expect(persistedProbes).toHaveLength(1);
+  });
+
+  it('wakes primary on decide="any" with typing and forced any-tool choice without requiring send_message', async () => {
+    const persistedProbes: ProbeResponseV2[] = [];
+    const persistedTurns: TurnResponseV2[] = [];
+    const sendTypingAction = vi.fn(async () => {});
+    const sendMessage = vi.fn(async () => ({ messageId: 1, date: 0 }));
+    const banSpammer = vi.fn(async () => ({
+      status: 'completed' as const,
+      userId: '456',
+      ban: { status: 'banned' as const },
+      deletion: {
+        deletedMessageIds: [1],
+        unavailableMessageIds: [],
+        notDeletableMessageIds: [],
+        failedMessageIds: [],
+      },
+    }));
+
+    let primaryStep = 0;
+    mockCallLlm.mockImplementation(async config => {
+      if (config.model === 'mock-probe') {
+        return {
+          entries: toolCallEntries('probe-any', 'decide', JSON.stringify({
+            should_act: 'any',
+            reason: 'Message 1 is one-off spam; remove silently.',
+          })),
+          usage: makeUsage(10, 4),
+        };
+      }
+      primaryStep++;
+      if (primaryStep === 1) {
+        return {
+          entries: toolCallEntries('ban-1', 'ban_spammer', JSON.stringify({
+            message_id: '1',
+            reason: 'crypto solicitation',
+          })),
+          usage: makeUsage(20, 8),
+        };
+      }
+      return {
+        entries: toolCallEntries('end-1', 'end_turn', '{}'),
+        usage: makeUsage(22, 4),
+      };
+    });
+
+    const base = makeChatConfig();
+    const driver = startDriver(
+      '-100777',
+      makeDriverDeps({
+        loadTurnResponses: async () => [...persistedTurns],
+        persistTurnResponse: async (_chatId, turn) => { persistedTurns.push(turn); },
+        persistProbeResponse: async (_chatId, probe) => { persistedProbes.push(probe); },
+        loadLastActivatedProbe: async () => persistedProbes.findLast(p => p.isActivated) ?? null,
+        sendTypingAction,
+        sendMessage,
+        banSpammer,
+      }),
+      {
+        sendTypingAction: true,
+        tools: { ...base.tools, banSpammer: true },
+      },
+    );
+
+    driver.handleEvent('-100777', buildExternalContext());
+
+    // 1 probe + 2 primary steps (ban_spammer -> end_turn), and NO forced send_message fallback.
+    await vi.waitFor(() => expect(persistedTurns).toHaveLength(2), { timeout: 2000 });
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+    expect(mockCallLlm).toHaveBeenCalledTimes(3);
+    expect(persistedProbes[0]).toMatchObject({ isActivated: true });
+    expect(sendTypingAction).toHaveBeenCalledWith('-100777');
+    expect(banSpammer).toHaveBeenCalledExactlyOnceWith('-100777', 1);
+    expect(mockCallLlm.mock.calls[1]![0].forceToolChoice).toBe('any');
+    expect(mockCallLlm.mock.calls[2]![0].forceToolChoice).toBe('any');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('preserves decide="any" across a cooperative interruption so continuation still omits forced send_message', async () => {
+    const persistedProbes: ProbeResponseV2[] = [];
+    const persistedTurns: TurnResponseV2[] = [];
+    const sendMessage = vi.fn(async () => ({ messageId: 1, date: 0 }));
+
+    let primaryCalls = 0;
+    mockCallLlm.mockImplementation(async config => {
+      if (config.model === 'mock-probe') {
+        return {
+          entries: toolCallEntries('probe-any-int', 'decide', JSON.stringify({
+            should_act: 'any',
+            reason: 'Silent reaction or moderation.',
+          })),
+          usage: makeUsage(9, 3),
+        };
+      }
+      primaryCalls++;
+      if (primaryCalls === 1) {
+        await new Promise<void>(resolve => setTimeout(resolve, 5));
+        return {
+          entries: toolCallEntries('react-1', 'react', JSON.stringify({
+            message_id: '1',
+            emoji: '👍',
+          })),
+          usage: makeUsage(15, 5),
+        };
+      }
+      await new Promise<void>(resolve => setTimeout(resolve, 5));
+      return {
+        entries: toolCallEntries('end-after-int', 'end_turn', '{}'),
+        usage: makeUsage(18, 4),
+      };
+    });
+
+    const driver = startDriver('-100778', makeDriverDeps({
+      loadTurnResponses: async () => [...persistedTurns],
+      persistTurnResponse: async (_chatId, turn) => {
+        persistedTurns.push(turn);
+        // Simulate a new external message arriving after step 1 was requested
+        // (turn.requestedAtMs + 1) and before the continuation step starts.
+        if (persistedTurns.length === 1) {
+          driver.handleEvent('-100778', [
+            ...buildExternalContext(1000),
+            ...buildExternalContext(turn.requestedAtMs + 1),
+          ]);
+        }
+      },
+      persistProbeResponse: async (_chatId, probe) => { persistedProbes.push(probe); },
+      loadLastActivatedProbe: async () => persistedProbes.findLast(p => p.isActivated) ?? null,
+      sendMessage,
+    }));
+
+    driver.handleEvent('-100778', buildExternalContext(1000));
+
+    // 1 initial probe + step 1 (react, interrupted) + continuation step 1 (end_turn,probe skipped) = 3 LLM calls, 0 fallback.
+    await vi.waitFor(() => expect(persistedTurns).toHaveLength(2), { timeout: 2000 });
+    await new Promise<void>(resolve => setTimeout(resolve, 60));
+
+    expect(persistedProbes).toHaveLength(1);
+    expect(mockCallLlm).toHaveBeenCalledTimes(3);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
 

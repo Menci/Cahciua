@@ -3,19 +3,30 @@ import type { CahciuaTool } from './types';
 import type { BanSpammerResult } from '../../telegram/moderation-types';
 
 /**
- * Moderation output is public-facing the moment the model writes it, and the
+ * Moderation output becomes public the moment the model writes it, and the
  * material behind it is attacker-controlled: a display name or message body can
- * itself be the advertisement. Repeat this instruction on every non-success
- * path, because a failed attempt is exactly when the model is tempted to explain
- * what it saw.
+ * itself be the advertisement. Repeat this constraint on every error path,
+ * because a failed attempt is when the model is tempted to describe what it saw.
  */
-const CONFIDENTIALITY_NOTICE = 'Do not repeat the spam message text, the sender name or username, or any detail about the content, links, or reasoning. Nothing was published about this account; if a human should know, say only that an account could not be removed and let them inspect.';
+const CONFIDENTIALITY_NOTICE = 'Do not repeat the spam message text, the sender display name or username, profile text, or any detail about the content, links, or moderation reasoning. When reporting an error for human administrators, state only the operational failure (and the provided numeric UID link if available) so they can inspect safely.';
+
+/**
+ * A target who already left (`unresolved`) or messages that were already gone
+ * (`unavailableMessageIds`) are expected outcomes, not operational failures.
+ * Only conditions that leave actionable work blocked require human attention.
+ */
+const hasOperationalProblem = (
+  result: Exclude<BanSpammerResult, { status: 'rejected' }>,
+): boolean =>
+  (result.ban.status !== 'banned' && result.ban.status !== 'unresolved')
+  || result.deletion.notDeletableMessageIds.length > 0
+  || result.deletion.failedMessageIds.length > 0;
 
 export const createBanSpammerTool = (
   banSpammer: (messageId: number) => Promise<BanSpammerResult>,
 ): CahciuaTool => createTool({
   name: 'ban_spammer',
-  description: 'Permanently ban the verified author of a spam message in this chat and delete known messages that Telegram permits within the 48-hour bot window. Apply the moderation policy in the current chat system files. Eligible targets have fewer than 10 observed messages. Summoned inline bots and their summoners remain eligible, including accounts outside the group; owners and administrators are protected. After a confirmed ban, send the exact announcement returned by the tool; it describes the completed actions and any remaining cleanup.',
+  description: 'Permanently ban the verified author of a spam message in this chat and delete known messages that Telegram permits within the 48-hour bot window. Apply the moderation policy in the current chat system files. Eligible targets have fewer than 10 observed messages. Summoned inline bots and their summoners remain eligible, including accounts outside the group; owners and administrators are protected. Stay silent when moderation succeeds or when the target or its messages were already gone; send a brief anonymous error notice only if an unexpected operational failure requires human administrator attention.',
   parameters: {
     type: 'object',
     properties: {
@@ -25,40 +36,39 @@ export const createBanSpammerTool = (
     required: ['message_id', 'reason'],
     additionalProperties: false,
   },
-  failureMessage: `The moderation request failed before any action was confirmed. ${CONFIDENTIALITY_NOTICE}`,
+  failureMessage: `The moderation request failed with an unexpected error before completion. Report briefly that spam moderation failed so human administrators can inspect. ${CONFIDENTIALITY_NOTICE}`,
   execute: async input => {
     const { message_id, reason } = input as { message_id: string; reason: string };
     if (reason.trim().length === 0) throw new Error('A moderation reason is required');
     const result = await banSpammer(Number(message_id));
-    if (result.status === 'rejected')
+    if (result.status === 'rejected') {
       return {
-        content: JSON.stringify({ ...result, confidentiality: CONFIDENTIALITY_NOTICE }),
+        content: JSON.stringify({
+          ...result,
+          confidentiality: CONFIDENTIALITY_NOTICE,
+          next_action: 'Moderation was rejected and nothing was changed. If a genuine spam incident could not be handled automatically (for example, message_limit on a flood), send a brief error notice for human administrators without naming or quoting the account; if no human intervention is needed, stay silent and finish with end_turn.',
+        }),
         requiresFollowUp: true,
       };
+    }
+
+    if (!hasOperationalProblem(result)) {
+      return {
+        content: JSON.stringify({
+          ...result,
+          next_action: 'Moderation settled with no error (including any target already absent from the group or messages already deleted). Do not send any message about this account or its removal; finish with end_turn once no other action remains in this turn.',
+        }),
+        requiresFollowUp: true,
+      };
+    }
 
     const accountLink = `[spam 账号](tg://user?id=${result.userId})`;
-    const deleted = result.deletion.deletedMessageIds.length;
-    const cleanup = result.status === 'completed'
-      ? '已清理记录中可删除的消息。'
-      : '部分消息需人工处理。';
-    const announcement = result.ban.status === 'banned'
-      ? `已踢出并永久封禁 ${accountLink}，${cleanup}`
-      : result.ban.status === 'unresolved'
-        // The account already left, so there is nothing to remove from the
-        // group; its messages are still cleaned up independently.
-        ? deleted > 0
-          ? `清理了 ${deleted} 条记录中可删除的消息；${accountLink} 已不在群中，无需踢出。`
-          : `${accountLink} 已不在群中，无需踢出；记录中可删除的消息已清理。`
-        : result.ban.status === 'protected'
-          ? `${accountLink} 是受保护账号，未踢出；${cleanup}`
-          : result.ban.status === 'missing_permissions'
-            ? `缺少管理权限，未踢出 ${accountLink}；${cleanup}`
-            : `无法踢出 ${accountLink}，${cleanup}`;
     return {
       content: JSON.stringify({
         ...result,
-        announcement,
-        next_action: 'Call send_message with exactly one argument: text, set to announcement exactly as provided. The fixed label and numeric UID link identify the account for public audit. Keep names, usernames, profile text, spam content, media, and reasoning in the private assessment. The supplied wording describes the confirmed ban and cleanup status.',
+        account_link: accountLink,
+        confidentiality: CONFIDENTIALITY_NOTICE,
+        next_action: 'Moderation hit an operational problem requiring human administrator attention (missing bot permissions, protected target, failed message deletions, or messages older than the 48-hour bot deletion window). Send a brief factual error notice via send_message using account_link for audit, and strictly follow confidentiality.',
       }),
       requiresFollowUp: true,
     };

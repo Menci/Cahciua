@@ -401,6 +401,28 @@ export const loadLastProbeTime = (db: DB, chatId: string): number => {
   return row?.requestedAt ?? 0;
 };
 
+export const loadLastActivatedProbe = async (db: DB, chatId: string): Promise<ProbeResponseV2 | null> => {
+  const row = db.select()
+    .from(probeResponsesV2)
+    .where(and(eq(probeResponsesV2.chatId, chatId), eq(probeResponsesV2.isActivated, true)))
+    .orderBy(desc(probeResponsesV2.id))
+    .limit(1)
+    .get();
+  if (!row) return null;
+  const entries = await codec.parse(row.entries) as ConversationEntry[];
+  return {
+    requestedAtMs: row.requestedAt,
+    entries,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    cacheReadTokens: row.cacheReadTokens,
+    cacheWriteTokens: row.cacheWriteTokens,
+    modelName: row.modelName,
+    isActivated: row.isActivated,
+    createdAt: row.createdAt,
+  };
+};
+
 export const loadImageAltTextByHash = (db: DB, imageHash: string): ImageAltTextRecord | null => {
   const row = db.select().from(imageAltTexts)
     .where(eq(imageAltTexts.imageHash, imageHash))
