@@ -1,4 +1,4 @@
-import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentNode } from '../adaptation/types';
+import type { CanonicalAttachment, CanonicalExternalReply, CanonicalForwardInfo, CanonicalUser, ContentNode } from '../adaptation/types';
 
 export interface ICMessage {
   type: 'message';
@@ -13,6 +13,7 @@ export interface ICMessage {
   replyToPreview?: string;
   replyQuoteContent?: ContentNode[];
   replyToContent?: ContentNode[];
+  externalReply?: CanonicalExternalReply;
   forwardInfo?: CanonicalForwardInfo;
   attachments: CanonicalAttachment[];
   editedAtSec?: number;

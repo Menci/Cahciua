@@ -50,6 +50,12 @@ export interface CanonicalForwardInfo {
   date?: number;
 }
 
+export interface CanonicalExternalReply {
+  origin: CanonicalForwardInfo;
+  quoteContent?: ContentNode[];
+  mediaType?: string;
+}
+
 export interface CanonicalMessageEvent {
   type: 'message';
   chatId: string;
@@ -61,6 +67,7 @@ export interface CanonicalMessageEvent {
   content: ContentNode[];
   replyToMessageId?: string;
   replyQuoteContent?: ContentNode[];
+  externalReply?: CanonicalExternalReply;
   forwardInfo?: CanonicalForwardInfo;
   attachments: CanonicalAttachment[];
   isSelfSent?: boolean;

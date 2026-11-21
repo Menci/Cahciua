@@ -1,8 +1,8 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
-import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentNode, ServiceAction } from '../adaptation/types';
+import type { CanonicalAttachment, CanonicalExternalReply, CanonicalForwardInfo, CanonicalUser, ContentNode, ServiceAction } from '../adaptation/types';
 import type { RuntimeEventData } from '../runtime-event';
-import type { Attachment, ForwardInfo, MessageEntity } from '../telegram/message/types';
+import type { Attachment, ExternalReplyInfo, ForwardInfo, MessageEntity, ReplyQuote } from '../telegram/message/types';
 
 type AnyMsg = Record<string, any>;
 
@@ -32,6 +32,8 @@ export const messages = sqliteTable('messages', {
   // Reply & thread context
   replyToMessageId: integer('reply_to_message_id'),
   replyToTopId: integer('reply_to_top_id'),
+  replyQuote: text('reply_quote', { mode: 'json' }).$type<ReplyQuote>(),
+  externalReply: text('external_reply', { mode: 'json' }).$type<ExternalReplyInfo>(),
 
   // Forward info — stored as JSON since the shape varies
   // (forwarded from user vs channel vs hidden, etc.)
@@ -78,6 +80,8 @@ export const events = sqliteTable('events', {
 
   // message only (canonical string ID)
   replyToMessageId: text('reply_to_message_id'),
+  replyQuoteContent: text('reply_quote_content', { mode: 'json' }).$type<ContentNode[]>(),
+  externalReply: text('external_reply', { mode: 'json' }).$type<CanonicalExternalReply>(),
   forwardInfo: text('forward_info', { mode: 'json' }).$type<CanonicalForwardInfo>(),
 
   // Bot's own sent messages — marked at creation time, not derived from sender ID

@@ -132,7 +132,7 @@ export const createBotClient = (options: BotClientOptions, logger: Logger): BotC
     };
     client.addEventHandler(event => {
       if (!event.message) return;
-      const message = fromTeleprotoMessage(event.message, 'bot');
+      const message = fromTeleprotoMessage(event.message, 'bot', event._entities);
       if (message) messageBus.emit(captureIngressMetadata(message));
     }, new NewMessage({}));
     log.withFields({

@@ -65,8 +65,12 @@ const resolveCustomEmojiEntities = async (client: TelegramClient, entities: Mess
 };
 
 export const resolveMessageMetadata = async (client: TelegramClient, msg: TelegramMessage | TelegramMessageEdit): Promise<void> => {
+  const quoteEntities = 'replyQuote' in msg ? msg.replyQuote?.entities : undefined;
+  const externalQuoteEntities = 'externalReply' in msg ? msg.externalReply?.quote?.entities : undefined;
   await Promise.all([
     resolveAttachmentTitles(client, msg.attachments),
     resolveCustomEmojiEntities(client, msg.entities),
+    resolveCustomEmojiEntities(client, quoteEntities),
+    resolveCustomEmojiEntities(client, externalQuoteEntities),
   ]);
 };

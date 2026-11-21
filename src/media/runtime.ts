@@ -84,14 +84,22 @@ export const createMediaRuntime = (deps: {
     }
 
     if (!customEmojiResolvers.has(event.chatId)) return;
-    visitCustomEmoji(event.content, node => {
-      if (node.altText) return;
-      const cached = deps.lookupAltText(emojiCacheKey(node.customEmojiId));
-      if (cached) {
-        node.altText = cached.altText;
-        if (cached.stickerSetName) node.stickerSetName = cached.stickerSetName;
-      }
-    });
+    const hydrateEmoji = (nodes: typeof event.content | undefined): void => {
+      if (!nodes) return;
+      visitCustomEmoji(nodes, node => {
+        if (node.altText) return;
+        const cached = deps.lookupAltText(emojiCacheKey(node.customEmojiId));
+        if (cached) {
+          node.altText = cached.altText;
+          if (cached.stickerSetName) node.stickerSetName = cached.stickerSetName;
+        }
+      });
+    };
+    hydrateEmoji(event.content);
+    if (event.type === 'message') {
+      hydrateEmoji(event.replyQuoteContent);
+      hydrateEmoji(event.externalReply?.quoteContent);
+    }
   };
 
   return {

@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 
 import type { RenderParams, RenderedContentPiece, RenderedContext, RenderedContextSegment } from './types';
-import type { CanonicalAttachment, CanonicalUser, ContentNode } from '../adaptation/types';
+import type { CanonicalAttachment, CanonicalForwardInfo, CanonicalUser, ContentNode } from '../adaptation/types';
 import type { ICMessage, ICRuntimeEvent, ICSystemEvent, IntermediateContext } from '../projection/types';
 
 export type { RenderParams, RenderedContentPiece, RenderedContext, RenderedContextSegment } from './types';
@@ -21,6 +21,13 @@ const formatSender = (user: CanonicalUser, contactNames?: Map<string, string>): 
   if (user.username && user.username !== displayName) return `${displayName} (@${user.username})`;
   return displayName;
 };
+
+const formatForwardOrigin = (info: CanonicalForwardInfo, contactNames?: Map<string, string>): string =>
+  (info.sender ? formatSender(info.sender, contactNames) : undefined)
+  ?? info.senderName
+  ?? (info.fromUserId ? `user:${info.fromUserId}` : undefined)
+  ?? (info.fromChatId ? `chat:${info.fromChatId}` : undefined)
+  ?? 'unknown';
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
@@ -139,12 +146,7 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
     attrs.push(`edited="${formatTimestamp(msg.editedAtSec, msg.editUtcOffsetMin ?? msg.utcOffsetMin)}"`);
 
   if (msg.forwardInfo) {
-    const from = (msg.forwardInfo.sender ? formatSender(msg.forwardInfo.sender, params.contactNames) : undefined)
-      ?? msg.forwardInfo.senderName
-      ?? (msg.forwardInfo.fromUserId ? `user:${msg.forwardInfo.fromUserId}` : undefined)
-      ?? (msg.forwardInfo.fromChatId ? `chat:${msg.forwardInfo.fromChatId}` : undefined)
-      ?? 'unknown';
-    attrs.push(`forwarded_from="${escapeXml(from)}"`);
+    attrs.push(`forwarded_from="${escapeXml(formatForwardOrigin(msg.forwardInfo, params.contactNames))}"`);
   }
 
   // Blocked senders: render as a self-closing tag with sender info intact but no
@@ -175,6 +177,16 @@ const renderMessage = (msg: ICMessage, params: RenderParams): { content: Rendere
     } else {
       inner = msg.replyToPreview ? escapeXml(msg.replyToPreview) : '';
     }
+    parts.push(`<in-reply-to ${replyAttrs.join(' ')}>${inner}</in-reply-to>`);
+  } else if (msg.externalReply) {
+    const replyAttrs = [
+      'external="true"',
+      `sender="${escapeXml(formatForwardOrigin(msg.externalReply.origin, params.contactNames))}"`,
+    ];
+    if (msg.externalReply.mediaType) replyAttrs.push(`media="${escapeXml(msg.externalReply.mediaType)}"`);
+    const inner = msg.externalReply.quoteContent
+      ? truncateXml(renderContent(msg.externalReply.quoteContent), REPLY_PREVIEW_MAX_CHARS)
+      : '';
     parts.push(`<in-reply-to ${replyAttrs.join(' ')}>${inner}</in-reply-to>`);
   }
 

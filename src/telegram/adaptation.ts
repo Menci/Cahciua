@@ -1,9 +1,10 @@
 import type { IngressTelegramMessage, IngressTelegramMessageDelete, IngressTelegramMessageEdit } from './ingress-meta';
-import type { Attachment, ForwardInfo, MessageEntity, SharedContact, TelegramMessage, TelegramUser } from './message';
+import type { Attachment, ExternalReplyInfo, ForwardInfo, MessageEntity, SharedContact, TelegramMessage, TelegramUser } from './message';
 import type {
   CanonicalAttachment,
   CanonicalDeleteEvent,
   CanonicalEditEvent,
+  CanonicalExternalReply,
   CanonicalForwardInfo,
   CanonicalMessageEvent,
   CanonicalServiceEvent,
@@ -55,6 +56,19 @@ const adaptForwardInfo = (info?: ForwardInfo): CanonicalForwardInfo | undefined 
   if (info.senderName) result.senderName = info.senderName;
   if (info.date != null) result.date = info.date;
   return result;
+};
+
+const adaptExternalReply = (reply?: ExternalReplyInfo): CanonicalExternalReply | undefined => {
+  if (!reply) return undefined;
+  const origin = adaptForwardInfo(reply.origin) ?? {};
+  const quoteContent = reply.quote ? parseContent(reply.quote.text, reply.quote.entities) : undefined;
+  if (Object.keys(origin).length === 0 && (!quoteContent || quoteContent.length === 0) && !reply.mediaType)
+    return undefined;
+  return {
+    origin,
+    ...(quoteContent && quoteContent.length > 0 ? { quoteContent } : {}),
+    ...(reply.mediaType ? { mediaType: reply.mediaType } : {}),
+  };
 };
 
 const entityToNode = (
@@ -199,6 +213,8 @@ export const adaptMessage = (msg: IngressTelegramMessage): CanonicalMessageEvent
   if (msg.sender) event.sender = adaptUser(msg.sender);
   if (msg.replyToMessageId != null) event.replyToMessageId = String(msg.replyToMessageId);
   if (msg.replyQuote) event.replyQuoteContent = parseContent(msg.replyQuote.text, msg.replyQuote.entities);
+  const externalReply = adaptExternalReply(msg.externalReply);
+  if (externalReply) event.externalReply = externalReply;
   const forwardInfo = adaptForwardInfo(msg.forwardInfo);
   if (forwardInfo) event.forwardInfo = forwardInfo;
   return event;

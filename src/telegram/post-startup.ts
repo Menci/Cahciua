@@ -96,14 +96,22 @@ export const createTelegramPostStartupTasks = (deps: {
       const items = new Map<string, CustomEmojiResolveItem>();
       for (const event of events) {
         if (event.type !== 'message' && event.type !== 'edit') continue;
-        visitCustomEmoji(event.content, node => {
-          if (items.has(node.customEmojiId)) return;
-          items.set(node.customEmojiId, {
-            customEmojiId: node.customEmojiId,
-            fallbackEmoji: contentToPlainText(node.children),
-            stickerSetName: node.stickerSetName,
+        const collectEmoji = (nodes: typeof event.content | undefined): void => {
+          if (!nodes) return;
+          visitCustomEmoji(nodes, node => {
+            if (items.has(node.customEmojiId)) return;
+            items.set(node.customEmojiId, {
+              customEmojiId: node.customEmojiId,
+              fallbackEmoji: contentToPlainText(node.children),
+              stickerSetName: node.stickerSetName,
+            });
           });
-        });
+        };
+        collectEmoji(event.content);
+        if (event.type === 'message') {
+          collectEmoji(event.replyQuoteContent);
+          collectEmoji(event.externalReply?.quoteContent);
+        }
       }
       if (items.size === 0) continue;
 

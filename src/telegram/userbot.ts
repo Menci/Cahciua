@@ -71,7 +71,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
   const registerHandlers = () => {
     client.addEventHandler(event => {
       if (!event.message) return;
-      const message = fromTeleprotoMessage(event.message, 'userbot');
+      const message = fromTeleprotoMessage(event.message, 'userbot', event._entities);
       if (message) {
         const ingress = captureIngressMetadata(message);
         enqueueUpdate(ingress.chatId, async () => messageBus.emit(ingress));
@@ -80,7 +80,7 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
 
     client.addEventHandler(event => {
       if (!event.message) return;
-      const edit = fromTeleprotoEdit(event.message);
+      const edit = fromTeleprotoEdit(event.message, event._entities);
       if (!edit) return;
       const ingress = captureIngressMetadata(edit);
       enqueueUpdate(ingress.chatId, async () => editBus.emit(ingress));

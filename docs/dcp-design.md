@@ -57,7 +57,7 @@ Projection never performs I/O and never receives LLM output.
 
 Rendering converts IC into ordered RC segments. Each segment retains `receivedAtMs` and metadata used by scheduling (`senderId`, `isMyself`, `isSelfSent`, mention/reply flags).
 
-User-controlled identity is encoded in XML attributes. Content is escaped and cannot inject sibling message attributes. Attachments expose stable logical file IDs in `messageId:index` form; provider-local file references are not persisted.
+User-controlled identity is encoded in XML attributes. Content is escaped and cannot inject sibling message attributes. In-chat replies carry `id`; cross-chat/channel replies render `<in-reply-to external="true" sender="...">` without an `id` so external post IDs never masquerade as current-chat messages. Attachments expose stable logical file IDs in `messageId:index` form; provider-local file references are not persisted.
 
 Configured blocked senders are masked at render time. Their source events remain in persistence and IC so changing configuration can restore them after replay.
 

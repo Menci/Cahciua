@@ -49,6 +49,7 @@ const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent)
       existing.attachments = event.attachments;
       existing.replyToMessageId = event.replyToMessageId;
       existing.replyQuoteContent = event.replyQuoteContent;
+      existing.externalReply = event.externalReply;
       existing.forwardInfo = event.forwardInfo;
     }
     return;
@@ -99,6 +100,8 @@ const reduceMessage = (draft: IntermediateContext, event: CanonicalMessageEvent)
       if (plain) message.replyToPreview = truncate(plain, REPLY_PREVIEW_MAX);
       if (target.content.length > 0) message.replyToContent = target.content;
     }
+  } else if (event.externalReply) {
+    message.externalReply = event.externalReply;
   }
   if (event.forwardInfo) message.forwardInfo = event.forwardInfo;
   if (event.isSelfSent) message.isSelfSent = true;

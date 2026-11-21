@@ -2,7 +2,8 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadEventsByMessageIds } from './persistence';
+import { runMigrations } from './client';
+import { loadEvents, loadEventsByMessageIds, persistEvent } from './persistence';
 import * as schema from './schema';
 
 const opened: Database.Database[] = [];
@@ -36,6 +37,8 @@ const fixture = () => {
     content TEXT,
     attachments TEXT,
     reply_to_message_id TEXT,
+    reply_quote_content TEXT,
+    external_reply TEXT,
     forward_info TEXT,
     is_self_sent INTEGER,
     service_action TEXT,
@@ -93,5 +96,64 @@ describe('loadEventsByMessageIds', () => {
   it('returns nothing for an empty ID list', () => {
     const { db } = fixture();
     expect(loadEventsByMessageIds(db, 'chat', [])).toEqual([]);
+  });
+
+  it('persists and replays replyQuoteContent and externalReply through real Drizzle migrations', () => {
+    const sqlite = new Database(':memory:');
+    opened.push(sqlite);
+    const db = drizzle(sqlite, { schema });
+    const noopLogger = { withContext: () => noopLogger, log: () => {} } as never;
+    runMigrations(db, noopLogger);
+
+    persistEvent(db, {
+      type: 'message',
+      chatId: '-1003767048038',
+      messageId: '110893',
+      sender: { id: '8999475746', displayName: 'ranyang', isBot: false },
+      receivedAtMs: 1795282491043,
+      timestampSec: 1795282489,
+      utcOffsetMin: 480,
+      content: [{ type: 'bold', children: [{ type: 'text', text: '卧槽👿我他妈花钱进的策略频道现在直接进了？？？' }] }],
+      externalReply: {
+        origin: {
+          fromChatId: '-100999',
+          sender: { id: '-100999', displayName: '[KAI]的幣圈策略分享', isBot: false },
+        },
+        quoteContent: [{ type: 'text', text: '站住反彈了 先分批  #ETH    #BTC' }],
+        mediaType: 'photo',
+      },
+      attachments: [],
+    });
+
+    persistEvent(db, {
+      type: 'message',
+      chatId: '-1003767048038',
+      messageId: '110894',
+      receivedAtMs: 1795282500000,
+      timestampSec: 1795282500,
+      utcOffsetMin: 480,
+      content: [{ type: 'text', text: 'quoted in-chat' }],
+      replyToMessageId: '110893',
+      replyQuoteContent: [{ type: 'text', text: '花钱进的策略频道' }],
+      attachments: [],
+    });
+
+    const loaded = loadEvents(db, '-1003767048038');
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0]).toMatchObject({
+      type: 'message',
+      messageId: '110893',
+      externalReply: {
+        origin: { sender: { displayName: '[KAI]的幣圈策略分享' } },
+        quoteContent: [{ type: 'text', text: '站住反彈了 先分批  #ETH    #BTC' }],
+        mediaType: 'photo',
+      },
+    });
+    expect(loaded[1]).toMatchObject({
+      type: 'message',
+      messageId: '110894',
+      replyToMessageId: '110893',
+      replyQuoteContent: [{ type: 'text', text: '花钱进的策略频道' }],
+    });
   });
 });

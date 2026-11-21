@@ -3,6 +3,7 @@ export type {
   CanonicalAttachment,
   CanonicalDeleteEvent,
   CanonicalEditEvent,
+  CanonicalExternalReply,
   CanonicalForwardInfo,
   CanonicalIMEvent,
   CanonicalMessageEvent,

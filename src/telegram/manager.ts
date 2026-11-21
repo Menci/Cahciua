@@ -118,6 +118,7 @@ export const createTelegramManager = (
     text: string,
     attachments?: Attachment[],
     entities?: MessageEntity[],
+    extraRichTexts: { text: string; entities?: MessageEntity[] }[] = [],
   ) => {
     const imageToText = options.imageToTextResolvers.get(chatId);
     const animationToText = options.animationToTextResolvers.get(chatId);
@@ -170,16 +171,17 @@ export const createTelegramManager = (
       }
     }
 
-    if (customEmojiToText && entities) {
-      const items = entities.flatMap(ent => {
+    if (customEmojiToText) {
+      const spans = [{ text, entities }, ...extraRichTexts];
+      const items = spans.flatMap(span => (span.entities ?? []).flatMap(ent => {
         if (ent.type !== 'custom_emoji') return [];
         if (!ent.customEmojiId) throw new Error('Custom emoji entity has no ID');
         return [{
           customEmojiId: ent.customEmojiId,
-          fallbackEmoji: text.substring(ent.offset, ent.offset + ent.length),
+          fallbackEmoji: span.text.substring(ent.offset, ent.offset + ent.length),
           stickerSetName: ent.customEmojiSetName,
         }];
-      });
+      }));
       if (items.length > 0) {
         await customEmojiToText.resolve(items);
       }
@@ -190,10 +192,14 @@ export const createTelegramManager = (
     logger,
     transform: async event => {
       switch (event.kind) {
-      case 'message':
+      case 'message': {
         await resolveMessageMetadata(userbot?.raw() ?? bot.raw(), event.message);
-        await hydrateAttachments(event.chatId, event.message.messageId, event.message.text, event.message.attachments, event.message.entities);
+        const quotes = [event.message.replyQuote, event.message.externalReply?.quote].filter(
+          (q): q is { text: string; entities?: MessageEntity[] } => q != null,
+        );
+        await hydrateAttachments(event.chatId, event.message.messageId, event.message.text, event.message.attachments, event.message.entities, quotes);
         return event;
+      }
       case 'edit':
         await resolveMessageMetadata(userbot?.raw() ?? bot.raw(), event.edit);
         await hydrateAttachments(event.chatId, event.edit.messageId, event.edit.text, event.edit.attachments, event.edit.entities);

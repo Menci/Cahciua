@@ -1,6 +1,8 @@
 export type {
   Attachment,
+  ExternalReplyInfo,
   ForwardInfo,
+  ReplyQuote,
   MessageEntity,
   SharedContact,
   TelegramMessage,

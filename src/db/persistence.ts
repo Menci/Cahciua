@@ -59,6 +59,8 @@ export const persistMessage = (db: DB, msg: TelegramMessage) => {
       entities: msg.entities,
       replyToMessageId: msg.replyToMessageId,
       replyToTopId: msg.replyToTopId,
+      replyQuote: msg.replyQuote,
+      externalReply: msg.externalReply,
       forwardInfo: msg.forwardInfo,
       mediaGroupId: msg.mediaGroupId,
       viaBotId: msg.viaBotId,
@@ -77,6 +79,8 @@ export const persistMessage = (db: DB, msg: TelegramMessage) => {
         // COALESCE(new, existing) ensures a non-null value is never overwritten by null.
         replyToMessageId: sql`coalesce(${msg.replyToMessageId ?? null}, ${messages.replyToMessageId})`,
         replyToTopId: sql`coalesce(${msg.replyToTopId ?? null}, ${messages.replyToTopId})`,
+        replyQuote: sql`coalesce(${msg.replyQuote ? JSON.stringify(msg.replyQuote) : null}, ${messages.replyQuote})`,
+        externalReply: sql`coalesce(${msg.externalReply ? JSON.stringify(msg.externalReply) : null}, ${messages.externalReply})`,
         forwardInfo: sql`coalesce(${msg.forwardInfo ? JSON.stringify(msg.forwardInfo) : null}, ${messages.forwardInfo})`,
         mediaGroupId: sql`coalesce(${msg.mediaGroupId ?? null}, ${messages.mediaGroupId})`,
         viaBotId: sql`coalesce(${msg.viaBotId ?? null}, ${messages.viaBotId})`,
@@ -171,6 +175,8 @@ export const persistEvent = (db: DB, event: PipelineEvent) => {
       content: event.content.length > 0 ? event.content : null,
       attachments: event.attachments.length > 0 ? event.attachments : null,
       replyToMessageId: event.type === 'message' ? (event.replyToMessageId ?? null) : null,
+      replyQuoteContent: event.type === 'message' && event.replyQuoteContent && event.replyQuoteContent.length > 0 ? event.replyQuoteContent : null,
+      externalReply: event.type === 'message' ? (event.externalReply ?? null) : null,
       forwardInfo: event.type === 'message' ? (event.forwardInfo ?? null) : null,
       isSelfSent: event.type === 'message' ? (event.isSelfSent ?? null) : null,
     }).run();
@@ -204,6 +210,8 @@ const reconstructMessageEvent = (row: EventRow): CanonicalMessageEvent => {
   };
   if (row.sender) event.sender = row.sender;
   if (row.replyToMessageId != null) event.replyToMessageId = row.replyToMessageId;
+  if (row.replyQuoteContent && row.replyQuoteContent.length > 0) event.replyQuoteContent = row.replyQuoteContent;
+  if (row.externalReply) event.externalReply = row.externalReply;
   if (row.forwardInfo) event.forwardInfo = row.forwardInfo;
   if (row.isSelfSent) event.isSelfSent = true;
   return event;

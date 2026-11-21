@@ -26,6 +26,17 @@ export interface ForwardInfo {
   date?: number;
 }
 
+export interface ReplyQuote {
+  text: string;
+  entities?: MessageEntity[];
+}
+
+export interface ExternalReplyInfo {
+  origin: ForwardInfo;
+  quote?: ReplyQuote;
+  mediaType?: string;
+}
+
 export interface Attachment {
   type: 'photo' | 'sticker' | 'document' | 'video' | 'audio' | 'voice' | 'video_note' | 'animation';
 
@@ -100,7 +111,8 @@ export interface TelegramMessage {
   entities?: MessageEntity[];
   replyToMessageId?: number;
   replyToTopId?: number;
-  replyQuote?: { text: string; entities?: MessageEntity[] };
+  replyQuote?: ReplyQuote;
+  externalReply?: ExternalReplyInfo;
   forwardInfo?: ForwardInfo;
   mediaGroupId?: string;
   viaBotId?: string;
