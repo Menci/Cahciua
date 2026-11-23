@@ -33,6 +33,8 @@ export interface TelegramClients {
 
 export interface TelegramManagerOptions {
   initialChatIds: readonly string[];
+  /** Highest Telegram message id archived for a chat, or undefined if none. */
+  loadArchivedTopMessageId: (chatId: string) => number | undefined;
   imageToTextResolvers: ReadonlyMap<string, ImageToTextResolver>;
   animationToTextResolvers: ReadonlyMap<string, AnimationToTextResolver>;
   animationMaxFrames: ReadonlyMap<string, number>;
@@ -223,10 +225,57 @@ export const createTelegramManager = (
     },
   });
 
+  // Live ingress produced while startup recovery runs is held back, so the
+  // recovered history commits ahead of it in the per-chat queue.
+  let heldIngress: IngressEvent[] | undefined;
+  const enqueueIngress = (event: IngressEvent) => {
+    if (heldIngress) heldIngress.push(event);
+    else ingressQueue.enqueue(event);
+  };
+
+  // Recovery fetches every message in `(afterId, throughId]`; a live update for
+  // one of those ids, however late it is delivered, would duplicate it.
+  const recoveredRanges = new Map<string, { afterId: number; throughId: number }>();
+  const isRecovered = (chatId: string, messageId: number) => {
+    const range = recoveredRanges.get(chatId);
+    return range != null && messageId > range.afterId && messageId <= range.throughId;
+  };
+
   const ingestMessage = (msg: TelegramMessage) => {
     botChats.add(msg.chatId);
+    if (isRecovered(msg.chatId, msg.messageId)) return;
     const enriched = captureIngressMetadata(msg);
-    ingressQueue.enqueue({ kind: 'message', chatId: enriched.chatId, message: enriched });
+    enqueueIngress({ kind: 'message', chatId: enriched.chatId, message: enriched });
+  };
+
+  /**
+   * Messages that never committed are lost on restart: they sat in the ingress
+   * queue (possibly blocked on a failing transform) or arrived while the process
+   * was down. Commits are ordered, so the archive is always a prefix of each
+   * chat's history and everything above its top id is missing. We refetch that
+   * tail and feed it through the normal ingress path. Edits and deletions made
+   * while offline are not recoverable this way.
+   *
+   * `receivedAtMs` records when we observed a message, so recovered messages
+   * take the reconnect time: the model never saw them before its earlier turns,
+   * and `timestampSec` still carries when they were sent. Live updates held
+   * during recovery arrive no earlier and commit later, so replay order matches.
+   */
+  const recoverMissedMessages = async (ingress: UserbotClient, observedAtMs: number): Promise<void> => {
+    const dialogTops = ingress.dialogTopMessageIds();
+    for (const chatId of [...botChats]) {
+      const afterId = options.loadArchivedTopMessageId(chatId);
+      const throughId = dialogTops.get(chatId);
+      if (afterId == null || throughId == null || throughId <= afterId) continue;
+      recoveredRanges.set(chatId, { afterId, throughId });
+      const messages = await ingress.fetchMessageRange(chatId, afterId, throughId);
+      log.withFields({ chatId, afterId, throughId, recovered: messages.length })
+        .log('Recovering messages missed while offline');
+      for (const message of messages) {
+        const enriched = captureIngressMetadata({ ...message, receivedAtMs: observedAtMs });
+        ingressQueue.enqueue({ kind: 'message', chatId, message: enriched });
+      }
+    }
   };
 
   const handleTypingEvent = (typing: TypingEvent) => {
@@ -240,7 +289,7 @@ export const createTelegramManager = (
 
     userbot.onMessageEdit(edit => {
       if (!botChats.has(edit.chatId)) return;
-      ingressQueue.enqueue({
+      enqueueIngress({
         kind: 'edit',
         chatId: edit.chatId,
         edit: captureIngressMetadata(edit),
@@ -251,7 +300,7 @@ export const createTelegramManager = (
       if (!del.chatId) throw new Error('Delete update is missing chatId');
       const chatId = del.chatId;
       if (!botChats.has(chatId)) return;
-      ingressQueue.enqueue({
+      enqueueIngress({
         kind: 'delete',
         chatId,
         del: captureIngressMetadata({ ...del, chatId }),
@@ -277,7 +326,18 @@ export const createTelegramManager = (
   const start = async () => {
     // Both clients are teleproto clients. Start the ingress client first so its
     // entity cache is warm before outbound actions begin.
-    if (userbot) await userbot.start();
+    if (userbot) {
+      heldIngress = [];
+      const reconnectedAtMs = Date.now();
+      await userbot.start();
+      await recoverMissedMessages(userbot, reconnectedAtMs);
+      const held = heldIngress;
+      heldIngress = undefined;
+      for (const event of held) {
+        if (event.kind === 'message' && isRecovered(event.chatId, event.message.messageId)) continue;
+        ingressQueue.enqueue(event);
+      }
+    }
     await bot.start();
   };
 

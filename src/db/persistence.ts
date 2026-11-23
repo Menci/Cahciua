@@ -523,6 +523,14 @@ export const loadMessageAttachments = (db: DB, chatId: string, messageId: number
  * integer, and a bogus id would otherwise be sent verbatim to the server from
  * react/reply_to.
  */
+export const loadArchivedTopMessageId = (db: DB, chatId: string): number | undefined => {
+  const row = db.select({ messageId: sql<number | null>`max(${messages.messageId})` })
+    .from(messages)
+    .where(eq(messages.chatId, chatId))
+    .get();
+  return row?.messageId ?? undefined;
+};
+
 export const messageExists = (db: DB, chatId: string, messageId: number): boolean => {
   const row = db.select({ messageId: messages.messageId })
     .from(messages)

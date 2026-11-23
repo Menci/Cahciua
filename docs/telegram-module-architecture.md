@@ -50,7 +50,7 @@ adapt
 -> DriverInputBus
 ```
 
-Edits and deletes use the same retriable persistence boundary. Service events have no platform message-row write. Repeated commit attempts reuse the same canonical object, so platform persistence, canonical persistence, Pipeline publication, and Driver notification are idempotent.
+Edits and deletes use the same retriable persistence boundary. Service events also write a platform message row, so the archive's top message id covers every message kind. Repeated commit attempts reuse the same canonical object, so platform persistence, canonical persistence, Pipeline publication, and Driver notification are idempotent.
 
 Unconfigured chats always retain the canonical/platform archive but never hydrate/project/wake.
 
@@ -59,6 +59,14 @@ Unconfigured chats always retain the canonical/platform archive but never hydrat
 Bot and userbot capture ingress timestamps when the raw teleproto update arrives. Userbot re-fetches are serialized per chat; metadata, image, animation, and custom-emoji transforms then run through the manager's ordered queue. Later transforms may finish early but cannot commit past an unresolved head.
 
 Transform failures are retried and keep the queue blocked. Do not replace this with timeout fallback or empty alt text.
+
+## Startup Recovery
+
+The ingress queue is in memory, so messages that had not committed when the process stopped, and messages sent while it was down, are missing from the archive. Commits are ordered per chat, so the archive is always a prefix and everything above its top message id is missing.
+
+When the userbot starts, it lists dialogs, which also records each chat's current top message id. Live updates arriving during recovery are held. For every known chat whose dialog top exceeds the archived top, the manager fetches the range `(archivedTop, dialogTop]` oldest first and enqueues it through the normal transform path, then releases the held updates. Live updates for ids inside a recovered range are dropped, because the range fetch already contains them.
+
+Recovered messages use the reconnect time as `receivedAtMs`: the model observes them only now, and `timestampSec` still carries when they were sent. Edits and deletions that happened while offline are not recovered. Without a userbot there is no history access and no recovery.
 
 ## Driver Egress
 

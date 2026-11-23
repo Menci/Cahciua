@@ -183,7 +183,7 @@ persist platform message/edit/delete row
 -> notify DriverInputBus
 ```
 
-The queue retries the same commit object on persistence/publication failure; live handlers and the event sink make each phase idempotent. Unconfigured chats stop after persistence.
+The queue retries the same commit object on persistence/publication failure; live handlers and the event sink make each phase idempotent. Unconfigured chats stop after persistence. The queue itself is in memory; on startup the userbot refetches each chat's history above the archived top message id and commits it ahead of live updates, so a restart, even one that interrupts a blocked queue, loses no new messages.
 
 Driver hooks own outbound sends. teleproto resolves a send only after Telegram accepts it and returns the server-confirmed `Api.Message`, including the final server message id; the hooks create and persist a synthetic `isSelfSent` event, project it for configured chats, and deliberately do not notify Driver. This makes the bot's action visible to the next probe before userbot echo, and its message id makes the echo deduplication in Projection an exact match.
 

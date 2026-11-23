@@ -1,4 +1,4 @@
-import { loadKnownChatIds } from '../../db';
+import { loadArchivedTopMessageId, loadKnownChatIds } from '../../db';
 import { createTelegramClients, createTelegramManager } from '../../telegram';
 import { loadUserbotSession, resolveBotSessionPath } from '../../telegram/session';
 import type { Registrar } from '../registrar';
@@ -22,6 +22,7 @@ export const registerTelegram = ({ get, register }: Registrar): void => {
     const media = get(TOKENS.MEDIA_RUNTIME);
     return createTelegramManager({
       initialChatIds: loadKnownChatIds(db),
+      loadArchivedTopMessageId: chatId => loadArchivedTopMessageId(db, chatId),
       imageToTextResolvers: media.imageResolvers,
       animationToTextResolvers: media.animationResolvers,
       animationMaxFrames: media.animationMaxFrames,

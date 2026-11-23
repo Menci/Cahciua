@@ -60,7 +60,7 @@ Construction order breaks cycles explicitly:
 - Event producers publish through `DriverInputBus`, not a mutable Driver reference.
 - Driver is attached before Telegram start, but the bus buffers the latest RC per chat until activation.
 
-Startup order: build container and migrate DB -> cold replay -> attach Driver and register live handlers -> start Telegram clients -> activate Driver -> recover background tasks -> seed current RC -> run post-startup media backfills.
+Startup order: build container and migrate DB -> cold replay -> attach Driver and register live handlers -> start Telegram clients (userbot recovers missed messages before live ingress flows) -> activate Driver -> recover background tasks -> seed current RC -> run post-startup media backfills.
 
 Shutdown is idempotent: deactivate Driver input -> stop Driver -> checkpoint background tasks -> stop Telegram clients -> close SQLite -> dispose the DI container.
 
@@ -83,6 +83,8 @@ DB replay orders by `(received_at, id)`.
 ### Consistency Above Availability
 
 Enabled media transforms are blocking. A per-chat queue may transform later events speculatively, but only a contiguous ready prefix commits. A failed head retries indefinitely and blocks the session; partially transformed events never enter Adaptation.
+
+The queue lives in memory, so uncommitted ingress is lost on restart. Because commits are ordered, each chat's `messages` archive is a prefix of its history: on userbot start, the manager compares the archived top message id with each dialog's top id, refetches the missing tail, and enqueues it ahead of live updates held during recovery. Recovered messages take the reconnect time as `receivedAtMs`. Service messages also write a platform row so they count toward that top id. Edits and deletions made while offline are not recovered.
 
 ### MTProto Runtime
 

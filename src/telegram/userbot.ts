@@ -32,6 +32,10 @@ export interface UserbotClient {
   onTyping: (handler: (event: TypingEvent) => void) => void;
   fetchMessages(chatId: string, options: FetchOptions): Promise<TelegramMessage[]>;
   fetchSpecificMessages(chatId: string, messageIds: number[]): Promise<TelegramMessage[]>;
+  /** Messages with `afterId < id <= throughId`, oldest first, without metadata resolution. */
+  fetchMessageRange(chatId: string, afterId: number, throughId: number): Promise<TelegramMessage[]>;
+  /** Latest message id per dialog, as listed when the client started. */
+  dialogTopMessageIds(): ReadonlyMap<string, number>;
   downloadMessageMedia(chatId: string, messageId: number): Promise<Buffer | undefined>;
   openChat(chatId: string): Promise<void>;
   closeChat(chatId: string): Promise<void>;
@@ -108,6 +112,8 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
 
   type IngressDelete = TelegramMessageDelete & { chatId: string };
 
+  const topMessageIds = new Map<string, number>();
+
   const start = async () => {
     log.log('Connecting...');
     await client.connect();
@@ -116,7 +122,13 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     const me = await client.getMe();
     log.withFields({ id: String(me.id), username: me.username }).log('Authenticated');
     registerHandlers();
-    await client.getDialogs({ limit: 500 });
+    // Listing dialogs warms the entity cache and records where each chat stood
+    // when live updates began. Dialogs are ordered by recent activity, so any
+    // chat that moved while we were offline is within this page.
+    const dialogs = await client.getDialogs({ limit: 500 });
+    for (const dialog of dialogs) {
+      if (dialog.id != null && dialog.message) topMessageIds.set(dialog.id.toString(), dialog.message.id);
+    }
   };
 
   const stop = async () => {
@@ -149,6 +161,16 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     return converted;
   };
 
+  const fetchMessageRange = async (chatId: string, afterId: number, throughId: number): Promise<TelegramMessage[]> => {
+    const messages = await client.getMessages(chatId, {
+      limit: undefined,
+      minId: afterId,
+      maxId: throughId + 1,
+      reverse: true,
+    });
+    return toMessages([...messages]);
+  };
+
   const downloadMessageMedia = async (chatId: string, messageId: number): Promise<Buffer | undefined> => {
     const messages = await client.getMessages(chatId, { ids: [messageId] });
     const message = messages[0];
@@ -172,6 +194,8 @@ export const createUserbotClient = (options: UserbotOptions, logger: Logger): Us
     onTyping: typingBus.on,
     fetchMessages,
     fetchSpecificMessages,
+    fetchMessageRange,
+    dialogTopMessageIds: () => topMessageIds,
     downloadMessageMedia,
     openChat,
     closeChat,

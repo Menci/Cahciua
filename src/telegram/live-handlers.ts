@@ -60,7 +60,8 @@ export const createTelegramLiveHandlers = (deps: {
           chatId: message.chatId,
           action: event.action.action,
         }).log('Service event received');
-        deps.eventSink.accept(event, { hydrateAltText: false });
+        persist(message, event, () => deps.messageStore.persistMessage(message));
+        deps.eventSink.publish(event, { hydrateAltText: false });
         return;
       }
 
