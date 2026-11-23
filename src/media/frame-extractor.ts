@@ -93,60 +93,36 @@ const extractGifFrames = async (buffer: Buffer, maxFrames: number): Promise<{ fr
 
 // --- MP4/WEBM extraction via ffmpeg ---
 
-const getVideoFrameCount = async (filePath: string): Promise<number> => {
+// Container metadata (`nb_frames`, `r_frame_rate`) describes stored packets, not
+// what the decoder emits: an edit list from a stream-copied cut hides leading
+// packets, and VFR streams report a timebase-like rate. `select` numbers the
+// decoded frames, so we index and timestamp exactly those, from one decode pass.
+const probeDecodedFrameTimes = async (filePath: string): Promise<number[]> => {
   const ffprobe = await getFfprobePath();
-  // Try nb_frames first (fast, from container metadata)
-  try {
-    const { stdout } = await execFileAsync(ffprobe, [
-      '-v', 'error', '-select_streams', 'v:0',
-      '-show_entries', 'stream=nb_frames',
-      '-of', 'default=noprint_wrappers=1:nokey=1',
-      filePath,
-    ]);
-    const count = parseInt(stdout.trim(), 10);
-    if (!isNaN(count) && count > 0) return count;
-  } catch { /* fall through */ }
-
-  // Fallback: count by decoding (slower but reliable)
   const { stdout } = await execFileAsync(ffprobe, [
-    '-v', 'error', '-count_frames', '-select_streams', 'v:0',
-    '-show_entries', 'stream=nb_read_frames',
-    '-of', 'default=noprint_wrappers=1:nokey=1',
+    '-v', 'error', '-select_streams', 'v:0',
+    '-show_entries', 'frame=best_effort_timestamp_time',
+    '-of', 'csv=p=0',
     filePath,
-  ]);
-  const count = parseInt(stdout.trim(), 10);
-  if (isNaN(count) || count <= 0) throw new Error('ffprobe returned no positive frame count');
-  return count;
+  ], { maxBuffer: 10 * 1024 * 1024 });
+  const times = stdout.split('\n').filter(line => line.trim() !== '').map(line => {
+    const time = Number(line.trim().replace(/,$/, ''));
+    if (!Number.isFinite(time)) throw new Error(`ffprobe returned a non-numeric frame time: ${line}`);
+    return time;
+  });
+  if (times.length === 0) throw new Error('ffprobe decoded no video frames');
+  return times;
 };
 
-const getVideoFps = async (filePath: string): Promise<number | undefined> => {
-  const ffprobe = await getFfprobePath();
-  try {
-    const { stdout } = await execFileAsync(ffprobe, [
-      '-v', 'error', '-select_streams', 'v:0',
-      '-show_entries', 'stream=r_frame_rate',
-      '-of', 'default=noprint_wrappers=1:nokey=1',
-      filePath,
-    ]);
-    const parts = stdout.trim().split('/');
-    if (parts.length === 2) {
-      const num = parseInt(parts[0]!, 10);
-      const den = parseInt(parts[1]!, 10);
-      if (!isNaN(num) && !isNaN(den) && den > 0) return num / den;
-    }
-  } catch { /* ignore */ }
-  return undefined;
-};
-
-const extractVideoFrames = async (buffer: Buffer, maxFrames: number): Promise<{ frames: Buffer[]; frameTimestamps?: number[] }> => {
+const extractVideoFrames = async (buffer: Buffer, maxFrames: number): Promise<{ frames: Buffer[]; frameTimestamps: number[] }> => {
   const ffmpeg = await getFfmpegPath();
   const dir = await mkdtemp(join(tmpdir(), 'cahciua-frames-'));
   const inputPath = join(dir, 'input');
   await writeFile(inputPath, buffer);
 
   try {
-    const totalFrames = await getVideoFrameCount(inputPath);
-    const indices = pickFrameIndices(totalFrames, maxFrames);
+    const frameTimes = await probeDecodedFrameTimes(inputPath);
+    const indices = pickFrameIndices(frameTimes.length, maxFrames);
     const selectExpr = indices.map(n => `eq(n\\,${n})`).join('+');
     const outputPattern = join(dir, 'frame_%d.png');
 
@@ -160,13 +136,12 @@ const extractVideoFrames = async (buffer: Buffer, maxFrames: number): Promise<{ 
     // ffmpeg outputs 1-indexed: frame_1.png, frame_2.png, ...
     const frames: Buffer[] = [];
     for (let i = 1; i <= indices.length; i++) {
-      const framePath = join(dir, `frame_${i}.png`);
-      const raw = await sharp(framePath).png().toBuffer();
+      const raw = await sharp(join(dir, `frame_${i}.png`)).png().toBuffer();
       frames.push(await resizeFrame(raw));
     }
 
-    const fps = await getVideoFps(inputPath);
-    const frameTimestamps = fps ? indices.map(i => i / fps) : undefined;
+    const startTime = frameTimes[0]!;
+    const frameTimestamps = indices.map(i => frameTimes[i]! - startTime);
     return { frames, frameTimestamps };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});

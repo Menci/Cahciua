@@ -79,6 +79,30 @@ describe('extractFrames', () => {
     }
   }, 30000);
 
+  it('MP4: selects only frames that decode when container metadata overcounts them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vitest-frames-'));
+    try {
+      const sourcePath = join(dir, 'source.mp4');
+      const trimmedPath = join(dir, 'trimmed.mp4');
+      await exec(ffmpegPath!, [
+        '-f', 'lavfi', '-i', 'testsrc=duration=2:size=64x64:rate=30',
+        '-c:v', 'libx264', '-g', '60', '-pix_fmt', 'yuv420p', sourcePath,
+      ]);
+      // A stream-copied cut keeps every packet from the preceding keyframe but
+      // adds an edit list that hides the leading ones, so `nb_frames` reports
+      // 60 while only 45 frames decode.
+      await exec(ffmpegPath!, ['-ss', '0.5', '-i', sourcePath, '-c', 'copy', trimmedPath]);
+      const buf = await readFile(trimmedPath);
+      const result = await extractFrames(buf, { type: 'animation', mimeType: 'video/mp4' } as Attachment);
+      expect(result.frames).toHaveLength(5);
+      expect(result.frameTimestamps).toHaveLength(5);
+      expect(result.frameTimestamps![0]).toBe(0);
+      expect(result.frameTimestamps![4]).toBeCloseTo(44 / 30, 1);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  }, 30000);
+
   it('rejects files exceeding 20MB', async () => {
     const huge = Buffer.alloc(21 * 1024 * 1024);
     await expect(extractFrames(huge, { type: 'animation' } as Attachment))
